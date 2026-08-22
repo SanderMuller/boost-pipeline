@@ -34,12 +34,7 @@ final class Phases
     ];
 
     /** @var list<class-string<Phase>> */
-    private array $phases;
-
-    public function __construct()
-    {
-        $this->phases = self::DEFAULTS;
-    }
+    private array $phases = self::DEFAULTS;
 
     /**
      * Ensure a phase sits last. Appending one that is already registered MOVES

@@ -35,14 +35,14 @@ it('returns null when the project has not opted in, rather than throwing', funct
 it('loads a config that returns a Pipeline', function (): void {
     file_put_contents(
         $this->base.'/.config/pipeline.php',
-        '<?php return \SanderMuller\BoostPipeline\Config\Pipeline::configure();'
+        '<?php return '.Pipeline::class.'::configure();'
     );
 
-    expect((new PipelineLoader($this->base))->load())->toBeInstanceOf(Pipeline::class);
+    expect(new PipelineLoader($this->base)->load())->toBeInstanceOf(Pipeline::class);
 });
 
 it('fails loudly when the config exists but returns the wrong thing', function (): void {
     file_put_contents($this->base.'/.config/pipeline.php', '<?php return ["not", "a", "pipeline"];');
 
-    (new PipelineLoader($this->base))->load();
+    new PipelineLoader($this->base)->load();
 })->throws(InvalidPipelineConfigException::class, 'must return a Pipeline instance, got array');

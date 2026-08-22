@@ -9,6 +9,7 @@ use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
+use SanderMuller\BoostPipeline\Walk\WalkStep;
 
 /**
  * Builds every tool response body, in one place.
@@ -120,7 +121,7 @@ final readonly class StepPayload
     {
         $current = $run->currentStep();
 
-        if ($current === null) {
+        if (! $current instanceof WalkStep) {
             return [];
         }
 

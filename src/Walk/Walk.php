@@ -176,7 +176,7 @@ final readonly class Walk
             default => sprintf(
                 'they are registered but not adjacent — [%s] sits between them',
                 implode('], [', array_map(
-                    static fn (string $phase): string => class_basename($phase),
+                    class_basename(...),
                     array_slice($registered, $afterIndex + 1, $beforeIndex - $afterIndex - 1),
                 )),
             ),

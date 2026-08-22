@@ -14,9 +14,9 @@ it('tells the agent the four things the tools do not say', function (): void {
         ->assertSee('status');
 });
 
-it('forbids running a step\'s command and forbids calling complete a pass', function (): void {
+it("forbids running a step's command and forbids calling complete a pass", function (): void {
     PipelineServer::prompt(RunPipeline::class)
-        ->assertSee('Do not run a step\'s command yourself')
+        ->assertSee("Do not run a step's command yourself")
         ->assertSee('unless `all_verified` is true')
         ->assertSee('not that everything passed');
 });

@@ -8,7 +8,7 @@ use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 
-it('derives the step ids the spec\'s own contract examples show', function (string $command, string $expected): void {
+it("derives the step ids the spec's own contract examples show", function (string $command, string $expected): void {
     expect(Shell::run($command)->id())->toBe($expected);
 })->with([
     ['vendor/bin/pint --test', 'pint'],

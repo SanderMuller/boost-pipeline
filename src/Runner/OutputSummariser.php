@@ -22,7 +22,7 @@ final readonly class OutputSummariser
     public const int MAX_LINE_LENGTH = 400;
 
     /** @return list<string> */
-    private static function split(string $output): array
+    private function split(string $output): array
     {
         $lines = preg_split('/\R/', trim($output));
 
@@ -35,7 +35,7 @@ final readonly class OutputSummariser
     public function summarise(string $output, int $maxLines = self::MAX_LINES): array
     {
         $lines = array_values(array_filter(
-            self::split($output),
+            $this->split($output),
             static fn (string $line): bool => trim($line) !== '',
         ));
 

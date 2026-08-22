@@ -20,19 +20,20 @@ afterEach(function (): void {
 });
 
 it('returns nothing to scrub when the app has no .env', function (): void {
-    expect((new EnvironmentScrubber($this->base))->forStep())->toBe([]);
+    expect(new EnvironmentScrubber($this->base)->forStep())
+        ->toBeEmpty();
 });
 
 it('removes every key the app .env defines, so the child re-reads it', function (): void {
-    file_put_contents($this->base.'/.env', <<<'ENV'
+    file_put_contents($this->base.'/.env', <<<'ENV_WRAP'
     # a comment
     APP_ENV=local
     DB_DATABASE=my_tp
-
+    
     DB_HOST=127.0.0.1
-    ENV);
+    ENV_WRAP);
 
-    $env = (new EnvironmentScrubber($this->base))->forStep();
+    $env = new EnvironmentScrubber($this->base)->forStep();
 
     expect($env)->toHaveKeys(['APP_ENV', 'DB_DATABASE', 'DB_HOST'])
         ->and($env['DB_DATABASE'])->toBeFalse()
@@ -42,7 +43,7 @@ it('removes every key the app .env defines, so the child re-reads it', function 
 it('lets an override win, which is how a step pins its own database', function (): void {
     file_put_contents($this->base.'/.env', "DB_DATABASE=my_tp_shared\n");
 
-    $env = (new EnvironmentScrubber($this->base))->forStep(['DB_DATABASE' => 'my_tp_phpunit_iso']);
+    $env = new EnvironmentScrubber($this->base)->forStep(['DB_DATABASE' => 'my_tp_phpunit_iso']);
 
     expect($env['DB_DATABASE'])->toBe('my_tp_phpunit_iso');
 });
@@ -52,5 +53,5 @@ it('ignores malformed lines rather than producing bogus keys', function (): void
     // trim() rejects outright under strict_types.
     file_put_contents($this->base.'/.env', "not a valid line\n1BAD=x\n=\n===\nGOOD=y\n");
 
-    expect(array_keys((new EnvironmentScrubber($this->base))->forStep()))->toBe(['GOOD']);
+    expect(array_keys(new EnvironmentScrubber($this->base)->forStep()))->toBe(['GOOD']);
 });

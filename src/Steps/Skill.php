@@ -16,12 +16,12 @@ use SanderMuller\BoostPipeline\Results\Result;
  * around: what the pipeline buys here is delivery at the right point in the
  * sequence, not verification.
  */
-final class Skill implements Step
+final readonly class Skill implements Step
 {
     private function __construct(
-        private readonly string $invocation,
-        private readonly string $id,
-        private readonly ?string $description,
+        private string $invocation,
+        private string $id,
+        private ?string $description,
     ) {}
 
     public static function run(string $invocation, ?string $id = null, ?string $description = null): self

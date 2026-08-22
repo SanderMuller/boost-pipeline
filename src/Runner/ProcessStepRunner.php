@@ -53,8 +53,8 @@ final readonly class ProcessStepRunner implements StepRunner
 
         try {
             $step->before();
-        } catch (Throwable $exception) {
-            return Result::error($step->id(), "Step setup failed: {$exception->getMessage()}");
+        } catch (Throwable $throwable) {
+            return Result::error($step->id(), "Step setup failed: {$throwable->getMessage()}");
         }
 
         $result = $this->execute($step);
@@ -93,7 +93,7 @@ final readonly class ProcessStepRunner implements StepRunner
         if (in_array($exitCode, self::UNRUNNABLE_EXIT_CODES, true)) {
             return Result::error(
                 $step->id(),
-                sprintf('Command did not run (exit %d): %s', $exitCode, self::orElse(trim($output), 'no output')),
+                sprintf('Command did not run (exit %d): %s', $exitCode, $this->orElse(trim($output), 'no output')),
                 logPath: $logPath,
             );
         }
@@ -141,9 +141,9 @@ final readonly class ProcessStepRunner implements StepRunner
 
         if ($process->getExitCode() !== 0) {
             return Result::error($step->id(), sprintf(
-                'Scope command exited %d, so the step\'s scope is unknown: %s',
+                "Scope command exited %d, so the step's scope is unknown: %s",
                 $process->getExitCode() ?? 1,
-                self::orElse(trim($this->combinedOutput($process)), 'no output'),
+                $this->orElse(trim($this->combinedOutput($process)), 'no output'),
             ));
         }
 
@@ -182,7 +182,7 @@ final readonly class ProcessStepRunner implements StepRunner
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
     private function describePass(array $summary, ?int $scope): string
     {
-        $text = self::orElse($summary['summary'], 'Passed.');
+        $text = $this->orElse($summary['summary'], 'Passed.');
 
         if ($scope !== 0) {
             return $text;
@@ -194,7 +194,7 @@ final readonly class ProcessStepRunner implements StepRunner
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
     private function describeFailure(array $summary, ?string $logPath): string
     {
-        $text = self::orElse($summary['summary'], 'Failed with no output.');
+        $text = $this->orElse($summary['summary'], 'Failed with no output.');
 
         if (! $summary['truncated']) {
             return $text;
@@ -213,20 +213,20 @@ final readonly class ProcessStepRunner implements StepRunner
     private function nonEmptyLines(string $output): array
     {
         return array_values(array_filter(
-            self::splitLines($output),
+            $this->splitLines($output),
             static fn (string $line): bool => trim($line) !== '',
         ));
     }
 
     /** @return list<string> */
-    private static function splitLines(string $output): array
+    private function splitLines(string $output): array
     {
         $lines = preg_split('/\R/', trim($output));
 
         return $lines === false ? [] : $lines;
     }
 
-    private static function orElse(string $value, string $fallback): string
+    private function orElse(string $value, string $fallback): string
     {
         return $value === '' ? $fallback : $value;
     }

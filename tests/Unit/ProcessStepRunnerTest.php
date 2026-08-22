@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use SanderMuller\BoostPipeline\Contracts\Step;
+use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
+use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
 use SanderMuller\BoostPipeline\Runner\OutputSummariser;
@@ -27,7 +30,9 @@ afterEach(function (): void {
         return;
     }
 
-    foreach (glob($this->logDir.'/*.log') ?: [] as $file) {
+    $logs = glob($this->logDir.'/*.log');
+
+    foreach ($logs === false ? [] : $logs as $file) {
         unlink($file);
     }
 
@@ -168,7 +173,7 @@ on-stderr');
 it('reports a step whose setup throws as an error, not a failure', function (): void {
     // The Edge Cases table claims coverage for "a step throws rather than
     // exiting non-zero"; it had none until this test.
-    $step = new class implements SanderMuller\BoostPipeline\Contracts\Step
+    $step = new class implements Step
     {
         public function id(): string
         {
@@ -180,9 +185,9 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
             return 'a step whose before() throws';
         }
 
-        public function kind(): SanderMuller\BoostPipeline\Enums\StepKind
+        public function kind(): StepKind
         {
-            return SanderMuller\BoostPipeline\Enums\StepKind::Shell;
+            return StepKind::Shell;
         }
 
         public function before(): void
@@ -190,7 +195,7 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
             throw new RuntimeException('setup exploded');
         }
 
-        public function after(SanderMuller\BoostPipeline\Results\Result $result): void {}
+        public function after(Result $result): void {}
     };
 
     $result = $this->runner->run($step);

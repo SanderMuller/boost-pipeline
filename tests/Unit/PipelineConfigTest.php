@@ -14,6 +14,7 @@ use SanderMuller\BoostPipeline\Phases\Phases;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
+use SanderMuller\BoostPipeline\Walk\WalkStep;
 
 final class ImpactAnalysis implements Phase
 {
@@ -50,7 +51,9 @@ it('ships no steps by default, so an out-of-the-box pipeline is immediately comp
 
 it('drops a phase with remove', function (): void {
     $pipeline = Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->remove(Refactoring::class));
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(Refactoring::class);
+        });
 
     expect($pipeline->phases()->all())->not->toContain(Refactoring::class)
         ->and($pipeline->phases()->all())->toHaveCount(4);
@@ -58,7 +61,9 @@ it('drops a phase with remove', function (): void {
 
 it('lands a custom phase directly after its anchor', function (): void {
     $pipeline = Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class));
+        ->withPhases(function (Phases $phases): void {
+            $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class);
+        });
 
     expect($pipeline->phases()->all())->toBe([
         Refactoring::class,
@@ -79,10 +84,12 @@ it('fails loudly when positioning after a phase that is not registered', functio
 
 it('fails loudly when a phase is positioned after itself', function (): void {
     Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class));
+        ->withPhases(function (Phases $phases): void {
+            $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class);
+        });
 })->throws(InvalidPipelineConfigException::class);
 
-it('walks each phase\'s steps in order, skipping empty phases silently', function (): void {
+it("walks each phase's steps in order, skipping empty phases silently", function (): void {
     $walk = Pipeline::configure()
         ->withSteps(function (Steps $steps): void {
             $steps->in(Formatting::class)
@@ -92,9 +99,10 @@ it('walks each phase\'s steps in order, skipping empty phases silently', functio
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
         ->toBe(['pint', 'lint-all', 'evaluate'])
-        ->and($walk->notices)->toBe([]);
+        ->and($walk->notices)
+        ->toBeEmpty();
 });
 
 it('prepend puts a step first within its phase', function (): void {
@@ -106,7 +114,7 @@ it('prepend puts a step first within its phase', function (): void {
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
         ->toBe(['typecheck', 'phpstan']);
 });
 
@@ -123,14 +131,17 @@ it('splices a transition step in at the join between its two anchors', function 
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
         ->toBe(['pint', 'deps-unchanged', 'phpstan'])
-        ->and($walk->notices)->toBe([]);
+        ->and($walk->notices)
+        ->toBeEmpty();
 });
 
 it('drops a transition whose anchor was removed, and reports it rather than promoting it', function (): void {
     $walk = Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->remove(StaticAnalysis::class))
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(StaticAnalysis::class);
+        })
         ->withSteps(function (Steps $steps): void {
             $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
             $steps->between(
@@ -141,7 +152,7 @@ it('drops a transition whose anchor was removed, and reports it rather than prom
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
         ->and($walk->notices)->toHaveCount(1)
         ->and($walk->notices[0])->toContain('deps-unchanged')
         ->and($walk->notices[0])->toContain('dropped');
@@ -166,7 +177,7 @@ it('reports a transition whose anchors are registered but not adjacent', functio
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
         ->toBe(['rector', 'phpstan'])
         ->and($walk->notices)->toHaveCount(1)
         ->and($walk->notices[0])->toContain('non-adjacent')
@@ -182,7 +193,7 @@ it('reports a transition whose anchors are the wrong way round', function (): vo
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
         ->and($walk->notices)->toHaveCount(1)
         ->and($walk->notices[0])->toContain('reversed')
         ->and($walk->notices[0])->toContain('comes before');
@@ -190,7 +201,9 @@ it('reports a transition whose anchors are the wrong way round', function (): vo
 
 it('names the missing anchor precisely when only one is registered', function (): void {
     $walk = Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->remove(Tests::class))
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(Tests::class);
+        })
         ->withSteps(function (Steps $steps): void {
             $steps->between(StaticAnalysis::class, Tests::class, Shell::run('true', id: 'orphan'));
         })
@@ -201,21 +214,25 @@ it('names the missing anchor precisely when only one is registered', function ()
 
 it('says "after itself" rather than "not registered" for a self-anchor', function (): void {
     Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class));
+        ->withPhases(function (Phases $phases): void {
+            $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class);
+        });
 })->throws(InvalidPipelineConfigException::class, 'after itself');
 
 it('reports steps declared into a phase that is not registered', function (): void {
     // Same class of silent loss as a dropped transition: removing a phase would
     // otherwise take its gates down without a word.
     $walk = Pipeline::configure()
-        ->withPhases(fn (Phases $phases) => $phases->remove(Refactoring::class))
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(Refactoring::class);
+        })
         ->withSteps(function (Steps $steps): void {
             $steps->in(Refactoring::class)->append(Shell::run('vendor/bin/rector process --dry-run'));
             $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
         })
         ->walk();
 
-    expect(array_map(fn ($walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
         ->and($walk->notices)->toHaveCount(1)
         ->and($walk->notices[0])->toContain('[rector]')
         ->and($walk->notices[0])->toContain('Refactoring')

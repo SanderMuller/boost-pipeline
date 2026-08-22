@@ -17,11 +17,11 @@ use SanderMuller\BoostPipeline\Walk\Walk;
  * force replaying completed steps and make every step carry an idempotency
  * requirement.
  */
-final class Pipeline
+final readonly class Pipeline
 {
-    private readonly Phases $phases;
+    private Phases $phases;
 
-    private readonly Steps $steps;
+    private Steps $steps;
 
     private function __construct()
     {

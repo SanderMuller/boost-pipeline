@@ -21,7 +21,7 @@ trait PipelineTool
      */
     public function shouldRegister(): bool
     {
-        return app(PipelineLoader::class)->exists();
+        return resolve(PipelineLoader::class)->exists();
     }
 
     /**

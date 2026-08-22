@@ -63,14 +63,10 @@ final readonly class EnvironmentScrubber
                 continue;
             }
 
-            $name = strtok($line, '=');
-
-            // A line of nothing but '=' has no token at all.
-            if ($name === false) {
-                continue;
-            }
-
-            $name = trim($name);
+            // explode rather than strtok: a line of nothing but '=' yields an
+            // empty name, which the check below rejects, and there is no false
+            // case to branch on.
+            $name = trim(explode('=', $line, 2)[0]);
 
             if ($name !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) === 1) {
                 $keys[] = $name;

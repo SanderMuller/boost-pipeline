@@ -6,6 +6,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Enums\Verdict;
@@ -23,31 +24,46 @@ use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 
-/** @var array<string, Verdict> */
-$scripted = [];
+/** Lets a test dictate a fake runner's verdict per step id. */
+final class VerdictScript
+{
+    /** @var array<string, Verdict> */
+    private array $verdicts = [];
+
+    /** @param array<string, Verdict> $verdicts */
+    public function set(array $verdicts): void
+    {
+        $this->verdicts = $verdicts;
+    }
+
+    public function for(string $stepId): Verdict
+    {
+        return $this->verdicts[$stepId] ?? Verdict::Passed;
+    }
+}
 
 beforeEach(function (): void {
-    $this->verdicts = [];
+    $this->verdicts = new VerdictScript;
 
     // The tools decline to register unless the project has opted in, so an
     // opted-in project is what the test has to simulate: the file's presence is
     // the opt-in; its contents are irrelevant here because the RunManager is
     // injected below.
-    $this->configPath = $this->app->basePath('.config/pipeline.php');
+    $this->configPath = app()->basePath('.config/pipeline.php');
 
     if (! is_dir(dirname($this->configPath))) {
         mkdir(dirname($this->configPath), recursive: true);
     }
 
-    file_put_contents($this->configPath, '<?php return \SanderMuller\BoostPipeline\Config\Pipeline::configure();');
+    file_put_contents($this->configPath, '<?php return '.Pipeline::class.'::configure();');
 
-    $runner = new class($this) implements StepRunner
+    $runner = new readonly class($this->verdicts) implements StepRunner
     {
-        public function __construct(private object $test) {}
+        public function __construct(private VerdictScript $script) {}
 
         public function run(Step $step): Result
         {
-            return match ($this->test->verdicts[$step->id()] ?? Verdict::Passed) {
+            return match ($this->script->for($step->id())) {
                 Verdict::Failed => Result::failed($step->id(), 'problems found', 1, filesInspected: 0),
                 Verdict::Error => Result::error($step->id(), 'binary missing'),
                 default => Result::passed($step->id(), 'ok'),
@@ -61,11 +77,11 @@ beforeEach(function (): void {
         $steps->in(Agent::class)->append(Skill::run('/evaluate'));
     });
 
-    $this->app->instance(RunManager::class, new RunManager($pipeline, $runner));
+    app()->instance(RunManager::class, new RunManager($pipeline, $runner));
 });
 
 afterEach(function (): void {
-    if (isset($this->configPath) && is_file($this->configPath)) {
+    if ($this->configPath !== null && is_file($this->configPath)) {
         unlink($this->configPath);
     }
 });
@@ -80,7 +96,7 @@ afterEach(function (): void {
  */
 function acknowledge(string $summary): void
 {
-    (new ReportStep(app(RunManager::class)))->handle(new Request(['summary' => $summary]));
+    new ReportStep(resolve(RunManager::class))->handle(new Request(['summary' => $summary]));
 }
 
 it('reveals exactly one step and leaks no later step id', function (): void {
@@ -104,12 +120,12 @@ it('refuses next_step before a run is open', function (): void {
 it('declines to register its tools at all when the project has not opted in', function (): void {
     unlink($this->configPath);
 
-    expect(app(SanderMuller\BoostPipeline\Config\PipelineLoader::class)->exists())->toBeFalse()
-        ->and((new OpenRun(app(RunManager::class)))->shouldRegister())->toBeFalse();
+    expect(resolve(PipelineLoader::class)->exists())->toBeFalse()
+        ->and(new OpenRun(resolve(RunManager::class))->shouldRegister())->toBeFalse();
 });
 
 it('registers its tools when the project has opted in', function (): void {
-    expect((new OpenRun(app(RunManager::class)))->shouldRegister())->toBeTrue();
+    expect(new OpenRun(resolve(RunManager::class))->shouldRegister())->toBeTrue();
 });
 
 it('resumes an already-open run rather than restarting it', function (): void {
@@ -122,7 +138,7 @@ it('resumes an already-open run rather than restarting it', function (): void {
 });
 
 it('returns the same step repeatedly while it fails, and blocks rather than halting', function (): void {
-    $this->verdicts = ['pint' => Verdict::Failed];
+    $this->verdicts->set(['pint' => Verdict::Failed]);
     PipelineServer::tool(OpenRun::class);
 
     foreach (range(1, 3) as $ignored) {
@@ -135,7 +151,7 @@ it('returns the same step repeatedly while it fails, and blocks rather than halt
 });
 
 it('puts an error on the MCP error channel, and a failure on the normal one', function (): void {
-    $this->verdicts = ['pint' => Verdict::Error];
+    $this->verdicts->set(['pint' => Verdict::Error]);
     PipelineServer::tool(OpenRun::class);
 
     // The tool CALL failed, because the tool did not run.
@@ -143,7 +159,7 @@ it('puts an error on the MCP error channel, and a failure on the normal one', fu
 })->skip(fn (): bool => false);
 
 it('does not mark a failing check as an MCP error', function (): void {
-    $this->verdicts = ['pint' => Verdict::Failed];
+    $this->verdicts->set(['pint' => Verdict::Failed]);
     PipelineServer::tool(OpenRun::class);
 
     // The call SUCCEEDED and reported a finding. Flagging isError here would make
@@ -180,7 +196,7 @@ it('rejects report_step for a shell step', function (): void {
 });
 
 it('keeps server_run and acknowledged as separate keys in status', function (): void {
-    $this->verdicts = ['phpstan' => Verdict::Failed];
+    $this->verdicts->set(['phpstan' => Verdict::Failed]);
     PipelineServer::tool(OpenRun::class);
     PipelineServer::tool(NextStep::class);
     PipelineServer::tool(NextStep::class);
@@ -215,15 +231,13 @@ it('walks a whole pipeline to complete and never claims a verified pass it did n
 it('rejects report_step with a missing or blank summary', function (): void {
     PipelineServer::tool(OpenRun::class);
 
-    $tool = new ReportStep(app(RunManager::class));
+    $tool = new ReportStep(resolve(RunManager::class));
 
     // Previously `(string) $request->get('summary')` turned a missing argument
     // into '', so an acknowledgement with no content was accepted silently.
-    $isError = static function (Response|ResponseFactory $result): bool {
-        return $result instanceof Response
-            ? $result->isError()
-            : $result->responses()->contains(static fn (Response $r): bool => $r->isError());
-    };
+    $isError = (static fn (Response|ResponseFactory $result): bool => $result instanceof Response
+        ? $result->isError()
+        : $result->responses()->contains(static fn (Response $r): bool => $r->isError()));
 
     expect($isError($tool->handle(new Request([]))))->toBeTrue()
         ->and($isError($tool->handle(new Request(['summary' => '   ']))))->toBeTrue();

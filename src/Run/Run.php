@@ -6,6 +6,7 @@ namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Enums\StepKind;
+use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
@@ -67,7 +68,7 @@ final class Run
     {
         $current = $this->currentStep();
 
-        if ($current === null) {
+        if (! $current instanceof WalkStep) {
             $this->state = RunState::Complete;
 
             return null;
@@ -94,7 +95,7 @@ final class Run
     {
         $current = $this->currentStep();
 
-        if ($current === null || $current->step->kind() !== StepKind::Skill) {
+        if (! $current instanceof WalkStep || $current->step->kind() !== StepKind::Skill) {
             throw AcknowledgementNotAllowed::forState($this->state);
         }
 
@@ -143,17 +144,27 @@ final class Run
         return $this->state === RunState::Complete;
     }
 
-    /** @return array{passed: int, failed: int, error: int} */
+    /**
+     * Counts only verdicts the server produced itself.
+     *
+     * The match is exhaustive on purpose rather than writing
+     * `$tally[$result->verdict->value]`: a dynamic key would let a future verdict
+     * (Acknowledged today) silently open a fourth bucket in a tally whose whole
+     * point is that it reports server-produced results only.
+     *
+     * @return array{passed: int, failed: int, error: int}
+     */
     public function serverRunTally(): array
     {
         $tally = ['passed' => 0, 'failed' => 0, 'error' => 0];
 
         foreach ($this->results as $result) {
-            if (! $result->serverRun()) {
-                continue;
-            }
-
-            $tally[$result->verdict->value] = ($tally[$result->verdict->value] ?? 0) + 1;
+            match ($result->verdict) {
+                Verdict::Passed => $tally['passed']++,
+                Verdict::Failed => $tally['failed']++,
+                Verdict::Error => $tally['error']++,
+                Verdict::Acknowledged => null,
+            };
         }
 
         return $tally;
@@ -187,7 +198,7 @@ final class Run
         // a skill step with state "running" and must call next_step again purely
         // to flip the state and be handed the same step twice.
         $this->state = match (true) {
-            $next === null => RunState::Complete,
+            ! $next instanceof WalkStep => RunState::Complete,
             $next->step->kind() === StepKind::Skill => RunState::Awaiting,
             default => RunState::Running,
         };

@@ -64,8 +64,8 @@ final class ReportStep extends Tool
 
         try {
             $result = $run->acknowledgeCurrentStep($summary);
-        } catch (AcknowledgementNotAllowed $exception) {
-            return Response::error($exception->getMessage());
+        } catch (AcknowledgementNotAllowed $acknowledgementNotAllowed) {
+            return Response::error($acknowledgementNotAllowed->getMessage());
         }
 
         return Response::structured(StepPayload::afterResolution($run, $result));

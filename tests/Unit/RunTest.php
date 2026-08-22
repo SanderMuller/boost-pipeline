@@ -50,7 +50,8 @@ final class FakeRunner implements StepRunner
     }
 }
 
-function pipelineWith(callable $callback): Pipeline
+/** @param Closure(Steps): void $callback */
+function pipelineWith(Closure $callback): Pipeline
 {
     return Pipeline::configure()->withSteps($callback);
 }
@@ -126,6 +127,7 @@ it('never executes a skill step, however often next_step is called', function ()
     $run = threeStepRun($runner);
     $run->resolveCurrentStep();
     $run->resolveCurrentStep();
+
     $callsBefore = $runner->calls;
 
     expect($run->resolveCurrentStep())->toBeNull()
