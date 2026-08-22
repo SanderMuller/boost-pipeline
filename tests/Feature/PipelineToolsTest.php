@@ -87,16 +87,16 @@ afterEach(function (): void {
 });
 
 /**
- * Invoke report_step with a real Request.
+ * Invoke report_step through the MCP harness, arguments and all.
  *
- * `PipelineServer::tool(ReportStep::class, [...])` cannot be used: laravel/mcp
- * v0.9.4 populates a resolved Request from an `mcp.request` container binding
- * that its Testing harness never sets, so arguments arrive empty. Confirmed
- * against the live stdio server that real JSON-RPC calls deliver them fine.
+ * Arguments only reach a tool because `McpServiceProvider` registers a
+ * `resolving(Request::class)` callback that copies them off the `mcp.request`
+ * binding. Testbench loads only the providers `getPackageProviders()` names, so
+ * that provider has to be listed there or every tool sees an empty Request.
  */
 function acknowledge(string $summary): void
 {
-    new ReportStep(resolve(RunManager::class))->handle(new Request(['summary' => $summary]));
+    PipelineServer::tool(ReportStep::class, ['summary' => $summary])->assertOk();
 }
 
 it('reveals exactly one step and leaks no later step id', function (): void {

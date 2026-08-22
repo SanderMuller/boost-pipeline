@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Tests;
 
 use Illuminate\Foundation\Application;
+use Laravel\Mcp\Server\McpServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
 
@@ -16,6 +17,6 @@ abstract class TestCase extends Orchestra
      */
     protected function getPackageProviders($app): array
     {
-        return [BoostPipelineServiceProvider::class];
+        return [McpServiceProvider::class, BoostPipelineServiceProvider::class];
     }
 }
