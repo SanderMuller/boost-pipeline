@@ -37,16 +37,17 @@ jobs:
         include:
           # PHP floor is 8.4 — Pest 5 requires PHP ^8.4. `php: ^8.4` also admits
           # 8.5, so both are covered below.
-          # Laravel 12 / testbench 10 cells are NOT testable with Pest 5:
-          # Pest 5 needs symfony/process ^8.1 and testbench 10 pins ^7.2, so the
-          # pair cannot install. `require` still allows Laravel 12 for consumers;
-          # the suite runs on Laravel 13 only.
+          # Laravel 12 needs testbench 10, which pins symfony/process ^7.2 while
+          # Pest 5 needs ^8.1 — so the Laravel 12 cell runs the Pest 4 toolchain
+          # instead (see the downgrade step below).
           # Floor — lowest supported combo (prefer-lowest)
           - { php: '8.4', laravel: '13.*', testbench: '11.*', stability: prefer-lowest }
           # Ceiling — highest supported combo
           - { php: '8.4', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
           # Highest PHP the `^8.4` constraint admits
           - { php: '8.5', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
+          # Laravel 12 — the floor of the declared runtime range
+          - { php: '8.4', laravel: '12.*', testbench: '10.*', stability: prefer-stable, pest: '4' }
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }}
 
@@ -60,6 +61,14 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
+
+      # pest-plugin-rector, -phpstan and -agent have no 4.x line, so they are
+      # removed rather than downgraded. None of them is needed to run the suite.
+      - name: Downgrade the test toolchain for Laravel 12
+        if: matrix.pest == '4'
+        run: |
+          composer remove --dev pestphp/pest-plugin-rector pestphp/pest-plugin-phpstan pestphp/pest-plugin-agent --no-update --no-interaction
+          composer require --dev "pestphp/pest:^4.6.3" "pestphp/pest-plugin-arch:^4.0" "pestphp/pest-plugin-laravel:^4.0" --no-update --no-interaction
 
       - name: Install dependencies
         run: |

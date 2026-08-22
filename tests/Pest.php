@@ -16,6 +16,11 @@ pest()->extend(TestCase::class)->in('Feature');
 | `--tia` from a composer script or a workflow step. The first recording run
 | needs PCOV or Xdebug; the graph lives in `~/.pest/tia/`, outside the repo.
 |
+| Guarded because Tia is Pest 5 only, and the Laravel 12 CI cell runs Pest 4 —
+| unguarded, this line fatals there before a single test executes.
+|
 */
 
-pest()->tia()->locally();
+if (method_exists(pest(), 'tia')) {
+    pest()->tia()->locally();
+}
