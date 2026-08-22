@@ -29,10 +29,30 @@
         "symfony/process": "^7.0||^8.0"
     },
     "require-dev": {
+        "driftingly/rector-laravel": "^2.5",
+        "larastan/larastan": "^3.10",
+        "laravel/boost": "^2.0||^3.0",
+        "laravel/pao": "^1.0",
         "laravel/pint": "^1.29",
-        "orchestra/testbench": "^9.0||^10.0||^11.0",
-        "pestphp/pest": "^3.0||^4.0",
-        "pestphp/pest-plugin-laravel": "^3.0||^4.0"
+        "nunomaduro/collision": "^8.0",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^5.0",
+        "pestphp/pest-plugin-agent": "^5.0",
+        "pestphp/pest-plugin-arch": "^5.0",
+        "pestphp/pest-plugin-laravel": "^5.0",
+        "pestphp/pest-plugin-phpstan": "^5.0",
+        "pestphp/pest-plugin-rector": "^5.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "rector/rector": "^2.5",
+        "sandermuller/boost-skills": "^2.27.0",
+        "sandermuller/package-boost-laravel": "^1.0",
+        "spaze/phpstan-disallowed-calls": "^4.13",
+        "symplify/phpstan-rules": "^14.12",
+        "tomasvotruba/cognitive-complexity": "^1.2",
+        "tomasvotruba/type-coverage": "^2.3"
     },
     "autoload": {
         "psr-4": {
@@ -41,12 +61,48 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "SanderMuller\\BoostPipeline\\Tests\\": "tests/"
+            "SanderMuller\\BoostPipeline\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/"
         }
     },
     "scripts": {
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare"
+        ],
+        "clear": "@php vendor/bin/testbench package:purge-skeleton --ansi",
+        "prepare": "@php vendor/bin/testbench package:discover --ansi",
+        "build": "@php vendor/bin/testbench workbench:build --ansi",
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "@build",
+            "@php vendor/bin/testbench serve --ansi"
+        ],
+        "post-install-cmd": [
+            "SanderMuller\\PackageBoostLaravel\\Scripts\\AutoSync::run"
+        ],
+        "post-update-cmd": [
+            "SanderMuller\\PackageBoostLaravel\\Scripts\\AutoSync::run"
+        ],
+        "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G",
+        "phpstan-simplified": "vendor/bin/phpstan analyse --memory-limit=2G --error-format symplify",
+        "phpstan-clear-cache": "vendor/bin/phpstan clear-result-cache",
         "format": "vendor/bin/pint",
-        "test": "vendor/bin/pest"
+        "rector": "vendor/bin/rector process",
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage",
+        "sync-ai": "vendor/bin/boost sync",
+        "qa": [
+            "@rector",
+            "@format",
+            "@phpstan-simplified"
+        ],
+        "qa-check": [
+            "vendor/bin/rector process --dry-run",
+            "vendor/bin/pint --test",
+            "@phpstan-simplified",
+            "@test"
+        ]
     },
     "extra": {
         "laravel": {
@@ -58,7 +114,8 @@
     "config": {
         "sort-packages": true,
         "allow-plugins": {
-            "pestphp/pest-plugin": true
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
         }
     },
     "minimum-stability": "stable",
