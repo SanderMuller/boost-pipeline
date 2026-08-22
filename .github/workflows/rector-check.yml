@@ -5,6 +5,7 @@ on:
     paths:
       - '**.php'
       - 'rector.php'
+      - 'composer.json'
       - '.github/workflows/rector-check.yml'
 
 permissions:

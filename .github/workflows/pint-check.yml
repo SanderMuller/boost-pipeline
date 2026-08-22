@@ -5,6 +5,7 @@ on:
     paths:
       - '**.php'
       - 'pint.json'
+      - 'composer.json'
       - '.github/workflows/pint-check.yml'
 
 permissions:

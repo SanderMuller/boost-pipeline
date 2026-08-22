@@ -16,15 +16,15 @@
     "authors": [
         {
             "name": "Sander Muller",
-            "email": "sander@hihaho.com",
+            "email": "github@scode.nl",
             "role": "Developer"
         }
     ],
     "require": {
         "php": "^8.4",
-        "illuminate/console": "^11.0||^12.0||^13.0",
-        "illuminate/contracts": "^11.0||^12.0||^13.0",
-        "illuminate/support": "^11.0||^12.0||^13.0",
+        "illuminate/console": "^12.41.1||^13.0",
+        "illuminate/contracts": "^12.41.1||^13.0",
+        "illuminate/support": "^12.41.1||^13.0",
         "laravel/mcp": "^0.9.4",
         "symfony/process": "^7.0||^8.0"
     },
