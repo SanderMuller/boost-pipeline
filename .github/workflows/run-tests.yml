@@ -46,8 +46,9 @@ jobs:
           - { php: '8.4', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
           # Highest PHP the `^8.4` constraint admits
           - { php: '8.5', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
-          # Laravel 12 — the floor of the declared runtime range
-          - { php: '8.4', laravel: '12.*', testbench: '10.*', stability: prefer-stable, pest: '4' }
+          # Laravel 12 — prefer-lowest, so this cell tests the floor of the declared
+          # range rather than the newest 12.x release
+          - { php: '8.4', laravel: '12.*', testbench: '10.*', stability: prefer-lowest, pest: '4' }
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }}
 

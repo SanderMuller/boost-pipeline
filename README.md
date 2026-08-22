@@ -7,16 +7,16 @@
 
 **A verification pipeline as an MCP server: phases, steps, and a cursor the agent cannot move.**
 
-Your project already has the checks that should gate a change — a formatter, a static analyser, a
+Your project already has the checks that should gate a change: a formatter, a static analyser, a
 test suite. What it probably does not have is anything that makes an agent actually run them, in
 order, before reporting the work as done.
 
 The usual approach is prose: a skill or instruction file listing the checks. An agent reads all of
-it at once, picks its own order, and afterwards reports whether it complied — judged from its own
+it at once, picks its own order, and afterwards reports whether it complied, judged from its own
 transcript. That last part is the problem. *"I ran the tests"* and *"the tests ran"* are different
 claims, and prose cannot tell them apart.
 
-This package makes the **server** run each check and own the verdict, and hands the agent one step
+This package makes the server run each check and own the verdict, and hands the agent one step
 at a time.
 
 > **Status: prototype.** It works and it is tested, but several designed behaviours are
@@ -27,10 +27,8 @@ at a time.
 
 ## What the guarantee actually is
 
-Worth being precise, because the obvious reading is wrong.
-
-The guarantee is **not** that the agent cannot see the pipeline. `.config/pipeline.php` is a file
-in your repo; the agent can read the whole thing whenever it likes. MCP cannot help here either —
+The guarantee is not that the agent cannot see the pipeline. `.config/pipeline.php` is a file
+in your repo, and the agent can read the whole thing whenever it likes. MCP cannot help either:
 the specification makes tools *model-controlled*, so there is no way to force a call or pin an
 order at the protocol level.
 
@@ -79,9 +77,7 @@ agent  → report_step({ summary: "ran /evaluate, fixed 2 issues" })
 server ← { state: "complete", all_verified: false, acknowledged: 1 }
 ```
 
-That last line is the point of the whole design. Read on.
-
----
+That last line is why `all_verified` exists. More on it below.
 
 ## Install
 
@@ -103,14 +99,12 @@ Register the server in `.mcp.json`:
 }
 ```
 
-The explicit `timeout` is not decoration. A per-server timeout is a hard wall-clock limit per tool
-call that progress notifications do **not** extend; the step runner's own default sits below it, so
-a slow step is never killed client-side with its verdict lost.
+Set the `timeout` explicitly. It is a hard wall-clock limit per tool call, and progress
+notifications do not extend it. The step runner's own default sits below this value so a slow step
+is not killed client-side with its verdict lost.
 
 Until `.config/pipeline.php` exists the tools decline to register, so a project that has not opted
 in gets an honestly empty tool list rather than errors at call time.
-
----
 
 ## Configure
 
@@ -118,7 +112,8 @@ in gets an honestly empty tool list rather than errors at call time.
 <?php declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
-use SanderMuller\BoostPipeline\Phases\Defaults\{Refactoring, Formatting, StaticAnalysis, Tests, Agent};
+use SanderMuller\BoostPipeline\Phases\Defaults\{Refactoring, Formatting, StaticAnalysis, Tests,
+Agent};
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Steps\{Shell, Skill};
 
@@ -151,50 +146,46 @@ Five phases ship, in this order, holding no steps until you add them:
 | 2 | `Formatting` | Pint, linters |
 | 3 | `StaticAnalysis` | PHPStan, Larastan, `tsc`, Mago |
 | 4 | `Tests` | Pest, PHPUnit, Vitest, Dusk |
-| 5 | `Agent` | Skills the agent invokes — `/evaluate`, an eye-verify command |
+| 5 | `Agent` | Skills the agent invokes, such as `/evaluate` or an eye-verify command |
 
 ### Why that order
 
-Not "cheapest first" — that rule applies *within* a phase. Across phases the order follows the fix
+Not "cheapest first", which applies *within* a phase. Across phases the order follows the fix
 chain: **Rector changes code, the formatter formats the result, analysis reads the formatted
 result, tests exercise it.** Each phase's output is the next one's input. Putting the cheap checks
 first would mean formatting code Rector is about to rewrite.
 
 ### `withSteps()` order is not execution order
 
-A real trap. Steps run in **phase** order, then in `append`/`prepend` order within a phase.
-Declaring `in(Formatting::class)` before `in(Refactoring::class)` changes nothing — only
+Steps run in phase order, then in `append`/`prepend` order within a phase. Declaring
+`in(Formatting::class)` before `in(Refactoring::class)` changes nothing, because only
 `withPhases()` orders phases. Group your `in()` calls in phase order so the file reads the way it
-runs.
+runs. This catches people out.
 
----
-
-## Verdicts, and the two distinctions that matter
+## Verdicts
 
 | Verdict | Meaning | Cursor |
 |---|---|---|
 | `passed` | Shell step exited 0 | Advances |
 | `failed` | Shell step ran and found problems | Holds (`blocked`) |
-| `error` | Shell step **did not run** — missing binary, timeout, exception | Holds (`halted`) |
+| `error` | Shell step **did not run** (missing binary, timeout, exception) | Holds (`halted`) |
 | `acknowledged` | Skill step the agent reports it invoked. **Not verified.** | Advances |
 
 **`error` is not `failed`.** A tool that did not run is not a tool that found nothing. An `error`
 travels on MCP's error channel; a `failed` verdict deliberately does not, because a failing check
-is a *successful* tool call reporting a finding — flagging that as a protocol error would make
+is a *successful* tool call reporting a finding. Flagging that as a protocol error would make
 every red check look like a broken server and invite the client to retry it.
 
 **`acknowledged` is not `passed`.** The server cannot verify that `/evaluate` really ran, so it
 does not pretend to. Consequently:
 
 - `state: complete` means **the walk finished**, never "everything passed".
-- Every terminal response carries `all_verified` — true only when every step was a server-verified
+- Every terminal response carries `all_verified`, true only when every step was a server-verified
   pass *and* no declared step was dropped from the walk.
 - `status` reports `server_run` and `acknowledged` as **separate keys**, never one tally.
 
 Note that a *failed* step is `server_run: true`. That key answers *who produced the verdict*, not
-*whether it passed* — conflating the two is the easiest way to launder a claim into a receipt.
-
----
+*whether it passed*. Conflating the two is the easiest way to launder a claim into a receipt.
 
 ## Extending
 
@@ -213,29 +204,31 @@ Pipeline::configure()
         ->append(Shell::run('php artisan richter:detect-changes --fail-on=high')));
 ```
 
-A step can also be anchored *between* two phases — an ordinary step, different attach position:
+A step can also be anchored *between* two phases. It is an ordinary step with a different attach
+position:
 
 ```php
 $steps->between(Formatting::class, StaticAnalysis::class,
     Shell::run('git diff --quiet -- composer.lock'));
 ```
 
-**Nothing declared disappears quietly.** If a transition's anchors are missing or not adjacent, or
-a step is declared into a phase you removed, that step is dropped — and the drop is reported in
-`open_run`'s `notices` *and* forces `all_verified: false`. A gate you declared but never ran must
-never look like a clean run.
+A dropped step is always reported. If a transition's anchors are missing or not adjacent, or a
+step is declared into a phase you removed, that step does not run: the drop appears in `open_run`'s
+`notices` and forces `all_verified: false`. A gate you declared but never ran must not look like a
+clean run.
 
 ---
 
 ## The trap worth knowing: steps that pass vacuously
 
-The most common way a pipeline lies is a step whose exit code does not reflect its finding.
+A step whose exit code does not reflect its finding will pass while proving nothing. It is the
+commonest source of a false green.
 
 - `yarn lint` scoped to `git diff` exits 0 without linting anything when nothing changed.
 - `richter:detect-changes` is advisory by default and exits 0 whatever it finds, unless you pass
   `--fail-on`.
 
-Ask it of every step you add: *if this tool finds a problem, does the process exit non-zero?*
+So check each step you add: if this tool finds a problem, does the process exit non-zero?
 
 Where a step really is scoped, declare the scope:
 
@@ -243,25 +236,105 @@ Where a step really is scoped, declare the scope:
 Shell::run('yarn lint')->inspecting('git diff --name-only HEAD -- "resources/**/*.ts"')
 ```
 
-The command still always runs — an empty scope only annotates the verdict, never replaces it, and a
+The command still always runs. An empty scope only annotates the verdict, never replaces it, and a
 scope command that cannot run is an `error` rather than an empty scope. A scoped step that
-inspected nothing says so out loud: *"Inspected 0 files … passed without proving anything."*
-
----
+inspected nothing reports it: *"Inspected 0 files … passed without proving anything."*
 
 ## Driving it
 
 `run_pipeline` ships as an MCP prompt, so it appears as a slash command
 (`/mcp__pipeline__run_pipeline`). Or drive the tools directly:
 
-| Tool | Does |
+| Tool | What it does |
 |---|---|
 | `open_run` | Starts a run, returns the first step. Idempotent. |
-| `next_step` | Resolves the current step, returns the next — or the same one again. |
+| `next_step` | Resolves the current step, returns the next, or the same one again. |
 | `report_step` | Acknowledges a skill step. Only valid while `awaiting`. |
 | `status` | Position, per-step verdicts, verified versus acknowledged. |
 
 ---
+
+## Passing data between steps
+
+There is no step-output mechanism, and that is deliberate. Turborepo and Nx have none either.
+Use files and the shell. Three patterns cover it.
+
+### 1. Command substitution, in one step
+
+The simplest case is not two steps at all. If a tool can emit a machine-readable list, substitute
+it directly:
+
+```php
+$steps->in(Tests::class)->append(
+    Shell::run('php artisan test $(php artisan richter:affected-tests --plain)')
+);
+```
+
+Tools often ship a flag exactly for this. `richter:affected-tests --plain` prints one path per
+line "for command substitution". Prefer this over splitting into two steps: nothing crosses a
+boundary, so there is nothing to coordinate.
+
+Do not quote the substitution to guard against spaces — `"$(cat ...)"` passes the whole file as
+one argument, so a list of one path per line arrives as a single path with newlines in it. If
+paths may contain spaces, write the file NUL-delimited and let `xargs` split it:
+
+```php
+Shell::run('xargs -0 php artisan test < storage/pipeline/affected.txt')
+```
+
+### 2. A file written by one step, read by the next
+
+When the producer is expensive and several later steps need it, write it down once:
+
+```php
+$steps->in(StaticAnalysis::class)
+    ->append(Shell::run('php artisan richter:detect-changes --json > storage/pipeline/impact.json'))
+    ->append(Shell::run('jq -e \'.risk != "high"\' storage/pipeline/impact.json'));
+```
+
+Use `storage/pipeline/`, which sits beside the run logs. A Laravel app ignores `storage/app`,
+`storage/framework` and `storage/logs` through their own nested `.gitignore` files, and nothing
+else under `storage/` — so add `/storage/pipeline/` to your `.gitignore`, or these files will show
+up as untracked. Two things to keep in mind:
+
+- The producer must come first in phase order. Steps run in phase order, then in declaration
+  order within a phase. A consumer placed earlier reads a stale file or none at all.
+- **A failing producer blocks the run**, so a consumer never runs against a half-written file.
+  Because the walk is linear, you do not need to declare a dependency between them.
+
+### 3. An earlier step's log, which is already on disk
+
+Every step writes its full output to `storage/pipeline/logs/<run>-<step>.log`, and the path comes
+back in that step's result. A later step can read it without the producer doing anything special —
+but mind the run id: logs persist across runs, and a shell step has no way to receive the path
+from the earlier step's result, so a `*` glob can match logs from previous runs as well. Match on
+the current run id, or clear the directory at the start of a run:
+
+```php
+$steps->in(Tests::class)->append(
+    Shell::run('scripts/summarise-analysis.sh storage/pipeline/logs/*-phpstan.log')
+);
+```
+
+### What not to do
+
+**Do not build a step that parses another step's stdout to set variables.** GitHub Actions shipped
+exactly that as `set-output` and deprecated it for a security vulnerability: parsing raw stdout let
+any step logging untrusted data inject environment variables and paths. If you need a value, have
+the producer write a file with a known shape (`--json`) and have the consumer read *that*.
+
+Be careful interpolating tool output into a shell line. Every command here comes from
+`.config/pipeline.php`, which is repo code you trust. The moment a command embeds another tool's output,
+that output becomes shell input, and a filename or fixture containing `$(…)` is an injection path.
+Prefer a file plus a parser (`jq -e`) over `$(…)` when the value is not something you control.
+
+### If you need more than this
+
+A declared step-output tier is designed but not built. The intended shape, following GitHub and
+GitLab: named outputs written to a file the runner owns rather than stdout, a hard size cap in the
+kilobytes, values delivered as argv or env, and forward references rejected when the run opens.
+Ask before reaching for it. The three patterns above have covered everything that has come up so
+far.
 
 ## The environment steps run in
 
@@ -269,14 +342,12 @@ Each step runs in a subprocess with every key your app's `.env` **defines** remo
 re-reads `.env` instead of inheriting already-resolved values. That is what lets a test step pin
 its own `DB_DATABASE` rather than touching a shared database.
 
-It does **not** sandbox the environment. Anything exported only in the parent shell — a
-`GITHUB_TOKEN`, an API key, a CI secret — is inherited by every step command. That is the same
+It does **not** sandbox the environment. Anything exported only in the parent shell (a
+`GITHUB_TOKEN`, an API key, a CI secret) is inherited by every step command. That is the same
 exposure as running the tool by hand in that shell, and step commands come from
 `.config/pipeline.php`, which is repo code you already trust. Stricter isolation means an
 allowlist, but one that omits `PATH` or `HOME` turns a misconfiguration into "the tool did not
-run" — so it is not a prototype default.
-
----
+run", so it is not a prototype default.
 
 ## What it deliberately does not do
 
@@ -284,22 +355,20 @@ run" — so it is not a prototype default.
 |---|---|
 | Expire a receipt when you edit code afterwards | A pass stays green even if the file changed. Needs input fingerprinting |
 | Survive a session restart | Run state is in-process; one run per process |
-| Tolerate failures that predate your change | Every step is strict — use the tool's own baseline (e.g. `phpstan-baseline.neon`) |
+| Tolerate failures that predate your change | Every step is strict, so use the tool's own baseline (e.g. `phpstan-baseline.neon`) |
 | Verify an agent step | Reported as `acknowledged`, never `passed` |
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
 | Resume after `halted` | Undefined whether a run can continue once the cause is fixed |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
 
-None of these are secretly handled. If a row matters to you, it is real work, not a flag.
-
----
+None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 
 ## Requirements
 
 - PHP 8.4+
-- Laravel 11, 12 or 13
-- `laravel/mcp` — currently **0.9.x, pre-1.0**, so its API may move between minor releases
+- Laravel 12.41+ or 13
+- `laravel/mcp`, currently 0.9.x and pre-1.0, so its API may move between minor releases
 
 ## Testing
 
