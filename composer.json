@@ -1,0 +1,66 @@
+{
+    "name": "sandermuller/boost-pipeline",
+    "description": "A drip-feed verification pipeline as an MCP server: phases, steps, and a cursor the agent cannot move.",
+    "keywords": [
+        "laravel",
+        "mcp",
+        "ai",
+        "agents",
+        "verification",
+        "pipeline",
+        "developer-tools"
+    ],
+    "homepage": "https://github.com/SanderMuller/boost-pipeline",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Sander Muller",
+            "email": "sander@hihaho.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/console": "^11.0||^12.0||^13.0",
+        "illuminate/contracts": "^11.0||^12.0||^13.0",
+        "illuminate/support": "^11.0||^12.0||^13.0",
+        "laravel/mcp": "^0.9.4",
+        "symfony/process": "^7.0||^8.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.29",
+        "orchestra/testbench": "^9.0||^10.0||^11.0",
+        "pestphp/pest": "^3.0||^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0||^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "SanderMuller\\BoostPipeline\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SanderMuller\\BoostPipeline\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "format": "vendor/bin/pint",
+        "test": "vendor/bin/pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SanderMuller\\BoostPipeline\\BoostPipelineServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
