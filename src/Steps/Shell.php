@@ -20,6 +20,9 @@ final class Shell implements Step
 
     private ?string $scopeCommand = null;
 
+    /** @var array<string, string> */
+    private array $env = [];
+
     private function __construct(
         private readonly string $command,
         private readonly string $id,
@@ -70,6 +73,28 @@ final class Shell implements Step
         return $this->scopeCommand;
     }
 
+    /**
+     * Environment values this step pins for itself.
+     *
+     * The reason the scrubber exists: a test step must set its own DB_DATABASE
+     * rather than inherit whatever the app booted with, because several checkouts
+     * can share one database server.
+     *
+     * @param  array<string, string>  $env
+     */
+    public function withEnv(array $env): self
+    {
+        $this->env = [...$this->env, ...$env];
+
+        return $this;
+    }
+
+    /** @return array<string, string> */
+    public function env(): array
+    {
+        return $this->env;
+    }
+
     public function before(): void {}
 
     public function after(Result $result): void {}
@@ -80,7 +105,8 @@ final class Shell implements Step
      */
     private static function deriveId(string $command): string
     {
-        $tokens = preg_split('/\s+/', trim($command)) ?: [];
+        $split = preg_split('/\s+/', trim($command));
+        $tokens = $split === false ? [] : $split;
         $tokens = array_values(array_filter($tokens, static fn (string $t): bool => $t !== ''));
 
         if ($tokens === []) {
@@ -94,6 +120,8 @@ final class Shell implements Step
 
         $slug = strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', basename($candidate)));
 
-        return trim($slug, '-') ?: 'step';
+        $trimmed = trim($slug, '-');
+
+        return $trimmed === '' ? 'step' : $trimmed;
     }
 }

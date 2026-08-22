@@ -57,6 +57,8 @@ final class Skill implements Step
     {
         $slug = strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', $invocation));
 
-        return trim($slug, '-') ?: 'skill';
+        $trimmed = trim($slug, '-');
+
+        return $trimmed === '' ? 'skill' : $trimmed;
     }
 }

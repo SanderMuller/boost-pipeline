@@ -48,7 +48,9 @@ it('lets an override win, which is how a step pins its own database', function (
 });
 
 it('ignores malformed lines rather than producing bogus keys', function (): void {
-    file_put_contents($this->base.'/.env', "not a valid line\n1BAD=x\nGOOD=y\n");
+    // A line of only '=' makes strtok return false rather than a token, which
+    // trim() rejects outright under strict_types.
+    file_put_contents($this->base.'/.env', "not a valid line\n1BAD=x\n=\n===\nGOOD=y\n");
 
     expect(array_keys((new EnvironmentScrubber($this->base))->forStep()))->toBe(['GOOD']);
 });

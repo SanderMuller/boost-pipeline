@@ -56,8 +56,14 @@ final class ReportStep extends Tool
             return Response::error('No run is open. Call open_run first.');
         }
 
+        $summary = $request->get('summary');
+
+        if (! is_string($summary) || trim($summary) === '') {
+            return Response::error('report_step needs a non-empty [summary] describing what you did.');
+        }
+
         try {
-            $result = $run->acknowledgeCurrentStep((string) $request->get('summary'));
+            $result = $run->acknowledgeCurrentStep($summary);
         } catch (AcknowledgementNotAllowed $exception) {
             return Response::error($exception->getMessage());
         }

@@ -38,7 +38,7 @@ final class PipelineServer extends Server
     all_verified: true means every step was verified by the server.
     TXT;
 
-    /** @var array<int, class-string> */
+    /** @var array<int|string, array<int, class-string<Server\Tool>|Server\Tool>|class-string<Server\Tool>|Server\Tool> */
     protected array $tools = [
         OpenRun::class,
         NextStep::class,
@@ -46,7 +46,7 @@ final class PipelineServer extends Server
         Status::class,
     ];
 
-    /** @var array<int, class-string> */
+    /** @var array<int, class-string<Server\Prompt>|Server\Prompt> */
     protected array $prompts = [
         RunPipeline::class,
     ];

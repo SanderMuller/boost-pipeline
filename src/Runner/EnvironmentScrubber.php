@@ -54,14 +54,23 @@ final readonly class EnvironmentScrubber
 
         $keys = [];
 
-        foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        foreach ($lines === false ? [] : $lines as $line) {
             $line = trim($line);
 
             if ($line === '' || str_starts_with($line, '#')) {
                 continue;
             }
 
-            $name = trim(strtok($line, '=') ?: '');
+            $name = strtok($line, '=');
+
+            // A line of nothing but '=' has no token at all.
+            if ($name === false) {
+                continue;
+            }
+
+            $name = trim($name);
 
             if ($name !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) === 1) {
                 $keys[] = $name;

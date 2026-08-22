@@ -42,7 +42,7 @@ final class OpenRun extends Tool
         ];
     }
 
-    public function handle(Request $request): Response|ResponseFactory
+    public function handle(Request $request): ResponseFactory
     {
         // Idempotent: opening an already-open run returns it where it stands.
         // Restarting would discard verdicts silently.

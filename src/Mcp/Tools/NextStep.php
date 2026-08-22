@@ -90,7 +90,7 @@ final class NextStep extends Tool
     private function explainHalt(Run $run): string
     {
         $stepId = $run->currentStep()?->step->id() ?? 'unknown';
-        $reason = $run->resultFor($stepId)?->reason ?? 'see status for detail';
+        $reason = $run->resultFor($stepId)->reason ?? 'see status for detail';
 
         return "This run halted on step [{$stepId}]: {$reason}. A tool that could not run is not a tool that found nothing — calling again changes nothing.";
     }

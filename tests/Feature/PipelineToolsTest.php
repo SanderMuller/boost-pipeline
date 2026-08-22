@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
@@ -66,6 +69,19 @@ afterEach(function (): void {
         unlink($this->configPath);
     }
 });
+
+/**
+ * Invoke report_step with a real Request.
+ *
+ * `PipelineServer::tool(ReportStep::class, [...])` cannot be used: laravel/mcp
+ * v0.9.4 populates a resolved Request from an `mcp.request` container binding
+ * that its Testing harness never sets, so arguments arrive empty. Confirmed
+ * against the live stdio server that real JSON-RPC calls deliver them fine.
+ */
+function acknowledge(string $summary): void
+{
+    (new ReportStep(app(RunManager::class)))->handle(new Request(['summary' => $summary]));
+}
 
 it('reveals exactly one step and leaks no later step id', function (): void {
     PipelineServer::tool(OpenRun::class)
@@ -148,7 +164,9 @@ it('awaits a skill step, holds until report_step, then completes', function (): 
     // Calling next_step again must not advance past an unacknowledged skill step.
     PipelineServer::tool(NextStep::class)->assertSee('"state":"awaiting"');
 
-    PipelineServer::tool(ReportStep::class, ['summary' => 'ran /evaluate'])
+    acknowledge('ran /evaluate');
+
+    PipelineServer::tool(Status::class)
         ->assertOk()
         ->assertSee('"state":"complete"')
         ->assertSee('"all_verified":false');
@@ -181,7 +199,7 @@ it('walks a whole pipeline to complete and never claims a verified pass it did n
 
     PipelineServer::tool(NextStep::class)->assertSee('"verdict":"passed"');
     PipelineServer::tool(NextStep::class)->assertSee('"state":"awaiting"');
-    PipelineServer::tool(ReportStep::class, ['summary' => 'ran /evaluate']);
+    acknowledge('ran /evaluate');
 
     PipelineServer::tool(Status::class)
         ->assertOk()
@@ -192,4 +210,21 @@ it('walks a whole pipeline to complete and never claims a verified pass it did n
         ->assertSee('"all_verified":false')
         ->assertSee('"server_run":{"passed":2,"failed":0,"error":0}')
         ->assertSee('"acknowledged":1');
+});
+
+it('rejects report_step with a missing or blank summary', function (): void {
+    PipelineServer::tool(OpenRun::class);
+
+    $tool = new ReportStep(app(RunManager::class));
+
+    // Previously `(string) $request->get('summary')` turned a missing argument
+    // into '', so an acknowledgement with no content was accepted silently.
+    $isError = static function (Response|ResponseFactory $result): bool {
+        return $result instanceof Response
+            ? $result->isError()
+            : $result->responses()->contains(static fn (Response $r): bool => $r->isError());
+    };
+
+    expect($isError($tool->handle(new Request([]))))->toBeTrue()
+        ->and($isError($tool->handle(new Request(['summary' => '   ']))))->toBeTrue();
 });

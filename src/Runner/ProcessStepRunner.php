@@ -80,7 +80,7 @@ final readonly class ProcessStepRunner implements StepRunner
         // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
         // scope command that silently matches nothing, permanently disables the
         // gate — a false green of exactly the kind this pipeline exists to stop.
-        $process = $this->process($step->id(), $step->command(), $this->timeoutSeconds);
+        $process = $this->process($step->id(), $step->command(), $this->timeoutSeconds, $step->env());
 
         if ($process instanceof Result) {
             return $process;
@@ -93,7 +93,7 @@ final readonly class ProcessStepRunner implements StepRunner
         if (in_array($exitCode, self::UNRUNNABLE_EXIT_CODES, true)) {
             return Result::error(
                 $step->id(),
-                sprintf('Command did not run (exit %d): %s', $exitCode, trim($output) ?: 'no output'),
+                sprintf('Command did not run (exit %d): %s', $exitCode, self::orElse(trim($output), 'no output')),
                 logPath: $logPath,
             );
         }
@@ -133,7 +133,7 @@ final readonly class ProcessStepRunner implements StepRunner
             return null;
         }
 
-        $process = $this->process($step->id(), $command, self::SCOPE_TIMEOUT_SECONDS);
+        $process = $this->process($step->id(), $command, self::SCOPE_TIMEOUT_SECONDS, $step->env());
 
         if ($process instanceof Result) {
             return Result::error($step->id(), "Could not determine declared scope: {$process->summary}");
@@ -143,20 +143,21 @@ final readonly class ProcessStepRunner implements StepRunner
             return Result::error($step->id(), sprintf(
                 'Scope command exited %d, so the step\'s scope is unknown: %s',
                 $process->getExitCode() ?? 1,
-                trim($this->combinedOutput($process)) ?: 'no output',
+                self::orElse(trim($this->combinedOutput($process)), 'no output'),
             ));
         }
 
         return count($this->nonEmptyLines($process->getOutput()));
     }
 
-    private function process(string $stepId, string $command, float $timeout): Process|Result
+    /** @param array<string, string> $env */
+    private function process(string $stepId, string $command, float $timeout, array $env = []): Process|Result
     {
         try {
             $process = Process::fromShellCommandline(
                 $command,
                 $this->workingDirectory,
-                $this->environment->forStep(),
+                $this->environment->forStep($env),
                 timeout: $timeout,
             );
 
@@ -181,7 +182,7 @@ final readonly class ProcessStepRunner implements StepRunner
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
     private function describePass(array $summary, ?int $scope): string
     {
-        $text = $summary['summary'] ?: 'Passed.';
+        $text = self::orElse($summary['summary'], 'Passed.');
 
         if ($scope !== 0) {
             return $text;
@@ -193,7 +194,7 @@ final readonly class ProcessStepRunner implements StepRunner
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
     private function describeFailure(array $summary, ?string $logPath): string
     {
-        $text = $summary['summary'] ?: 'Failed with no output.';
+        $text = self::orElse($summary['summary'], 'Failed with no output.');
 
         if (! $summary['truncated']) {
             return $text;
@@ -212,8 +213,21 @@ final readonly class ProcessStepRunner implements StepRunner
     private function nonEmptyLines(string $output): array
     {
         return array_values(array_filter(
-            preg_split('/\R/', trim($output)) ?: [],
+            self::splitLines($output),
             static fn (string $line): bool => trim($line) !== '',
         ));
+    }
+
+    /** @return list<string> */
+    private static function splitLines(string $output): array
+    {
+        $lines = preg_split('/\R/', trim($output));
+
+        return $lines === false ? [] : $lines;
+    }
+
+    private static function orElse(string $value, string $fallback): string
+    {
+        return $value === '' ? $fallback : $value;
     }
 }

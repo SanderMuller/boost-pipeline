@@ -200,3 +200,14 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
     expect($result->verdict)->toBe(Verdict::Error)
         ->and($result->stepId)->toBe('throws-in-setup');
 });
+
+it('lets a step pin its own environment, which is the point of the scrubber', function (): void {
+    // Documented in the README before it existed: the override path on
+    // EnvironmentScrubber had no public route from a step until now.
+    $result = $this->runner->run(
+        Shell::run('printf "%s" "$PIPELINE_PINNED"', id: 'pinned')
+            ->withEnv(['PIPELINE_PINNED' => 'my_tp_phpunit_iso'])
+    );
+
+    expect($result->summary)->toContain('my_tp_phpunit_iso');
+});

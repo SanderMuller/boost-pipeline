@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Walk;
 
 use SanderMuller\BoostPipeline\Contracts\Phase;
+use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Phases;
 use SanderMuller\BoostPipeline\Phases\Steps;
@@ -27,10 +28,26 @@ final readonly class Walk
     public static function resolve(Phases $phases, Steps $steps): self
     {
         $registered = $phases->all();
-        $walk = [];
-        $notices = [];
 
-        /** @var array<int, true> $placed */
+        [$walk, $placed] = self::buildWalk($registered, $steps);
+
+        $notices = [
+            ...self::noticesForUnplacedTransitions($steps, $registered, $placed),
+            ...self::noticesForUnregisteredPhases($steps, $registered),
+        ];
+
+        self::assertUniqueStepIds($walk);
+
+        return new self($walk, $notices);
+    }
+
+    /**
+     * @param  list<class-string<Phase>>  $registered
+     * @return array{0: list<WalkStep>, 1: array<int, true>}
+     */
+    private static function buildWalk(array $registered, Steps $steps): array
+    {
+        $walk = [];
         $placed = [];
         $transitions = $steps->transitions();
 
@@ -64,10 +81,23 @@ final readonly class Walk
             }
         }
 
-        // Never drop a transition silently: registered-but-not-adjacent anchors
-        // vanish just as quietly as missing ones, and that is a declared gate
-        // disappearing without a trace.
-        foreach ($transitions as $key => $transition) {
+        return [$walk, $placed];
+    }
+
+    /**
+     * Never drop a transition silently: registered-but-not-adjacent anchors
+     * vanish just as quietly as missing ones, and that is a declared gate
+     * disappearing without a trace.
+     *
+     * @param  list<class-string<Phase>>  $registered
+     * @param  array<int, true>  $placed
+     * @return list<string>
+     */
+    private static function noticesForUnplacedTransitions(Steps $steps, array $registered, array $placed): array
+    {
+        $notices = [];
+
+        foreach ($steps->transitions() as $key => $transition) {
             if (isset($placed[$key])) {
                 continue;
             }
@@ -75,16 +105,28 @@ final readonly class Walk
             $notices[] = self::explainDroppedTransition($transition, $registered);
         }
 
-        // Same rule as a dropped transition, and just as easy to miss: steps
-        // declared into a phase that is not registered never reach the cursor, so
-        // a removed phase would take its gates down in silence.
+        return $notices;
+    }
+
+    /**
+     * Same rule, other shape: steps declared into a phase that is not registered
+     * never reach the cursor, so a removed phase would take its gates down in
+     * silence.
+     *
+     * @param  list<class-string<Phase>>  $registered
+     * @return list<string>
+     */
+    private static function noticesForUnregisteredPhases(Steps $steps, array $registered): array
+    {
+        $notices = [];
+
         foreach ($steps->declaredPhases() as $phaseClass) {
             if (in_array($phaseClass, $registered, true)) {
                 continue;
             }
 
             $ids = implode(', ', array_map(
-                static fn ($step): string => '['.$step->id().']',
+                static fn (Step $step): string => '['.$step->id().']',
                 $steps->forPhase($phaseClass),
             ));
 
@@ -95,9 +137,7 @@ final readonly class Walk
             );
         }
 
-        self::assertUniqueStepIds($walk);
-
-        return new self($walk, $notices);
+        return $notices;
     }
 
     public function count(): int
@@ -116,7 +156,7 @@ final readonly class Walk
     }
 
     /**
-     * @param  array{after: class-string<Phase>, before: class-string<Phase>, step: \SanderMuller\BoostPipeline\Contracts\Step}  $transition
+     * @param  array{after: class-string<Phase>, before: class-string<Phase>, step: Step}  $transition
      * @param  list<class-string<Phase>>  $registered
      */
     private static function explainDroppedTransition(array $transition, array $registered): string
@@ -137,7 +177,7 @@ final readonly class Walk
                 'they are registered but not adjacent — [%s] sits between them',
                 implode('], [', array_map(
                     static fn (string $phase): string => class_basename($phase),
-                    array_slice($registered, (int) $afterIndex + 1, (int) $beforeIndex - (int) $afterIndex - 1),
+                    array_slice($registered, $afterIndex + 1, $beforeIndex - $afterIndex - 1),
                 )),
             ),
         };
