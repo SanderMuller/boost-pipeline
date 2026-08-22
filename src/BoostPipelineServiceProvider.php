@@ -34,7 +34,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 
         $this->app->singleton(StepRunner::class, fn (): StepRunner => new ProcessStepRunner(
             workingDirectory: $this->app->basePath(),
-            logs: new LogWriter($this->app->storagePath('pipeline/logs')),
+            logs: new LogWriter($this->app->storagePath('logs/pipeline')),
             summariser: new OutputSummariser,
             environment: new EnvironmentScrubber($this->app->basePath()),
             runId: 'r-'.substr(bin2hex(random_bytes(4)), 0, 6),

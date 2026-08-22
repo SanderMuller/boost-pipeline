@@ -60,7 +60,7 @@ server ← { state: "running", position: "2/8",
 agent  → next_step()                       # the server runs phpstan itself
 server ← { state: "blocked", position: "5/8",
            result: { verdict: "failed", exit_code: 1,
-                     log: "storage/pipeline/logs/r-4f2a-phpstan.log" },
+                     log: "storage/logs/pipeline/r-4f2a-phpstan.log" },
            step: { id: "phpstan", … } }    # ← the SAME step
 
 agent  → next_step()                       # asking again does not help
@@ -292,10 +292,11 @@ $steps->in(StaticAnalysis::class)
     ->append(Shell::run('jq -e \'.risk != "high"\' storage/pipeline/impact.json'));
 ```
 
-Use `storage/pipeline/`, which sits beside the run logs. A Laravel app ignores `storage/app`,
-`storage/framework` and `storage/logs` through their own nested `.gitignore` files, and nothing
-else under `storage/` — so add `/storage/pipeline/` to your `.gitignore`, or these files will show
-up as untracked. Two things to keep in mind:
+Run logs live under `storage/logs/pipeline/`, which a Laravel app already ignores. A directory you
+write yourself does not get that for free: Laravel ignores `storage/app`, `storage/framework` and
+`storage/logs` through their own nested `.gitignore` files and nothing else under `storage/`, so
+either put your own artefacts under `storage/logs/` too, or add `/storage/pipeline/` to your
+`.gitignore`. Two things to keep in mind:
 
 - The producer must come first in phase order. Steps run in phase order, then in declaration
   order within a phase. A consumer placed earlier reads a stale file or none at all.
@@ -304,7 +305,7 @@ up as untracked. Two things to keep in mind:
 
 ### 3. An earlier step's log, which is already on disk
 
-Every step writes its full output to `storage/pipeline/logs/<run>-<step>.log`, and the path comes
+Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`, and the path comes
 back in that step's result. A later step can read it without the producer doing anything special —
 but mind the run id: logs persist across runs, and a shell step has no way to receive the path
 from the earlier step's result, so a `*` glob can match logs from previous runs as well. Match on
@@ -312,7 +313,7 @@ the current run id, or clear the directory at the start of a run:
 
 ```php
 $steps->in(Tests::class)->append(
-    Shell::run('scripts/summarise-analysis.sh storage/pipeline/logs/*-phpstan.log')
+    Shell::run('scripts/summarise-analysis.sh storage/logs/pipeline/*-phpstan.log')
 );
 ```
 
