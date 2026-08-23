@@ -16,6 +16,10 @@
   }
   ```
 
+- `OpenRun`'s constructor takes a second argument, `CommandPreflight`. Only relevant if you
+  construct the tool yourself; the container resolves it for you otherwise, which is how
+  `laravel/mcp` gets it.
+
 - A step that rewrites code must declare it, or the run reports itself stale.
 
   ```php

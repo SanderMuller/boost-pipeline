@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking
 
 - `Step` gained `mutates(): bool`, and a step that rewrites code must declare it with
-  `->mutating()`. See UPGRADING.md.
+  `->mutating()`. `OpenRun` takes a `CommandPreflight` as a second constructor argument. See
+  UPGRADING.md.
 
 ### Added
 
@@ -33,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing run while it has not. A session was previously limited to exactly one run, which made
   the fix loop — run, see a failure, fix it, verify again — impossible without restarting the
   server, and in Claude Code that means restarting the session.
+
+- `Shell::run(...)->timeout(seconds)` overrides the runner's 540s cap for one step. A single cap has
+  to be set for the slowest step, which leaves it far too loose for every other — a real suite
+  measured 336s against that default.
+
+- `open_run` returns a `warnings` array naming any step whose binary is not on disk. A walk used to
+  pay for every earlier step before finding out step three could not run; a real run lost two
+  minutes of server-verified receipts that way. Only commands whose first token is a relative path
+  are checked, since PATH-resolved ones cannot be answered honestly.
 
 ### Changed
 

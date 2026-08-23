@@ -272,6 +272,36 @@ see a failure, fix it, run again, without restarting the server.
 A tree that cannot be fingerprinted (no git) disables expiry rather than guessing, so nothing
 becomes permanently unverifiable.
 
+### Missing binaries are flagged at `open_run`
+
+`open_run` returns a `warnings` array when a step's binary is not on disk, so you find out before
+paying for the steps ahead of it:
+
+```
+warnings: ["Step [oxlint] runs `node_modules/.bin/oxlint`, which is not present.
+            The run will halt there unless it is installed first."]
+```
+
+Only commands whose first token is a relative path are checked. `php artisan test` and
+`composer phpstan` resolve through PATH or another tool's dispatch, and guessing at those would
+warn about steps that run perfectly well.
+
+These are separate from `notices`: a notice means a gate you declared will never run, so the run
+cannot be fully verified. A warning is just "you will halt at step three".
+
+### Per-step timeouts
+
+The runner caps a step at 540s. One cap for every step has to be set for the slowest, which makes
+it useless for the rest — a real suite measured 336s, so the step needing the headroom is also the
+one whose runaway takes nine minutes to report. Set it where it differs:
+
+```php
+$steps->in(Tests::class)->append(Shell::run('php artisan test')->timeout(1800));
+```
+
+A timeout is an `error`, not a `failed`: the step did not produce a verdict, so the run halts
+rather than treating "no answer" as a finding.
+
 ### A halt can be retried
 
 `error` means the tool never ran — a missing binary, a bad path. The cursor stays put, so install
@@ -332,6 +362,21 @@ $steps->in(Tests::class)->append(
 Tools often ship a flag exactly for this. `richter:affected-tests --plain` prints one path per
 line "for command substitution". Prefer this over splitting into two steps: nothing crosses a
 boundary, so there is nothing to coordinate.
+
+**Check what an empty selection does before you trust this.** If the inner command prints nothing
+and exits 0, the substitution collapses and `php artisan test` runs with no arguments — the *whole*
+suite. That is a vacuous pass wearing the opposite disguise: not a step that verified nothing, but
+one that quietly verified everything and took the time to prove it. Nothing in the exit code says
+which happened.
+
+Where the tool distinguishes the cases, gate on that instead. `--plain` exits 0 when the selection
+is determinable and 2 when it is not, so a wrapper can fail the step rather than silently widen it:
+
+```php
+$steps->in(Tests::class)->append(
+    Shell::run('scripts/test-affected.sh')   // exits non-zero on an empty or undeterminable selection
+);
+```
 
 Do not quote the substitution to guard against spaces — `"$(cat ...)"` passes the whole file as
 one argument, so a list of one path per line arrives as a single path with newlines in it. If
