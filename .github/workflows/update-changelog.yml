@@ -17,11 +17,27 @@ jobs:
         with:
           ref: ${{ github.event.release.target_commitish }}
 
+      # The release notes carry a `verified-sha` pin on line 1 so the pre-tag gate
+      # can fail closed on drift. It is for the person cutting the tag, not for
+      # the changelog, and it reached CHANGELOG.md at every release that had one —
+      # including the release where the handoff said to strip it by hand, which is
+      # why this strips it here instead of asking anyone to remember.
+      - name: Strip the verified-sha pin from the release body
+        id: notes
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          {
+            echo 'body<<PIPELINE_NOTES_EOF'
+            printf '%s\n' "$RELEASE_BODY" | sed '/^[[:space:]]*<!--[[:space:]]*verified-sha:.*-->[[:space:]]*$/d'
+            echo 'PIPELINE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Update Changelog
         uses: stefanzweifel/changelog-updater-action@v1
         with:
           latest-version: ${{ github.event.release.tag_name }}
-          release-notes: ${{ github.event.release.body }}
+          release-notes: ${{ steps.notes.outputs.body }}
 
       - name: Commit updated CHANGELOG
         uses: stefanzweifel/git-auto-commit-action@v7

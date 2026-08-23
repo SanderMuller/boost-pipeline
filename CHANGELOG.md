@@ -12,7 +12,6 @@ draft until it ships.
 
 ## v0.4.0 - 2026-08-23
 
-<!-- verified-sha: 4c7295a3289be4775b51fe6cf24de9f125562651 -->
 A run can now be read from outside the session that produced it, a skill step can prove it did the
 work, and configuration surface that two consuming applications never touched is gone.
 
