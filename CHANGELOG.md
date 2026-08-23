@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A run's verdicts expire when the working tree changes. Each resolution fingerprints the tree —
+  the commit plus the contents of everything dirty or untracked, ignoring what git ignores — and
+  `all_verified` turns false once it moves, with a `stale` key saying whether the edit landed
+  during the walk or after it. "This run passed" now means "this passed against the code that is
+  on disk".
+
+  The fingerprint is taken before *and* after each step, so a step that rewrites code is not
+  mistaken for an edit. `pint` and `rector process` change the tree as their normal job; a single
+  reading per step would report stale on every clean run that uses one.
+
+  No git means no fingerprint and no expiry, rather than a run that can never be verified.
+
+- `open_run` starts a fresh run when the tree has changed since the open one, and returns the
+  existing run while it has not. A session was previously limited to exactly one run, which made
+  the fix loop — run, see a failure, fix it, verify again — impossible without restarting the
+  server, and in Claude Code that means restarting the session.
+
+### Changed
+
+- `next_step` retries a halted step instead of refusing for the rest of the session. `error` means
+  the tool could not run, which is the kind of thing that then gets fixed; the cursor stays on the
+  step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
+  open.
+
+- A truncated step summary keeps the head *and* the tail of the output, with an inline count of the
+  omitted lines. Tools disagree about where the useful part is — static analysis leads with
+  findings, a test runner leads with progress noise and ends with the failure — so head-only
+  truncation dropped exactly what mattered for the second kind.
+
 ## v0.2.0 - 2026-08-23
 
 A dogfooding release. Using the pipeline on a real change surfaced that a run's logs could not be

@@ -239,6 +239,37 @@ clean run.
 
 ---
 
+### A receipt is about the code that was there
+
+Each resolution fingerprints the tree — the commit plus the contents of everything dirty or
+untracked, ignoring what git ignores. Edit code after a run went green and `all_verified` flips to
+false, with a `stale` key saying which happened:
+
+```
+server ← { state: "complete", all_verified: false,
+           stale: "The working tree changed after this run resolved, so its verdicts no longer
+                   describe the code on disk. Open a new run." }
+```
+
+A step that rewrites code is not an edit. `pint` and `rector process` change the tree as their
+normal job, so the fingerprint is taken before *and* after each step: a change while a step ran is
+that step's, and a change between two steps is yours. Without that split, every pipeline using a
+fix-mode step would report stale on a clean run — and a gate that cries stale when nothing is wrong
+stops being read.
+
+`open_run` uses the same signal. It returns the run already open while the tree sits still, and
+starts a fresh one once you have changed something — which is what makes the fix loop work: run,
+see a failure, fix it, run again, without restarting the server.
+
+A tree that cannot be fingerprinted (no git) disables expiry rather than guessing, so nothing
+becomes permanently unverifiable.
+
+### A halt can be retried
+
+`error` means the tool never ran — a missing binary, a bad path. The cursor stays put, so install
+the thing and call `next_step` again. Only the step that halted re-runs; the verdicts already
+earned stand, because the tree has not moved.
+
 ## The trap worth knowing: steps that pass vacuously
 
 A step whose exit code does not reflect its finding will pass while proving nothing. It is the
@@ -375,13 +406,11 @@ run", so it is not a prototype default.
 
 | Not yet | Why it matters |
 |---|---|
-| Expire a receipt when you edit code afterwards | A pass stays green even if the file changed. Needs input fingerprinting |
-| Survive a session restart | Run state is in-process; one run per process |
+| Survive a session restart | Run state is in-process, so no CI job or skill can ask whether the pipeline passed |
 | Tolerate failures that predate your change | Every step is strict, so use the tool's own baseline (e.g. `phpstan-baseline.neon`) |
 | Verify an agent step | Reported as `acknowledged`, never `passed` |
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
-| Resume after `halted` | Undefined whether a run can continue once the cause is fixed |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
