@@ -309,6 +309,25 @@ see a failure, fix it, run again, without restarting the server.
 A tree that cannot be fingerprinted (no git) disables expiry rather than guessing, so nothing
 becomes permanently unverifiable.
 
+### A config error reaches the agent, not just the log
+
+When `.config/pipeline.php` cannot be loaded, the server still registers — under a degraded mode
+whose only tool reports why:
+
+```
+open_run → error: "This project's pipeline configuration could not be loaded, so no run can be
+                   opened. A step timeout must be greater than zero, got 0. …"
+```
+
+Declining to register instead put `mcp:start`'s own "server not found" line on stdout, which for a
+stdio server is the protocol channel: unparseable to a client, misleading (it was registered, then
+withdrawn), and indistinguishable from a project that never opted in. One driver hung waiting for
+the response that line was never going to be.
+
+The message also goes to stderr for whoever is watching the process. Only this package's own
+validation errors are handled that way — a syntax error or a `TypeError` in your config still fails
+loudly, because those are defects in your code and a tidy message would hide them.
+
 ### Missing binaries are flagged at `open_run`
 
 `open_run` returns a `warnings` array when a step's binary is not on disk, so you find out before

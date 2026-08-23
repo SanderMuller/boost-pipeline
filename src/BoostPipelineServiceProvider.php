@@ -6,12 +6,14 @@ namespace SanderMuller\BoostPipeline;
 
 use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
+use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
+use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
@@ -82,37 +84,47 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         // before provider boot has finished, and again in the child process
         // whenever an artisan command IS a pipeline step — `php artisan test` is
         // one. Only the server process has a protocol stream to protect.
-        if ($this->app->make(ServerProcess::class)->isStarting() && ! $this->configLoads()) {
-            return;
+        if ($this->app->make(ServerProcess::class)->isStarting()) {
+            $reason = $this->configError();
+
+            if ($reason !== null) {
+                // Register something, rather than nothing. Declining left
+                // `mcp:start` writing "server not found" to stdout — the JSON-RPC
+                // channel for a stdio server — which is unparseable to a client,
+                // reads as a registration mistake rather than a config error, and
+                // is indistinguishable from a project that never opted in. One
+                // driver hung waiting for the response that line was not.
+                $this->app->instance(ConfigError::class, new ConfigError($reason));
+
+                Mcp::local(self::HANDLE, InvalidConfigServer::class);
+
+                return;
+            }
         }
 
         Mcp::local(self::HANDLE, PipelineServer::class);
     }
 
     /**
-     * Load the config now and report a failure on stderr rather than stdout.
+     * Load the config now and return why it failed, or null when it loaded.
      *
-     * For a stdio MCP server STDOUT *is* the protocol channel. Letting the
-     * framework's exception renderer print a boxed trace there hands the client a
-     * run of malformed frames after the handshake, and what the operator then
-     * sees depends entirely on whether their client shows unparseable stdout or
-     * discards it — one reports the real error, another just says the server
-     * failed to start.
+     * The message also goes to stderr, for the operator: stdout is the protocol
+     * channel, and the agent gets the same reason through the degraded server.
      *
      * Only this package's own validation errors are caught. A syntax error, a
      * TypeError, a missing class: those are defects in the consumer's code, and
      * swallowing them here would hide a real bug behind a tidy message.
      */
-    private function configLoads(): bool
+    private function configError(): ?string
     {
         try {
             $this->app->make(Pipeline::class);
 
-            return true;
+            return null;
         } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
             $this->writeToStderr('[boost-pipeline] '.$invalidPipelineConfigException->getMessage());
 
-            return false;
+            return $invalidPipelineConfigException->getMessage();
         }
     }
 

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use Laravel\Mcp\Server\Registrar;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
+use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
+use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
+use SanderMuller\BoostPipeline\Mcp\Tools\ExplainInvalidConfig;
 
 /**
  * For a stdio MCP server STDOUT is the protocol channel, so an unhandled config
@@ -49,21 +52,28 @@ function bootWithConfig(string $php): Registrar
 it('registers the server when the config is valid', function (): void {
     $registrar = bootWithConfig('<?php return '.Pipeline::class.'::configure();');
 
-    expect($registrar->servers())->toHaveKey('pipeline');
+    // ConfigError is bound only on the degraded path, so its absence is what
+    // says the real server was registered.
+    expect($registrar->servers())->toHaveKey('pipeline')
+        ->and(app()->bound(ConfigError::class))->toBeFalse();
 });
 
-it('registers nothing when the config does not return a pipeline', function (): void {
-    // Registering anyway would expose a tool surface with no pipeline behind it,
-    // and the failure would surface at call time instead of at startup.
+it('registers a degraded server when the config does not return a pipeline', function (): void {
+    // Registering nothing left mcp:start writing "server not found" to stdout —
+    // the protocol channel — which is unparseable, reads as a registration
+    // mistake, and looks the same as a project that never opted in.
     $registrar = bootWithConfig('<?php return "not a pipeline";');
 
-    expect($registrar->servers())->not->toHaveKey('pipeline');
+    expect($registrar->servers())->toHaveKey('pipeline')
+        ->and(app()->bound(ConfigError::class))->toBeTrue()
+        ->and(resolve(ConfigError::class)->message)->toContain('must return a Pipeline instance');
 });
 
-it('registers nothing when the config throws while it is being built', function (): void {
+it('registers a degraded server when the config throws while it is being built', function (): void {
     $registrar = bootWithConfig('<?php return '.Pipeline::class.'::configure()->withTimeout(0);');
 
-    expect($registrar->servers())->not->toHaveKey('pipeline');
+    expect($registrar->servers())->toHaveKey('pipeline')
+        ->and(resolve(ConfigError::class)->message)->toContain('must be greater than zero');
 });
 
 it('lets a defect that is not a config error fail loudly', function (): void {
@@ -72,4 +82,15 @@ it('lets a defect that is not a config error fail loudly', function (): void {
     // tidy message about configuration.
     expect(fn (): Registrar => bootWithConfig('<?php throw new RuntimeException("something else entirely");'))
         ->toThrow(RuntimeException::class, 'something else entirely');
+});
+
+it('hands the agent the reason through the protocol, not just the log', function (): void {
+    // The operator may never see stderr. The agent is the party that can act, so
+    // the reason has to arrive as a tool error on the call the instructions tell
+    // it to make first.
+    bootWithConfig('<?php return '.Pipeline::class.'::configure()->withTimeout(0);');
+
+    InvalidConfigServer::tool(ExplainInvalidConfig::class)
+        ->assertHasErrors()
+        ->assertSee('must be greater than zero');
 });
