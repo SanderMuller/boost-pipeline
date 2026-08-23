@@ -94,10 +94,20 @@ final class VerifyCommand extends Command
         );
 
         if ($acknowledged === [] || $unverified !== []) {
+            // Not "finished": a blocked or halted run is retryable, and saying it
+            // finished contradicts the server, which hands the same step back on
+            // the next call.
+            $named = [];
+
+            foreach ($unverified as $stepId => $verdict) {
+                $named[] = "[{$stepId}] {$verdict}";
+            }
+
             return sprintf(
-                'Run [%s] finished in state [%s] without verifying every step.',
+                'Run [%s] has not verified every step. State [%s]%s.',
                 $receipt->runId,
                 $receipt->state,
+                $named === [] ? '' : ', with '.implode(', ', $named),
             );
         }
 
@@ -107,7 +117,7 @@ final class VerifyCommand extends Command
             $receipt->runId,
             count($acknowledged) === 1
                 ? sprintf('step [%s] was', $acknowledged[0])
-                : sprintf('%d steps were ([%s])', count($acknowledged), implode('], [', $acknowledged)),
+                : sprintf('%d steps ([%s]) were', count($acknowledged), implode('], [', $acknowledged)),
             count($acknowledged) === 1 ? 'it' : 'them',
         );
     }

@@ -88,7 +88,7 @@ it('fails when the run recorded itself stale', function (): void {
     expect(Artisan::call('pipeline:verify'))->toBe(1);
 });
 
-it('fails when the walk finished without verifying every step', function (): void {
+it('fails when the run has not verified every step', function (): void {
     // An acknowledged step reaches complete. Passing here would call agent
     // self-report a verified pass.
     receiptStoreHolding(receipt(allVerified: false));
@@ -107,7 +107,7 @@ it('says an acknowledged run is structural, not a shortfall to fix', function ()
         allVerified: false,
         tree: 'tree-a',
         stale: null,
-        verdicts: ['pint' => 'passed', 'review' => 'acknowledged'],
+        verdicts: ['pint' => 'passed', 'review' => 'acknowledged', 'audit' => 'acknowledged'],
         recordedAt: '2026-01-01T00:00:00+00:00',
     ));
     treeReporting('tree-a');
@@ -117,7 +117,11 @@ it('says an acknowledged run is structural, not a shortfall to fix', function ()
 
     expect($exit)->toBe(1)
         ->and($output)->toContain('[review]')
-        ->and($output)->toContain('cannot verify');
+        ->and($output)->toContain('cannot verify')
+        // Two consumers reported the parenthetical landing between "were" and
+        // "only acknowledged". It is the message a gate reader hits most often.
+        ->and($output)->toContain('steps ([review], [audit]) were')
+        ->and($output)->not->toContain('steps were ([');
 });
 
 it('still reports a plain failure as a failure, not as a design limit', function (): void {
@@ -134,8 +138,15 @@ it('still reports a plain failure as a failure, not as a design limit', function
     ));
     treeReporting('tree-a');
 
-    expect(Artisan::call('pipeline:verify'))->toBe(1)
-        ->and(Artisan::output())->toContain('without verifying every step');
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('has not verified every step')
+        ->and($output)->toContain('[pint] failed')
+        // A blocked or halted run is retryable — next_step hands the same step
+        // back — so calling it finished contradicts the server.
+        ->and($output)->not->toContain('finished');
 });
 
 it('succeeds only when the recorded run verified this exact tree', function (): void {

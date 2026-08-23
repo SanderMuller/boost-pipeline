@@ -558,8 +558,9 @@ php artisan pipeline:verify
 ```
 
 Exit 0 only when a run verified **the code now on disk**. It fails when no run was recorded, when
-the receipt describes a different tree, when the run recorded itself stale, and when the walk
-finished without verifying every step. That first case is the point: a gate that treats a missing
+the receipt describes a different tree, when the run recorded itself stale, and when the run has not
+verified every step — which includes a run still sitting at a failed step, since a blocked or halted
+run is retryable rather than finished. That first case is the point: a gate that treats a missing
 answer as "nothing to check" passes exactly the run that never happened.
 
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which every Laravel
