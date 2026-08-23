@@ -78,6 +78,23 @@ it('blocks and returns the same step when the artifact is not there', function (
         ->and($run->allVerified())->toBeFalse();
 });
 
+it('names the proof command when it does not hold', function (): void {
+    // A silent proof such as `grep -q` produced "Failed with no output", which
+    // reads like the skill failed and names nothing the agent can act on — and
+    // the agent is handed this step again, so the message is the whole
+    // instruction.
+    $run = runWithSkill(
+        Skill::run('/eye-verification')->proving('ls artifacts/*.png 2>/dev/null | grep -q .'),
+        $this->runner,
+    );
+
+    $result = $run->acknowledgeCurrentStep('took the screenshots');
+
+    expect($result->summary)->toContain('Proof did not hold')
+        ->and($result->summary)->toContain('grep -q')
+        ->and($result->summary)->toContain('[eye-verification]');
+});
+
 it('still acknowledges a step that declares no proof', function (): void {
     // Work that leaves nothing to find keeps the honest verdict.
     $run = runWithSkill(Skill::run('/code-review'), $this->runner);

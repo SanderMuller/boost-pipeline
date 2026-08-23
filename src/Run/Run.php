@@ -179,11 +179,20 @@ final class Run
 
         $result = $this->runner->run(Shell::run($proof, id: $step->id()), $this->id);
 
-        // A failing proof is returned as it stands, so the cursor holds and the
-        // agent is handed the same step again. Claiming done without the artifact
-        // must not be a way past it.
+        // A failing proof holds the cursor, so the agent is handed the same step
+        // again — claiming done without the artifact must not be a way past it.
+        // It has to say which command failed: a silent proof such as `grep -q`
+        // produced "Failed with no output", which reads like the skill itself
+        // failed and names nothing the agent can act on.
         if ($result->verdict !== Verdict::Passed) {
-            return $result;
+            return new Result(
+                verdict: $result->verdict,
+                stepId: $result->stepId,
+                summary: sprintf('Proof did not hold for [%s]: `%s`. %s', $step->id(), $proof, $result->summary),
+                exitCode: $result->exitCode,
+                logPath: $result->logPath,
+                reason: $result->reason,
+            );
         }
 
         return Result::passed(
