@@ -14,6 +14,12 @@ namespace SanderMuller\BoostPipeline\Runner;
  * v1 counts LINES, not failures. Counting failures needs a per-tool parser, and
  * those are deferred; reporting a line count as a failure count would be a lie
  * that happens to look like the spec's example.
+ *
+ * Truncation keeps the HEAD and the TAIL, never just the head. Tools disagree
+ * about where they put the part you need: PHPStan leads with findings, while a
+ * test runner leads with progress noise and ends with the failure and its
+ * timings. Keeping both ends makes a payload predictable regardless of which
+ * shape a step produces.
  */
 final readonly class OutputSummariser
 {
@@ -39,20 +45,51 @@ final readonly class OutputSummariser
             static fn (string $line): bool => trim($line) !== '',
         ));
 
-        $shown = array_slice($lines, 0, $maxLines);
+        $shown = $this->headAndTail($lines, $maxLines);
 
-        $shown = array_map(
+        $clamped = array_map(
             static fn (string $line): string => mb_strlen($line) > self::MAX_LINE_LENGTH
                 ? mb_substr($line, 0, self::MAX_LINE_LENGTH).'…'
                 : $line,
             $shown,
         );
 
+        $omitted = count($lines) - count($shown);
+
+        if ($omitted > 0) {
+            // Stated inline, because a consumer reading only `summary` would
+            // otherwise see two ends spliced together as if they were adjacent.
+            $head = (int) ceil($maxLines / 2);
+            array_splice($clamped, $head, 0, [sprintf('… %d lines omitted …', $omitted)]);
+        }
+
         return [
-            'summary' => implode("\n", $shown),
+            'summary' => implode("\n", $clamped),
             'output_lines' => count($lines),
             'shown_lines' => count($shown),
-            'truncated' => count($lines) > count($shown),
+            'truncated' => $omitted > 0,
+        ];
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @return list<string>
+     */
+    private function headAndTail(array $lines, int $maxLines): array
+    {
+        if ($maxLines < 1) {
+            return [];
+        }
+
+        if (count($lines) <= $maxLines) {
+            return $lines;
+        }
+
+        $head = (int) ceil($maxLines / 2);
+
+        return [
+            ...array_slice($lines, 0, $head),
+            ...array_slice($lines, -($maxLines - $head)),
         ];
     }
 }
