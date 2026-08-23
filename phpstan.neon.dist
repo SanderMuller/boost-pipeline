@@ -8,6 +8,14 @@ includes:
 parameters:
     tmpDir: .cache/phpstan
 
+    # Pinned to the range composer.json declares, because PHPStan otherwise
+    # analyses at whatever PHP is running it. That made a local run and CI two
+    # different analyses: CI runs 8.4, a developer may be on 8.5, and each missed
+    # what the other caught. The test matrix covers both versions; so should this.
+    phpVersion:
+        min: 80400
+        max: 80599
+
     paths:
         - src
         - tests

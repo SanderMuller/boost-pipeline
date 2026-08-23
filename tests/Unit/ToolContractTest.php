@@ -70,16 +70,18 @@ it('declares every key a payload can actually contain', function (): void {
         ->and(schemaTextFor('next_step', 'results'))->toContain('verdict');
 });
 
-/** One schema entry rendered, so its declared properties can be asserted. */
+/**
+ * One schema entry rendered, so its declared properties can be asserted.
+ *
+ * A plain instanceof rather than an expectation: narrowing a mixed value through
+ * `expect()` relies on an analyser extension, and whether it worked turned out to
+ * depend on which PHP version was analysing.
+ */
 function schemaTextFor(string $name, string $key): string
 {
     $type = schemaFor($name)[$key] ?? null;
 
-    // The expectation narrows the mixed value and fails the test if a schema
-    // entry is ever something other than a schema type.
-    expect($type)->toBeInstanceOf(Type::class);
-
-    return $type->toString();
+    return $type instanceof Type ? $type->toString() : "no schema declared for [{$key}]";
 }
 
 it('exposes total_steps on open_run but no later step identity', function (): void {
