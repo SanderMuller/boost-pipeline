@@ -50,21 +50,7 @@ final readonly class ProcessStepRunner implements StepRunner
             return Result::error($step->id(), 'Only shell steps can be executed by the server.');
         }
 
-        try {
-            $step->before();
-        } catch (Throwable $throwable) {
-            return Result::error($step->id(), "Step setup failed: {$throwable->getMessage()}");
-        }
-
-        $result = $this->execute($step, $runId);
-
-        try {
-            $step->after($result);
-        } catch (Throwable) {
-            // Teardown failure must not rewrite a verdict the tool already earned.
-        }
-
-        return $result;
+        return $this->execute($step, $runId);
     }
 
     private function execute(Shell $step, string $runId): Result

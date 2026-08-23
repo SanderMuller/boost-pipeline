@@ -7,7 +7,6 @@ namespace SanderMuller\BoostPipeline\Steps;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
-use SanderMuller\BoostPipeline\Results\Result;
 
 final class Shell implements Step
 {
@@ -140,10 +139,6 @@ final class Shell implements Step
     {
         return $this->timeoutSeconds;
     }
-
-    public function before(): void {}
-
-    public function after(Result $result): void {}
 
     /**
      * Best-effort id from a command string. Explicit ids win; this only has to be

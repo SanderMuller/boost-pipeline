@@ -178,19 +178,20 @@ it('keeps stderr on its own line rather than gluing it to stdout', function (): 
 on-stderr');
 });
 
-it('reports a step whose setup throws as an error, not a failure', function (): void {
-    // The Edge Cases table claims coverage for "a step throws rather than
-    // exiting non-zero"; it had none until this test.
+it('refuses a step that claims to be a shell step but is not one', function (): void {
+    // The kind alone does not make a step runnable. Only a real Shell carries a
+    // command, so anything else reaching the runner is a config fault, and an
+    // error says the step did not run rather than that it found nothing.
     $step = new class implements Step
     {
         public function id(): string
         {
-            return 'throws-in-setup';
+            return 'not-really-shell';
         }
 
         public function description(): string
         {
-            return 'a step whose before() throws';
+            return 'a step reporting Shell kind without being one';
         }
 
         public function kind(): StepKind
@@ -202,21 +203,13 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
         {
             return false;
         }
-
-        public function before(): void
-        {
-            throw new RuntimeException('setup exploded');
-        }
-
-        public function after(Result $result): void {}
     };
 
     $result = runStep($this->runner, $step);
 
-    // Not a Shell instance, so the runner refuses it before before() is reached —
-    // which is itself the guarantee: only a real Shell step can be executed.
     expect($result->verdict)->toBe(Verdict::Error)
-        ->and($result->stepId)->toBe('throws-in-setup');
+        ->and($result->stepId)->toBe('not-really-shell')
+        ->and($result->summary)->toContain('Only shell steps');
 });
 
 it('lets a step pin its own environment, which is the point of the scrubber', function (): void {

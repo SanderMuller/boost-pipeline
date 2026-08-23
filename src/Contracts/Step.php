@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Contracts;
 
 use SanderMuller\BoostPipeline\Enums\StepKind;
-use SanderMuller\BoostPipeline\Results\Result;
 
 interface Step
 {
@@ -25,10 +24,4 @@ interface Step
      * job, so the config says which it is.
      */
     public function mutates(): bool;
-
-    /** Optional setup, run before the step resolves. */
-    public function before(): void;
-
-    /** Optional teardown, run whatever the verdict was. */
-    public function after(Result $result): void;
 }

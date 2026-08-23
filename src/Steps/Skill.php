@@ -6,7 +6,6 @@ namespace SanderMuller\BoostPipeline\Steps;
 
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
-use SanderMuller\BoostPipeline\Results\Result;
 
 /**
  * An instruction handed back to the invoking agent.
@@ -95,10 +94,6 @@ final readonly class Skill implements Step
     {
         return $this->invocation;
     }
-
-    public function before(): void {}
-
-    public function after(Result $result): void {}
 
     private static function deriveId(string $invocation): string
     {
