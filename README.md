@@ -5,22 +5,22 @@
 [![Total Downloads](https://img.shields.io/packagist/dt/sandermuller/boost-pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
 [![License](https://img.shields.io/packagist/l/sandermuller/boost-pipeline.svg?style=flat-square)](LICENSE)
 
-**A verification pipeline as an MCP server: phases, steps, and a cursor the agent cannot move.**
+**An MCP server that hands an agent one step at a time: phases, steps, and a cursor it cannot move.**
 
-Your project already has the checks that should gate a change: a formatter, a static analyser, a
-test suite. What it probably does not have is anything that makes an agent actually run them, in
-order, before reporting the work as done.
+Closing out a change means several separate jobs. Review the diff for the things that bite, run the
+formatter and the analyser and the tests, then fix what came back. The usual way to ask for all that
+is prose: a skill or instruction file listing it. An agent reads the list at once, picks its own
+order, and afterwards reports whether it complied, judged from its own transcript.
 
-The usual approach is prose: a skill or instruction file listing the checks. An agent reads all of
-it at once, picks its own order, and afterwards reports whether it complied, judged from its own
-transcript.
+The list competes for attention with the task it arrives next to, so whatever sits near the bottom
+gets what is left over. You get most of the work, most of the time. A review told to cover six
+concerns in one pass covers each of them thinly, which is the same problem one level down.
 
-Two things go wrong there. The list competes for attention with the task it arrives next to, so
-the checks near the bottom get whatever is left over — you get most of the work, most of the time.
-And *"I ran the tests"* and *"the tests ran"* are different claims, which prose cannot tell apart.
+And *"I ran the tests"* and *"the tests ran"* are different claims. Prose cannot tell them apart.
 
-This package makes the server run each check and own the verdict, and hands the agent one step
-at a time.
+So this package hands over one step at a time. A shell step the server runs itself, so its verdict
+is an exit code rather than a claim. A skill step carries its own instruction, so the agent gets one
+thing to look at instead of a list.
 
 > **Status: prototype.** It works and it is tested, but several designed behaviours are
 > deliberately deferred. Read
@@ -50,15 +50,34 @@ Reading ahead tells the agent what is coming. It does not let the agent obtain a
 Handing an agent eight checks and handing it one check are different instructions, even when the
 eight are correct and well written. A list has to share the context window with the work itself,
 and attention thins out across it: some checks run properly, some get skimmed, one quietly does
-not happen. Nothing failed loudly — the run was simply partial, and the report still says done.
+not happen. Nothing failed loudly. The run was simply partial, and the report still says done.
 
 A step at the cursor has nothing to share with. The agent receives one command, one phase, and
 one thing to report, and cannot be handed the next one until this one resolves. That is the part
 worth more than the verdicts on their own: `next_step` narrows the agent's attention to a single
 item, and the server keeps the ordering that the prose version could only suggest.
 
-Reading ahead is still allowed and still harmless. The point is not that the agent cannot see
-what is coming — it is that nothing else is in the way of the step it is on.
+Reading ahead is still allowed and still harmless. What changes is that nothing else competes with
+the step the agent is on.
+
+### Narrowing a skill step
+
+A step that says only `/code-review` gives the breadth straight back. The skill arrives with its own
+list of concerns, and the agent skims that list the way it would have skimmed yours. Give the step its
+instruction and it has one thing to do.
+
+```php
+$steps->in(Agent::class)
+    ->append(Skill::run('/code-review', id: 'errors',
+        instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
+    ->append(Skill::run('/code-review', id: 'tests',
+        instruction: 'Judge whether the tests would catch a regression in this change.'));
+```
+
+Two steps, one lens each, and the second is not competing with the first for attention. The
+instruction reaches the agent verbatim in the step payload, so write it for the agent to act on
+rather than as a label for a human reading the config. Without one, the step falls back to naming
+the invocation.
 
 ---
 
@@ -91,7 +110,8 @@ server ← { state: "blocked", step: { id: "phpstan", … } }
 agent  → next_step()
 server ← { state: "awaiting", position: "7/8",
            step: { id: "evaluate", kind: "skill", invoke: "/evaluate",
-                   note: "…recorded as acknowledged, not verified." } }
+                   instruction: "Fix what the checks above reported.",
+                   note: "Do this step now, then call report_step. …" } }
 
 agent  → report_step({ summary: "ran /evaluate, fixed 2 issues" })
 server ← { state: "complete", all_verified: false, acknowledged: 1 }
@@ -154,13 +174,13 @@ return Pipeline::configure()
             ->append(Shell::run('yarn test:js'));
 
         $steps->in(Agent::class)
-            ->append(Skill::run('/evaluate'));
+            ->append(Skill::run('/evaluate', instruction: 'Fix what the checks above reported.'));
     });
 ```
 
-Five phases ship, in this order, holding no steps until you add them. The set is fixed — a phase
-is only a named, ordered group, so a step that wants different company goes in whichever phase
-runs at the right point:
+Five phases ship, in this order, holding no steps until you add them. A phase is a name and a
+position, nothing more, so put a step in whichever phase runs at the right point. You can also
+[define your own](#your-own-phases), which is what a pipeline of review steps usually wants:
 
 | # | Phase | For |
 |---|---|---|
@@ -186,10 +206,9 @@ people out.
 
 ### Analyse the config, it is real code
 
-`.config/pipeline.php` is PHP that runs in your application, but it sits outside the paths most
-projects hand to their static analyser — so a rule you enforce everywhere else is not enforced
-there. A real config reached production with a `shell_exec()` its own project bans, invisible to a
-full-project run and only found by analysing the file directly.
+`.config/pipeline.php` is PHP that runs in your application, and it sits outside the paths most
+projects hand to their static analyser. So a rule you enforce everywhere else is not enforced here,
+and a config can hold a call your own ruleset bans without any full-project run noticing.
 
 Add it to your analysed paths:
 
@@ -208,7 +227,7 @@ dot-directories on its default scan, so `vendor/bin/pint --test` reports clean w
 vendor/bin/pint --test . .config
 ```
 
-An `exclude` entry in `pint.json` is unrelated — there is no `include`, so the path has to be an
+An `exclude` entry in `pint.json` is unrelated: there is no `include`, so the path has to be an
 argument. Whatever else gates the rest of your code deserves the same check: assume nothing covers
 this file until you have seen it fail.
 
@@ -218,8 +237,8 @@ this file until you have seen it fail.
 |---|---|---|
 | `passed` | Shell step exited 0, or a skill step whose declared proof exited 0 | Advances |
 | `failed` | The step ran and found problems, or a declared proof did not hold | Holds (`blocked`) |
-| `error` | Shell step **did not run** (missing binary, timeout, exception) | Holds (`halted`) |
-| `acknowledged` | Skill step with no proof, which the agent reports it invoked. **Not verified.** | Advances |
+| `error` | Shell step did not run: missing binary, timeout, exception | Holds (`halted`) |
+| `acknowledged` | Skill step with no proof, which the agent reports it invoked, and the server did not check | Advances |
 
 **`error` is not `failed`.** A tool that did not run is not a tool that found nothing. An `error`
 travels on MCP's error channel; a `failed` verdict deliberately does not, because a failing check
@@ -227,13 +246,13 @@ is a *successful* tool call reporting a finding. Flagging that as a protocol err
 every red check look like a broken server and invite the client to retry it.
 
 **`acknowledged` is not `passed`.** The server cannot verify that `/evaluate` really ran, so it does
-not pretend to — unless the step declares a proof, which is the one way agent work becomes something
+not pretend to, unless the step declares a proof, which is the one way agent work becomes something
 the server checked (see [Proving an agent step](#proving-an-agent-step)). Without one:
 
-- `state: complete` means **the walk finished**, never "everything passed".
+- `state: complete` means the walk finished, never "everything passed".
 - Every response carrying a result also carries `all_verified`, true only when every step was a server-verified
   pass *and* no declared step was dropped from the walk.
-- `status` reports `server_run` and `acknowledged` as **separate keys**, never one tally.
+- `status` reports `server_run` and `acknowledged` as separate keys, never one tally.
 
 Note that a *failed* step is `server_run: true`. That key answers *who produced the verdict*, not
 *whether it passed*. Conflating the two is the easiest way to launder a claim into a receipt.
@@ -243,7 +262,7 @@ Note that a *failed* step is `server_run: true`. That key answers *who produced 
 ### Your own phases
 
 The five defaults suit a pipeline of mechanical checks. A pipeline that sequences review work does
-not fit them — its steps are not refactoring or formatting or tests — so the set is open:
+not fit them, because its steps are not refactoring or formatting or tests. So the set is open:
 
 ```php
 final class BlastRadius implements Phase
@@ -273,8 +292,8 @@ $this->app->singleton(StepRunner::class, fn () => new MyRunner);
 ```
 
 A custom `Step` needs that binding to be worth writing. `ProcessStepRunner` runs `Shell` and
-nothing else, and a step reporting `StepKind::Skill` is acknowledged by the agent rather than run —
-so with the shipped runner in place, a third kind of step has nowhere to resolve.
+nothing else, and a step reporting `StepKind::Skill` is acknowledged by the agent rather than run.
+With the shipped runner in place, a third kind of step has nowhere to resolve.
 
 A dropped step is always reported. Declare a step into a phase that is not registered and it does
 not run: the drop appears in `open_run`'s `notices` and forces `all_verified: false`. A gate you
@@ -284,7 +303,7 @@ declared but never ran must not look like a clean run.
 
 ### A receipt is about the code that was there
 
-Each resolution fingerprints the tree — the commit plus the contents of everything dirty or
+Each resolution fingerprints the tree: the commit plus the contents of everything dirty or
 untracked, ignoring what git ignores. Edit code after a run went green and `all_verified` flips to
 false, with a `stale` key saying which happened:
 
@@ -301,12 +320,12 @@ $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint')->mutating())
 ```
 
 Attribution is by declaration, not by timing. "Whatever step was running must have done it" would
-absorb an edit made *while* a step ran — and a blocked run is exactly when you go and change
+absorb an edit made *while* a step ran, and a blocked run is exactly when you go and change
 something, against steps that take half a minute. So a change nothing declared is reported rather
 than explained away: either the step rewrites code and should say so, or something edited files
 mid-run, and both mean the verdict is not proven for the code that exists now.
 
-Check-mode steps need nothing, which is the usual case — a gate uses `pint --test`, not `pint`.
+Check-mode steps need nothing, which is the usual case: a gate uses `pint --test`, not `pint`.
 
 A pipeline where **no** step declares `->mutating()` gets something extra out of that. The stale
 report names two possible causes, and one of them is impossible by construction: with nothing in the
@@ -316,15 +335,15 @@ out of a pipeline whose receipt you intend to gate on.
 
 Order matters, and the run enforces it rather than asking nicely. Each pass records the tree it
 measured, so a rewrite landing after a check has already passed leaves that check describing code
-the run then changed — and the run says which step it was. Rewrite first, check second, which is
+the run then changed, and the run says which step it was. Rewrite first, check second, which is
 what the default phase order does.
 
 Only a pass records a tree. An acknowledgement was never verified and a failure is already keeping
-the run from green, so neither expires — which is why fixing a blocked step and retrying it is not
+the run from green, so neither expires. That is why fixing a blocked step and retrying it is not
 treated as tampering.
 
 `open_run` uses the same signal. It returns the run already open while the tree sits still, and
-starts a fresh one once you have changed something — which is what makes the fix loop work: run,
+starts a fresh one once you have changed something. That is what makes the fix loop work: run,
 see a failure, fix it, run again, without restarting the server.
 
 A tree that cannot be fingerprinted (no git) disables expiry rather than guessing, so nothing
@@ -332,7 +351,7 @@ becomes permanently unverifiable.
 
 ### A config error reaches the agent, not just the log
 
-When `.config/pipeline.php` cannot be loaded, the server still registers — under a degraded mode
+When `.config/pipeline.php` cannot be loaded, the server still registers, under a degraded mode
 whose only tool reports why:
 
 ```
@@ -340,13 +359,13 @@ open_run → error: "This project's pipeline configuration could not be loaded, 
                    opened. A step timeout must be greater than zero, got 0. …"
 ```
 
-Declining to register instead put `mcp:start`'s own "server not found" line on stdout, which for a
-stdio server is the protocol channel: unparseable to a client, misleading (it was registered, then
-withdrawn), and indistinguishable from a project that never opted in. One driver hung waiting for
-the response that line was never going to be.
+The server has to register for this to work. For a stdio server, stdout is the JSON-RPC channel, so
+a server that withdraws leaves `mcp:start`'s own "not found" line there instead: unparseable to a
+client, and indistinguishable from a project that never opted in. Some clients report a confusing
+cause; others wait for a response that is never coming.
 
 The message also goes to stderr for whoever is watching the process. Only this package's own
-validation errors are handled that way — a syntax error or a `TypeError` in your config still fails
+validation errors are handled that way. A syntax error or a `TypeError` in your config still fails
 loudly, because those are defects in your code and a tidy message would hide them.
 
 ### Missing binaries are flagged at `open_run`
@@ -368,9 +387,9 @@ cannot be fully verified. A warning is just "you will halt at step three".
 
 ### Per-step timeouts
 
-The runner caps a step at 540s. One cap for every step has to be set for the slowest, which makes
-it useless for the rest — a real suite measured 336s, so the step needing the headroom is also the
-one whose runaway takes nine minutes to report. Set it where it differs:
+The runner caps a step at 540s. A single cap for every step has to be set for the slowest, which
+makes it useless for the rest: a five-minute test suite drags the ceiling up, and then a runaway
+formatter takes nine minutes to report. Set it where it differs:
 
 ```php
 $steps->in(Tests::class)->append(Shell::run('php artisan test')->timeout(1800));
@@ -391,7 +410,7 @@ rather than treating "no answer" as a finding.
 
 ### A halt can be retried
 
-`error` means the tool never ran — a missing binary, a bad path. The cursor stays put, so install
+`error` means the tool never ran: a missing binary, a bad path. The cursor stays put, so install
 the thing and call `next_step` again. Only the step that halted re-runs; the verdicts already
 earned stand, because the tree has not moved.
 
@@ -451,7 +470,7 @@ line "for command substitution". Prefer this over splitting into two steps: noth
 boundary, so there is nothing to coordinate.
 
 **Check what an empty selection does before you trust this.** If the inner command prints nothing
-and exits 0, the substitution collapses and `php artisan test` runs with no arguments — the *whole*
+and exits 0, the substitution collapses and `php artisan test` runs with no arguments, against the *whole*
 suite. That is a vacuous pass wearing the opposite disguise: not a step that verified nothing, but
 one that quietly verified everything and took the time to prove it. Nothing in the exit code says
 which happened.
@@ -465,7 +484,7 @@ $steps->in(Tests::class)->append(
 );
 ```
 
-Do not quote the substitution to guard against spaces — `"$(cat ...)"` passes the whole file as
+Do not quote the substitution to guard against spaces. `"$(cat ...)"` passes the whole file as
 one argument, so a list of one path per line arrives as a single path with newlines in it. If
 paths may contain spaces, write the file NUL-delimited and let `xargs` split it:
 
@@ -491,14 +510,14 @@ either put your own artefacts under `storage/logs/` too, or add `/storage/pipeli
 
 - The producer must come first in phase order. Steps run in phase order, then in declaration
   order within a phase. A consumer placed earlier reads a stale file or none at all.
-- **A failing producer blocks the run**, so a consumer never runs against a half-written file.
+- A failing producer blocks the run, so a consumer never runs against a half-written file.
   Because the walk is linear, you do not need to declare a dependency between them.
 
 ### 3. An earlier step's log, which is already on disk
 
 Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`, where `<run>` is
 the run id the server reports in every response, and the path comes back in that step's result. A
-later step can read it without the producer doing anything special — but mind the run id: logs
+later step can read it without the producer doing anything special, but mind the run id: logs
 persist across runs, and a shell step has no way to receive the path from the earlier step's
 result, so a `*` glob can match logs from previous runs as well. Match on the current run id, or
 clear the directory at the start of a run:
@@ -544,8 +563,8 @@ run", so it is not a prototype default.
 
 ## Proving an agent step
 
-A skill step reports `acknowledged` because the server cannot check that a skill ran — which is
-honest, and also means the steps doing the actual judgement are the ones carrying no verdict. Where
+A skill step reports `acknowledged` because the server cannot check that a skill ran. That is
+honest, and it also leaves the steps doing the actual judgement carrying no verdict at all. Where
 the work leaves a side effect, the server can check for it instead:
 
 ```php
@@ -556,7 +575,7 @@ $steps->in(Agent::class)->append(
 ```
 
 The proof runs through the same runner as any shell step, so a step with one reports **`passed`**,
-not `acknowledged` — the server ran a command and read an exit code. No model call, nothing taken
+not `acknowledged`: the server ran a command and read an exit code. No model call, nothing taken
 on trust. A failing proof blocks the run and returns the same step, so "I did it" without the
 artifact is not a way past the cursor.
 
@@ -565,31 +584,31 @@ log, a review commit. Steps whose work genuinely leaves nothing to find keep `ac
 is the right verdict for them.
 
 **A proof over an artifact the step creates only to satisfy the proof is worse than no proof.** It
-turns `acknowledged` into `passed` while checking nothing about whether the work was done — the same
-laundering as reading `server_run: true` as "it passed". Review skills are the common case: a
+turns `acknowledged` into `passed` while checking nothing about whether the work was done. It is the
+same laundering as reading `server_run: true` as "it passed". Review skills are the common case: a
 self-review, a code review and a Codex review can all leave the tree untouched, so there is nothing
 to test for, and a run whose judgement steps are honest about that never reaches `all_verified`.
-That is the correct outcome, not a gap to close. Ask whether the artifact would exist if nobody had
+That is the correct outcome. Ask whether the artifact would exist if nobody had
 written a proof command; if the answer is no, leave the step acknowledged.
 
 ## Letting something else read the run
 
-Run state is in-process, so for the first four releases every guarantee the server produced died
-with the session that produced it. A receipt is written to `storage/logs/pipeline/receipt.json`
-after each resolution, and one command turns it into an exit code:
+Run state lives in the server process, so a guarantee it produced dies with the session unless
+something writes it down. A receipt goes to `storage/logs/pipeline/receipt.json` after each
+resolution, and one command turns it into an exit code:
 
 ```bash
 php artisan pipeline:verify
 ```
 
-Exit 0 only when a run verified **the code now on disk**. It fails when no run was recorded, when
+Exit 0 only when a run verified the code now on disk. It fails when no run was recorded, when
 the receipt describes a different tree, when the run recorded itself stale, and when the run has not
-verified every step — which includes a run still sitting at a failed step, since a blocked or halted
+verified every step, which includes a run still sitting at a failed step, since a blocked or halted
 run is retryable rather than finished. That first case is the point: a gate that treats a missing
 answer as "nothing to check" passes exactly the run that never happened.
 
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which every Laravel
-application gitignores, so it does not travel with a push — a CI job would find no receipt and fail
+application gitignores, so it does not travel with a push. A CI job finds no receipt and fails
 every build. Wire it where the working copy is the thing being judged: a pre-commit or pre-push
 hook, or a closeout check an agent runs before it opens a pull request.
 
@@ -601,20 +620,20 @@ php artisan pipeline:verify || exit 1
 CI's job is different and unchanged: it runs the checks itself rather than asking whether someone
 else did.
 
-**It answers a narrower question than "did the pipeline run".** A skill step with no proof is
+It answers a narrower question than "did the pipeline run". A skill step with no proof is
 `acknowledged`, so `all_verified` stays false and this command exits 1 however many times the run
 repeats. That is the contract working: the server did not verify that work, and will not claim it
 did.
 
-It also means **this command is not the measure of a sequencing pipeline.** A pipeline whose steps
+It also means this command is not the measure of a sequencing pipeline. A pipeline whose steps
 are review and evaluation work is meant to hold acknowledged steps, and it still delivers what it is
-for — one step at a time, in order, none of them skippable. `pipeline:verify` is the right gate for
+for: one step at a time, in order, none of them skippable. `pipeline:verify` is the right gate for
 the mechanical part of a pipeline and says so; for the rest, read the run with `status`, which
 reports verified and acknowledged work as separate counts precisely so neither is mistaken for the
 other.
 
 **A receipt is not proof a run happened.** It is a file in the working copy, so anything that can
-run a shell step can write one — an agent able to forge it could already claim a pass in prose, so
+run a shell step can write one. An agent able to forge it could already claim a pass in prose, so
 this closes no trust hole that was open. What it carries is the part prose could never get right:
 the tree the verdicts were measured against, so a reader can tell a current pass from a stale one
 without asking anybody. A consumer that must not trust the working copy runs the pipeline itself.
@@ -659,7 +678,7 @@ release: see [UPGRADING.md](UPGRADING.md).
 
 ## Security
 
-Found a vulnerability? See [SECURITY.md](SECURITY.md) — please do not open a public issue.
+Found a vulnerability? See [SECURITY.md](SECURITY.md). Please do not open a public issue.
 
 ## License
 
