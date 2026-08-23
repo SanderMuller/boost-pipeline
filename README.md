@@ -283,6 +283,12 @@ mid-run, and both mean the verdict is not proven for the code that exists now.
 
 Check-mode steps need nothing, which is the usual case — a gate uses `pint --test`, not `pint`.
 
+A pipeline where **no** step declares `->mutating()` gets something extra out of that. The stale
+report names two possible causes, and one of them is impossible by construction: with nothing in the
+run able to write, a stale report during a run can only mean something outside it edited the code.
+That is a reason to prefer check mode beyond the obvious one, and a reason to keep a fix-mode step
+out of a pipeline whose receipt you intend to gate on.
+
 Order matters, and the run enforces it rather than asking nicely. Each pass records the tree it
 measured, so a rewrite landing after a check has already passed leaves that check describing code
 the run then changed — and the run says which step it was. Rewrite first, check second, which is

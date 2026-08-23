@@ -18,14 +18,20 @@ use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
 
-/** Passes every shell step except one whose command is `false`. */
+/** Passes every shell step, except `false` (a finding) and `missing` (did not run). */
 final class CommandRunner implements StepRunner
 {
     public function run(Step $step, string $runId): Result
     {
-        return $step instanceof Shell && $step->command() === 'false'
-            ? Result::failed($step->id(), 'found problems', exitCode: 1)
-            : Result::passed($step->id(), 'ok');
+        if (! $step instanceof Shell) {
+            return Result::passed($step->id(), 'ok');
+        }
+
+        return match ($step->command()) {
+            'false' => Result::failed($step->id(), 'found problems', exitCode: 1),
+            'missing' => Result::error($step->id(), 'command not found'),
+            default => Result::passed($step->id(), 'ok'),
+        };
     }
 }
 
@@ -100,6 +106,23 @@ it('persists the state the run actually reached, not the one before the transiti
     drain($run);
 
     expect($this->store->read()?->state)->toBe('blocked');
+});
+
+it('persists a halted run as halted, the other half of the early return', function (): void {
+    // `settleState()` returns early for both blocked and halted, and only blocked
+    // was pinned. The 0.4.0 bug was the persisted state being wrong on a path no
+    // test covered, so leaving its sibling uncovered repeats the same mistake.
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('missing', id: 'fmt'));
+    });
+
+    drain($run);
+
+    $receipt = $this->store->read();
+
+    expect($receipt?->state)->toBe('halted')
+        ->and($receipt?->allVerified)->toBeFalse()
+        ->and($receipt?->verdicts)->toBe(['fmt' => 'error']);
 });
 
 it('persists an acknowledged run as complete but not verified', function (): void {
