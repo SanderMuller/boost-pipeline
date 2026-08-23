@@ -103,6 +103,17 @@ it('bounds the work when a tool draws megabytes onto one line', function (): voi
     // summary that shows 20 lines has no reason to scan the rest.
     $result = new OutputSummariser()->summarise(str_repeat('x', 5_000_000), 4);
 
-    expect($result['shown_lines'])->toBe(1)
+    // Two segments, because the cap keeps both ends of the input.
+    expect($result['shown_lines'])->toBe(2)
         ->and(strlen($result['summary']))->toBeLessThan(1000);
+});
+
+it('keeps the end of a huge output, where the verdict usually is', function (): void {
+    // A head-only byte cap dropped everything past it, so a progress line
+    // megabytes long buried the one line that mattered.
+    $output = str_repeat('progress ', 400_000)."\nFAILED 3 tests";
+
+    $result = new OutputSummariser()->summarise($output, 6);
+
+    expect($result['summary'])->toContain('FAILED 3 tests');
 });

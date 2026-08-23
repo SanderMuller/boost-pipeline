@@ -231,3 +231,24 @@ it('verifies the fix chain, where rewriting steps come first', function (): void
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
 });
+
+it('does not invalidate a run when a rewriting step found nothing to rewrite', function (): void {
+    // A clean `pint` after a passing check changed nothing, so nothing about the
+    // earlier verdict is stale. Keying on the declaration alone would report a
+    // false stale on every green run that carries a fix-mode step.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)
+            ->append(Shell::run('true', id: 'checks'))
+            ->append(Shell::run('true', id: 'rewrites-nothing')->mutating());
+    });
+
+    $run = Run::start($pipeline->walk(), new AlwaysPasses, 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toBeNull()
+        ->and($run->allVerified())->toBeTrue();
+});

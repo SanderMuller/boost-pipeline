@@ -54,10 +54,12 @@ final readonly class OutputSummariser
     private function readable(string $output): string
     {
         // A single line can be megabytes when a tool draws without newlines, and
-        // every pass below copies the string. Cap first: far more than the line
-        // budget can ever show, and bounded.
+        // every pass below copies the string. Cap first — but from both ends: a
+        // head-only cap drops whatever came after it, and what comes last is
+        // usually the verdict, which is the one line worth keeping.
         if (strlen($output) > self::MAX_BYTES) {
-            $output = substr($output, 0, self::MAX_BYTES);
+            $half = intdiv(self::MAX_BYTES, 2);
+            $output = substr($output, 0, $half)."\n".substr($output, -$half);
         }
 
         // CSI (colour, cursor movement) including colon-form SGR colours and

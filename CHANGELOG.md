@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A run's verdicts expire when the working tree changes. Each resolution fingerprints the tree —
-  the commit plus the contents of everything dirty or untracked, ignoring what git ignores — and
+  the commit plus the contents of everything dirty or untracked, ignoring what git ignores, and
+  working before the first commit as well —
   `all_verified` turns false once it moves, with a `stale` key saying whether the edit landed
   during the walk or after it. "This run passed" now means "this passed against the code that is
   on disk".
@@ -51,7 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
   open.
 
-- A run reports itself stale when a step that rewrites code runs after a check has already passed.
+- A run reports itself stale when a step that rewrites code runs after a check has already passed
+  *and actually changed something*. A clean fix-mode step changed nothing, so it invalidates
+  nothing.
   Absorbing the rewrite kept the run looking current while that check described code the run then
   changed — a false green, which is the one thing this package exists not to produce. The ordering
   was previously advice in the docs; it is now enforced.

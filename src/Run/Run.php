@@ -288,16 +288,20 @@ final class Run
 
         // Only a step that said it rewrites code gets its changes absorbed.
         if ($step->mutates()) {
-            // ...but absorbing it does not make an earlier verdict true again. A
-            // check that passed before this step measured different code, so a
-            // rewrite arriving after one is the ordering error the phase defaults
-            // exist to prevent, and the run says so rather than trusting the
-            // config to have got it right.
-            if ($this->hasCheckedAnything()) {
+            $after = $this->tree?->capture();
+
+            // Absorbing a rewrite does not make an earlier verdict true again: a
+            // check that passed before this step measured different code. But a
+            // fix-mode step that found nothing to fix changed nothing, and a
+            // clean `pint` must not invalidate a run — so this turns on the tree
+            // actually having moved, not on the declaration alone.
+            $rewrote = $after !== null && $this->baseline !== null && $after !== $this->baseline;
+
+            if ($rewrote && $this->hasCheckedAnything()) {
                 $this->rewroteAfterChecking = true;
             }
 
-            $this->baseline = $this->tree?->capture() ?? $this->baseline;
+            $this->baseline = $after ?? $this->baseline;
         }
 
         if (! $result->verdict->advancesCursor()) {

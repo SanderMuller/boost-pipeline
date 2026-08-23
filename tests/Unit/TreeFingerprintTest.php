@@ -90,3 +90,21 @@ it('returns null outside a repository rather than inventing a digest', function 
         rmdir($bare);
     }
 });
+
+it('fingerprints a repository that has no commits yet', function (): void {
+    // rev-parse HEAD fails before the first commit. Answering null there turned
+    // expiry off for a whole new repository, which is the opposite of the rule.
+    $fresh = sys_get_temp_dir().'/bp-fp-unborn-'.bin2hex(random_bytes(4));
+    mkdir($fresh);
+    git($fresh, 'init', '--quiet');
+
+    $fingerprint = new GitTreeFingerprint($fresh);
+    $before = $fingerprint->capture();
+
+    file_put_contents($fresh.'/new.php', "<?php\n");
+
+    expect($before)->not->toBeNull()
+        ->and($fingerprint->capture())->not->toBe($before);
+
+    new Process(['rm', '-rf', $fresh])->run();
+});

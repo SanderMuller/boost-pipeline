@@ -36,21 +36,17 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
 
     public function capture(): ?string
     {
-        $head = $this->git(['rev-parse', 'HEAD']);
-
-        // A repository with no commits yet still has a meaningful dirty set, so
-        // only a missing git answers null.
-        if ($head === null) {
-            return null;
-        }
-
+        // Status is the test for "is this a repository at all", not rev-parse:
+        // before the first commit `rev-parse HEAD` fails while the dirty set is
+        // still perfectly meaningful. Treating that as unfingerprintable turned
+        // expiry off for a whole new repository.
         $status = $this->git(['status', '--porcelain=v1', '-z', '--untracked-files=all']);
 
         if ($status === null) {
             return null;
         }
 
-        $parts = [$head, $status];
+        $parts = [$this->git(['rev-parse', 'HEAD']) ?? 'unborn', $status];
 
         foreach ($this->dirtyPaths($status) as $path) {
             $absolute = rtrim($this->workingDirectory, '/').'/'.$path;
