@@ -62,9 +62,8 @@ final readonly class OutputSummariser
             $output = substr($output, 0, $half)."\n".substr($output, -$half);
         }
 
-        // CSI (colour, cursor movement) including colon-form SGR colours and
-        // sequences carrying intermediate bytes, then OSC strings such as
-        // hyperlinks, then any lone escape left over.
+        // CSI (colour, cursor) incl. colon-form SGR, then OSC strings such as
+        // hyperlinks, then any lone escape.
         $stripped = preg_replace(
             '/\e\[[0-9;:?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\\\)?|\e[@-Z\\\\-_]/',
             '',
@@ -72,11 +71,9 @@ final readonly class OutputSummariser
         );
         $output = $stripped ?? $output;
 
-        // Keep only what survived the last carriage return on a line. Not exact
-        // terminal rendering — a terminal overwrites column by column, so
-        // "abc\rxy" leaves "xyc" where this leaves "xy". The case that matters is
-        // a progress line rewritten whole; guessing at partial overwrites would
-        // invent output no tool produced.
+        // Last frame of a rewritten line. Deliberately not column-by-column: a
+        // terminal leaves "xyc" for "abc\rxy" where this leaves "xy", and the case
+        // that matters is a progress line rewritten whole.
         $collapsed = preg_replace('/^.*\r(?!\n)/m', '', $output);
 
         return $collapsed ?? $output;

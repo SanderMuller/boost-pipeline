@@ -59,10 +59,8 @@ final class OpenRun extends Tool
             $payload['notices'] = $run->walk->notices;
         }
 
-        // Separate from notices on purpose. A notice means the config asked for a
-        // gate that will not run, so the run can never be fully verified. This is
-        // only "you will halt at step three" — worth knowing before paying for
-        // steps one and two, but not a reason to call the run unverifiable.
+        // Not a notice: a notice means a declared gate will never run, so the run
+        // cannot be fully verified. This only says where the walk will stop.
         $warnings = $this->preflight->warnings($run->walk);
 
         if ($warnings !== []) {

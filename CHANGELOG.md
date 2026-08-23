@@ -52,9 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
   open.
 
-- A run reports itself stale when a step that rewrites code runs after a check has already passed
-  *and actually changed something*. A clean fix-mode step changed nothing, so it invalidates
-  nothing.
+- A run reports itself stale, naming the step, when a pass measured a tree other than the one on
+  disk. Each pass records what it measured, so the comparison is per receipt: a rewriting step is
+  exempt (it reports that the tool ran, not that the tree is in some state), an acknowledgement and
+  a failure are exempt (neither claims verification), and a receipt replaced by a retry takes the
+  retry's tree with it. Fixing a blocked step and retrying it is therefore not mistaken for
+  tampering, and a clean fix-mode step invalidates nothing.
   Absorbing the rewrite kept the run looking current while that check described code the run then
   changed — a false green, which is the one thing this package exists not to produce. The ordering
   was previously advice in the docs; it is now enforced.

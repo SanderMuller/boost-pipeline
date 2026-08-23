@@ -106,8 +106,8 @@ final readonly class StepPayload
             $envelope['all_verified'] = $run->allVerified();
             $envelope['acknowledged'] = $run->acknowledgedCount();
 
-            // all_verified: false with no reason reads as a bug in the pipeline
-            // rather than as a stale run, and the two need opposite responses.
+            // all_verified: false with no reason reads as a broken pipeline rather
+            // than a stale run, and those need opposite responses.
             if ($run->staleReason() !== null) {
                 $envelope['stale'] = $run->staleReason();
             }

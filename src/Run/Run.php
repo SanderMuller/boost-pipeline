@@ -33,17 +33,23 @@ final class Run
     private RunState $state = RunState::Open;
 
     /**
-     * The tree as it stood after the last resolution, or at the start.
+     * The tree each surviving receipt was measured against, by step id.
      *
-     * It moves forward only where a change is attributable: at the start, and
-     * after a step that DECLARED it rewrites code. Holding the original instead
-     * would report every run using a formatter as stale.
+     * null marks a step exempt from the comparison: a step that rewrites code
+     * reports whether the tool ran, not that the tree is in some state, so its
+     * own writes must not expire it.
+     *
+     * Per receipt rather than one flag for the run, because a receipt is replaced
+     * when its step is retried. A step fails, you fix it, the retry passes — and
+     * nothing is left asserting anything about the old tree. A run-level flag
+     * stayed stuck there and called the run stale for having been fixed.
+     *
+     * @var array<string, string|null>
      */
-    private ?string $baseline;
+    private array $measuredAt = [];
 
-    private bool $unexplainedChange = false;
-
-    private bool $rewroteAfterChecking = false;
+    /** The tree after the last resolution, which is what a fresh run compares to. */
+    private ?string $lastSeen;
 
     private function __construct(
         public readonly string $id,
@@ -51,7 +57,7 @@ final class Run
         private readonly StepRunner $runner,
         private readonly ?TreeFingerprint $tree = null,
     ) {
-        $this->baseline = $this->tree?->capture();
+        $this->lastSeen = $this->tree?->capture();
 
         if ($walk->isEmpty()) {
             $this->state = RunState::Complete;
@@ -99,10 +105,10 @@ final class Run
             return null;
         }
 
-        $this->accountForTree();
+        $measuredAt = $this->tree?->capture();
 
         $result = $this->runner->run($current->step, $this->id);
-        $this->record($result, $current->step);
+        $this->record($result, $current->step, $measuredAt);
 
         return $result;
     }
@@ -119,10 +125,12 @@ final class Run
             throw AcknowledgementNotAllowed::forState($this->state);
         }
 
-        $this->accountForTree();
+        // The agent did its work before calling this, so what is on disk now is
+        // what the skill measured — or produced, where it declared as much.
+        $measuredAt = $this->tree?->capture();
 
         $result = Result::acknowledged($current->step->id(), $summary);
-        $this->record($result, $current->step);
+        $this->record($result, $current->step, $measuredAt);
 
         return $result;
     }
@@ -157,7 +165,6 @@ final class Run
             return false;
         }
 
-        // A receipt is only about the code that was there when the step ran.
         if ($this->staleReason() !== null) {
             return false;
         }
@@ -198,25 +205,23 @@ final class Run
     }
 
     /**
-     * Why the receipts no longer describe the tree, or null when they still do.
-     *
-     * Two different events, and the wording separates them because the fix is
-     * different: an edit DURING the walk means earlier steps ran against code
-     * that has since changed, while an edit after the walk finished means the
-     * whole run describes a tree that no longer exists.
+     * Why a receipt no longer describes the tree, or null when they all still do.
      */
     public function staleReason(): ?string
     {
-        if ($this->unexplainedChange) {
-            return 'The working tree changed during a step that does not declare that it rewrites code, so this run no longer describes the code on disk. Either something edited files mid-run, or a step needs ->mutating(). Open a new run.';
+        $now = $this->tree?->capture();
+
+        if ($now === null) {
+            return null;
         }
 
-        if ($this->rewroteAfterChecking) {
-            return 'A step that rewrites code ran after a check had already passed, so that check describes code this run then changed. Put steps that rewrite code before the ones that check it — the default phase order does. Open a new run.';
-        }
-
-        if ($this->treeHasMoved()) {
-            return 'The working tree changed after this run resolved, so its verdicts no longer describe the code on disk. Open a new run.';
+        foreach ($this->measuredAt as $stepId => $measuredAt) {
+            if ($measuredAt !== null && $measuredAt !== $now) {
+                return sprintf(
+                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Either something edited files, or a step that rewrites code is missing ->mutating() — and a rewrite belongs before the checks that must see it. Open a new run.',
+                    $stepId,
+                );
+            }
         }
 
         return null;
@@ -224,26 +229,17 @@ final class Run
 
     /**
      * Whether the tree differs from the last resolution — the signal `open_run`
-     * uses to decide between resuming this run and starting a fresh one.
+     * uses to choose between resuming this run and starting a fresh one.
      */
     public function treeHasMoved(): bool
     {
-        if (! $this->tree instanceof TreeFingerprint || $this->baseline === null) {
+        if (! $this->tree instanceof TreeFingerprint || $this->lastSeen === null) {
             return false;
         }
 
         $now = $this->tree->capture();
 
-        return $now !== null && $now !== $this->baseline;
-    }
-
-    /**
-     * Whether any step so far produced a verdict about the code rather than
-     * changing it.
-     */
-    private function hasCheckedAnything(): bool
-    {
-        return array_any($this->walk->steps, fn (WalkStep $walkStep) => isset($this->results[$walkStep->step->id()]) && ! $walkStep->step->mutates());
+        return $now !== null && $now !== $this->lastSeen;
     }
 
     public function acknowledgedCount(): int
@@ -254,55 +250,17 @@ final class Run
         ));
     }
 
-    /**
-     * Read the tree at a step boundary and decide whether the difference is
-     * explained.
-     *
-     * A declared-mutating step rebaselines the moment it records, so anything
-     * left over here is a change nothing accounted for. One reading per boundary
-     * is therefore enough — and no guessing from timing, which cannot tell a
-     * formatter apart from an edit made while a step was running.
-     */
-    private function accountForTree(): void
-    {
-        if (! $this->tree instanceof TreeFingerprint) {
-            return;
-        }
-
-        $now = $this->tree->capture();
-
-        if ($now === null) {
-            return;
-        }
-
-        if ($this->baseline !== null && $now !== $this->baseline) {
-            $this->unexplainedChange = true;
-        }
-
-        $this->baseline = $now;
-    }
-
-    private function record(Result $result, Step $step): void
+    private function record(Result $result, Step $step, ?string $measuredAt): void
     {
         $this->results[$result->stepId] = $result;
+        // Only a pass asserts something about the tree. An acknowledgement was
+        // never verified, and a failure or error is already keeping the run from
+        // being green — stamping those just produces a stale message about a
+        // receipt that claims nothing.
+        $assertsTreeState = $result->verdict->isVerified() && ! $step->mutates();
 
-        // Only a step that said it rewrites code gets its changes absorbed.
-        if ($step->mutates()) {
-            $after = $this->tree?->capture();
-
-            // Absorbing a rewrite does not make an earlier verdict true again: a
-            // check that passed before this step measured different code. But a
-            // fix-mode step that found nothing to fix changed nothing, and a
-            // clean `pint` must not invalidate a run — so this turns on the tree
-            // actually having moved, not on the declaration alone.
-            $rewrote = $after !== null && $this->baseline !== null && $after !== $this->baseline;
-
-            if ($rewrote && $this->hasCheckedAnything()) {
-                $this->rewroteAfterChecking = true;
-            }
-
-            $this->baseline = $after ?? $this->baseline;
-        }
+        $this->measuredAt[$result->stepId] = $assertsTreeState ? $measuredAt : null;
+        $this->lastSeen = $this->tree?->capture() ?? $measuredAt ?? $this->lastSeen;
 
         if (! $result->verdict->advancesCursor()) {
             $this->state = $result->verdict->isTerminalForRun()

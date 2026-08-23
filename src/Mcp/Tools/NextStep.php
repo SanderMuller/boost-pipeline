@@ -56,10 +56,8 @@ final class NextStep extends Tool
         return match ($run->state()) {
             RunState::Complete => Response::structured(StepPayload::complete($run)),
             RunState::Awaiting => Response::structured(StepPayload::awaiting($run)),
-            // Retried, not refused. A halt means the tool could not run — a missing
-            // binary, a bad path — and that is exactly the kind of thing the agent
-            // then fixes. Refusing forever meant the only way out was restarting
-            // the server, which in practice means restarting the session.
+            // Retried, not refused: a missing binary is exactly what the agent then
+            // installs, and refusing forever left only a server restart.
             RunState::Halted => $this->resolve($run),
             default => $this->resolve($run),
         };

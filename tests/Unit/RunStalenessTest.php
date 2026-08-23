@@ -6,12 +6,14 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Phases\Defaults\Agent;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Steps\Shell;
+use SanderMuller\BoostPipeline\Steps\Skill;
 
 /** A digest the test moves by hand, so each case says exactly when the tree changed. */
 final class SettableFingerprint implements TreeFingerprint
@@ -115,7 +117,7 @@ it('refuses to verify when a read-only step is the one that changed the tree', f
     $run->resolveCurrentStep();
     $run->resolveCurrentStep();
 
-    expect($run->staleReason())->toContain('does not declare that it rewrites code')
+    expect($run->staleReason())->toContain('Step [first] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -131,7 +133,7 @@ it('refuses to verify when the tree changed between two steps', function (): voi
 
     $run->resolveCurrentStep();
 
-    expect($run->staleReason())->toContain('does not declare that it rewrites code')
+    expect($run->staleReason())->toContain('Step [first] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -146,7 +148,7 @@ it('refuses to verify when the tree changed after the walk finished', function (
 
     $tree->value = 'edited-after';
 
-    expect($run->staleReason())->toContain('after this run resolved')
+    expect($run->staleReason())->toContain('measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -208,7 +210,7 @@ it('refuses to verify when a rewriting step runs after a check already passed', 
     $run->resolveCurrentStep();
     $run->resolveCurrentStep();
 
-    expect($run->staleReason())->toContain('after a check had already passed')
+    expect($run->staleReason())->toContain('Step [checks] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -251,4 +253,79 @@ it('does not invalidate a run when a rewriting step found nothing to rewrite', f
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
+});
+
+it('does not hold a fixed run stale for having been fixed', function (): void {
+    // The fix loop, in place: the step fails, you edit the code, next_step retries
+    // it and it passes. A run-level flag stayed stuck on the edit and reported the
+    // finished run stale — defeating the very loop this release exists to enable.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'only'));
+    });
+
+    $failsUntilFixed = new class implements StepRunner
+    {
+        public function __construct(public int $attempts = 0) {}
+
+        public function run(Step $step, string $runId): Result
+        {
+            $this->attempts++;
+
+            return $this->attempts === 1
+                ? Result::failed($step->id(), 'problems found', 1)
+                : Result::passed($step->id(), 'ok');
+        }
+    };
+
+    $run = Run::start($pipeline->walk(), $failsUntilFixed, 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+
+    $tree->value = 'the-fix';
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toBeNull()
+        ->and($run->allVerified())->toBeTrue();
+});
+
+it('credits a declared mutating skill for the edit it was asked to make', function (): void {
+    // The agent edits during the skill, then calls report_step. Treating that as
+    // unexplained made a /evaluate step permanently stale — and a fixing skill
+    // changing code is the normal case, not the exception.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Agent::class)->append(Skill::run('/evaluate')->mutating());
+    });
+
+    $run = Run::start($pipeline->walk(), new AlwaysPasses, 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+
+    $tree->value = 'fixed-by-evaluate';
+    $run->acknowledgeCurrentStep('fixed two things');
+
+    expect($run->staleReason())->toBeNull();
+});
+
+it('does not treat an acknowledgement as a check a later rewrite invalidates', function (): void {
+    // An acknowledgement was never verified, so a rewrite after one invalidates
+    // nothing. Reporting stale there was a message about a receipt that claims
+    // nothing.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Agent::class)->append(Skill::run('/code-review'));
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'rewrites')->mutating());
+    });
+
+    $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+    $run->acknowledgeCurrentStep('reviewed');
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toBeNull();
 });
