@@ -79,6 +79,11 @@ instruction reaches the agent verbatim in the step payload, so write it for the 
 rather than as a label for a human reading the config. Without one, the step falls back to naming
 the invocation.
 
+Give each step an explicit `id` when several invoke the same skill. An id is derived from the
+invocation when you leave it out, so two `/code-review` steps would both derive `code-review`, and a
+duplicate id throws when the run opens rather than silently overwriting a verdict. Ids also name the
+log files, so pick something you would want to read in `storage/logs/pipeline/`.
+
 ---
 
 ## A run, start to finish

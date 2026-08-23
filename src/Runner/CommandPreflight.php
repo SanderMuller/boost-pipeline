@@ -10,10 +10,8 @@ use SanderMuller\BoostPipeline\Walk\Walk;
 /**
  * Warns at `open_run` about a step whose binary is not there.
  *
- * Nothing used to check until the cursor arrived, so a walk paid for every
- * earlier step before finding out that step three could not run. A real run lost
- * two minutes of server-verified receipts that way — the halt was correct, it was
- * just far too late to be useful.
+ * Without this, a walk pays for every earlier step before finding out that step
+ * three cannot run. Halting there is correct and far too late to be useful.
  *
  * Deliberately conservative: it only checks a command whose first token is a path
  * (`vendor/bin/pint`, `node_modules/.bin/oxlint`), because that is the case a

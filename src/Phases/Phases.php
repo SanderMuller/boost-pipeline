@@ -16,13 +16,14 @@ use SanderMuller\BoostPipeline\Phases\Defaults\Tests;
  * The ordered set of phases. A phase is nothing but a named, ordered group of
  * steps, which is why a custom one costs no extra machinery.
  *
- * Configurability was removed in 0.4.0 and restored here. The evidence for
- * removing it was that no consumer called it — but every consumer at the time was
- * running a pipeline of shell checks, where the five shipped names already fit.
- * A pipeline that sequences review work has no such luck: its steps are not
- * refactoring or formatting or tests, and grouping six review lenses under one
- * phase called Agent tells a reader nothing. The package cannot know a project's
- * review vocabulary, so it stops pretending the five defaults are everyone's.
+ * The set is open because the package cannot know a project's phase vocabulary.
+ * A pipeline of shell checks fits the five defaults. A pipeline that sequences
+ * review work does not: its steps are not refactoring or formatting or tests, and
+ * six review lenses all reporting phase Agent tell a reader nothing.
+ *
+ * Low usage is not a reason to close it again. Configuring phases only matters to
+ * the pipelines whose steps the defaults do not describe, so counting callers
+ * measures which pipelines exist, not whether the seam earns its place.
  */
 final class Phases
 {
