@@ -5,6 +5,69 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.0 - 2026-08-23
+
+<!-- verified-sha: 7610fef462af75763e8d8b643d19bfabc9843ab2 -->
+A run's verdicts now expire, and a session is no longer limited to a single run. Before this, a run
+that went green stayed green while you edited the code it was about — so "this run passed" meant
+"this passed at some earlier moment", which is not something a gate can act on. And because
+`open_run` never started a second run, the fix loop that is the whole point of a verification
+pipeline needed a server restart.
+
+### Breaking
+
+- `Step` gained `mutates(): bool`. `Shell` and `Skill` implement it; add it to your own
+  implementations. `OpenRun` takes a `CommandPreflight` as a second constructor argument, which
+  matters only if you build the tool yourself rather than resolving it from the container. See
+  [UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md).
+
+### Added
+
+- **A pass records the tree it measured, and expires when that tree changes.** The fingerprint is
+  the commit plus the contents of everything dirty or untracked, with ignored paths excluded so the
+  run's own logs and caches never count. `all_verified` turns false once a pass no longer matches
+  what is on disk, and a `stale` key names the step.
+  
+  Only a pass records a tree. A rewriting step is exempt — its verdict says the tool ran, not that
+  the tree is in some state. An acknowledgement and a failure are exempt too, since neither claims
+  verification. So fixing a blocked step and retrying it is not mistaken for tampering.
+  
+- **`open_run` starts a fresh run once the tree has changed**, and returns the run already open
+  while it has not. Run, see a failure, change the code, verify again — without restarting anything.
+  
+- **A step declares whether it rewrites code**, with `->mutating()`. Attribution is by declaration,
+  not by timing: "whatever step was running must have done it" would absorb an edit made *while* a
+  step ran, and a blocked run is exactly when you go and change something. A change nothing
+  declared is reported rather than explained away, which makes "a gate uses the tool's check mode,
+  never its fix mode" something the package keeps rather than a note in a config file.
+  
+- **`Shell::run(...)->timeout(seconds)`** per step. One cap for every step has to be set for the
+  slowest, which leaves it useless for the rest — a real suite measured 336s against the 540s
+  default.
+  
+- **`open_run` warns about a missing binary**, so a walk no longer pays for every earlier step
+  before discovering that step three cannot run.
+  
+
+### Changed
+
+- **`next_step` retries a halted step** instead of refusing for the rest of the session. An
+  `error` means the tool could not run, which is the kind of thing that then gets fixed; the
+  cursor stays put, so only that step re-runs and earlier verdicts stand.
+  
+- **A step summary is readable for tools that draw.** Escape sequences and carriage-return redraws
+  are stripped, and truncation keeps the head *and* the tail. A test-runner summary previously
+  arrived as an escape-wrapped dot repeated to the limit with the verdict pushed out of view, and a
+  refactoring tool's was almost entirely progress frames. The summary is the only step output
+  visible without opening a log.
+  
+
+### Requirements
+
+Unchanged: PHP 8.4+, Laravel 12.41+ or 13.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.2.0...v0.3.0
+
 ## [Unreleased]
 
 ### Breaking
@@ -21,29 +84,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `all_verified` turns false once it moves, with a `stale` key saying whether the edit landed
   during the walk or after it. "This run passed" now means "this passed against the code that is
   on disk".
-
+  
   Attribution is by declaration, not timing. A step that rewrites code says so with
   `->mutating()` and its writes are absorbed; a change nothing declared is a finding, because
   either the step lied or something edited files mid-run, and both mean the verdict is not proven
   for the code that now exists. Timing cannot separate those — a blocked run is precisely when
   files get edited, against steps that take half a minute — so the config decides rather than the
   clock. It also costs one tree reading per step instead of two.
-
+  
   No git means no fingerprint and no expiry, rather than a run that can never be verified.
-
+  
 - `open_run` starts a fresh run when the tree has changed since the open one, and returns the
   existing run while it has not. A session was previously limited to exactly one run, which made
   the fix loop — run, see a failure, fix it, verify again — impossible without restarting the
   server, and in Claude Code that means restarting the session.
-
+  
 - `Shell::run(...)->timeout(seconds)` overrides the runner's 540s cap for one step. A single cap has
   to be set for the slowest step, which leaves it far too loose for every other — a real suite
   measured 336s against that default.
-
+  
 - `open_run` returns a `warnings` array naming any step whose binary is not on disk. A walk used to
   pay for every earlier step before finding out step three could not run; a real run lost two
   minutes of server-verified receipts that way. Only commands whose first token is a relative path
   are checked, since PATH-resolved ones cannot be answered honestly.
+  
 
 ### Changed
 
@@ -51,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool could not run, which is the kind of thing that then gets fixed; the cursor stays on the
   step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
   open.
-
+  
 - A run reports itself stale, naming the step, when a pass measured a tree other than the one on
   disk. Each pass records what it measured, so the comparison is per receipt: a rewriting step is
   exempt (it reports that the tool ran, not that the tree is in some state), an acknowledgement and
@@ -61,7 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Absorbing the rewrite kept the run looking current while that check described code the run then
   changed — a false green, which is the one thing this package exists not to produce. The ordering
   was previously advice in the docs; it is now enforced.
-
+  
 - A step summary strips the escape sequences and carriage-return redraws a terminal would have
   consumed. A tool that draws returned nothing usable over MCP: a PHPUnit summary arrived as an
   escape-wrapped dot repeated to the truncation limit with the verdict pushed out of view, and a
@@ -70,11 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colours, OSC strings such as hyperlinks, and lone escapes; carriage-return handling keeps the
   last frame of a line rather than emulating column-by-column overwrite. Input is capped before
   scanning, so a tool that draws megabytes onto one line cannot make this expensive.
-
+  
 - A truncated step summary keeps the head *and* the tail of the output, with an inline count of the
   omitted lines. Tools disagree about where the useful part is — static analysis leads with
   findings, a test runner leads with progress noise and ends with the failure — so head-only
   truncation dropped exactly what mattered for the second kind.
+  
 
 ## v0.2.0 - 2026-08-23
 
