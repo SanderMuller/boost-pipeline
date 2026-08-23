@@ -25,6 +25,8 @@ final class Shell implements Step
 
     private bool $mutates = false;
 
+    private ?float $timeoutSeconds = null;
+
     private function __construct(
         private readonly string $command,
         private readonly string $id,
@@ -112,6 +114,26 @@ final class Shell implements Step
     public function mutates(): bool
     {
         return $this->mutates;
+    }
+
+    /**
+     * Override the runner's timeout for this step alone.
+     *
+     * One cap for every step means it is set for the slowest one, which makes it
+     * useless for the rest: a real suite measured 336s against a 540s default, so
+     * the step that needs the headroom is also the step whose runaway takes nine
+     * minutes to report.
+     */
+    public function timeout(float $seconds): self
+    {
+        $this->timeoutSeconds = $seconds;
+
+        return $this;
+    }
+
+    public function timeoutSeconds(): ?float
+    {
+        return $this->timeoutSeconds;
     }
 
     public function before(): void {}

@@ -76,3 +76,15 @@ describe('verdicts', function (): void {
             ->and($result->toArray()['files_inspected'])->toBe(0);
     });
 });
+
+it('lets a step set its own timeout, and reports none when it has not', function (): void {
+    expect(Shell::run('php artisan test')->timeoutSeconds())->toBeNull()
+        ->and(Shell::run('php artisan test')->timeout(1800.0)->timeoutSeconds())->toBe(1800.0);
+});
+
+it('declares mutation only when asked', function (): void {
+    expect(Shell::run('vendor/bin/pint --test')->mutates())->toBeFalse()
+        ->and(Shell::run('vendor/bin/pint')->mutating()->mutates())->toBeTrue()
+        ->and(Skill::run('/code-review')->mutates())->toBeFalse()
+        ->and(Skill::run('/evaluate')->mutating()->mutates())->toBeTrue();
+});

@@ -79,7 +79,12 @@ final readonly class ProcessStepRunner implements StepRunner
         // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
         // scope command that silently matches nothing, permanently disables the
         // gate — a false green of exactly the kind this pipeline exists to stop.
-        $process = $this->process($step->id(), $step->command(), $this->timeoutSeconds, $step->env());
+        $process = $this->process(
+            $step->id(),
+            $step->command(),
+            $step->timeoutSeconds() ?? $this->timeoutSeconds,
+            $step->env(),
+        );
 
         if ($process instanceof Result) {
             return $process;
