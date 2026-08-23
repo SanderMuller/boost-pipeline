@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Contracts\Phase;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Enums\Verdict;
@@ -16,6 +17,20 @@ use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
+
+/** A phase no pipeline registers, so steps declared into it are always dropped. */
+final class UnregisteredPhase implements Phase
+{
+    public function id(): string
+    {
+        return 'unregistered';
+    }
+
+    public function name(): string
+    {
+        return 'Unregistered';
+    }
+}
 
 /** A runner whose verdicts the test dictates, keyed by step id. */
 final class FakeRunner implements StepRunner
@@ -198,12 +213,12 @@ it('is complete immediately when the pipeline has no steps', function (): void {
 });
 
 it('refuses to claim all_verified when a declared step was dropped before the walk began', function (): void {
-    // The dangerous shape: the transition is dropped (anchors not adjacent), every
-    // remaining step passes, and the run would otherwise report a fully verified
-    // pass while a gate the config declared never ran at all.
+    // The dangerous shape: a step is declared into a phase that is not registered,
+    // so it is dropped, every remaining step passes, and the run would otherwise
+    // report a fully verified pass while a gate the config declared never ran.
     $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
         $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
-        $steps->between(Formatting::class, Agent::class, Shell::run('true', id: 'never-ran'));
+        $steps->in(UnregisteredPhase::class)->append(Shell::run('true', id: 'never-ran'));
     });
 
     $run = Run::start($pipeline->walk(), new FakeRunner, 'r-dropped');

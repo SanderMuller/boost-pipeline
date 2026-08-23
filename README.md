@@ -252,18 +252,9 @@ Pipeline::configure()
         ->append(Shell::run('php artisan richter:detect-changes --fail-on=high')));
 ```
 
-A step can also be anchored *between* two phases. It is an ordinary step with a different attach
-position:
-
-```php
-$steps->between(Formatting::class, StaticAnalysis::class,
-    Shell::run('git diff --quiet -- composer.lock'));
-```
-
-A dropped step is always reported. If a transition's anchors are missing or not adjacent, or a
-step is declared into a phase you removed, that step does not run: the drop appears in `open_run`'s
-`notices` and forces `all_verified: false`. A gate you declared but never ran must not look like a
-clean run.
+A dropped step is always reported. Declare a step into a phase that is not registered and it does
+not run: the drop appears in `open_run`'s `notices` and forces `all_verified: false`. A gate you
+declared but never ran must not look like a clean run.
 
 ---
 

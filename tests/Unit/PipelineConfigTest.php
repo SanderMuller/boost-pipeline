@@ -118,46 +118,6 @@ it('prepend puts a step first within its phase', function (): void {
         ->toBe(['typecheck', 'phpstan']);
 });
 
-it('splices a transition step in at the join between its two anchors', function (): void {
-    $walk = Pipeline::configure()
-        ->withSteps(function (Steps $steps): void {
-            $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
-            $steps->in(StaticAnalysis::class)->append(Shell::run('composer phpstan'));
-            $steps->between(
-                Formatting::class,
-                StaticAnalysis::class,
-                Shell::run('git diff --quiet -- composer.json composer.lock', id: 'deps-unchanged'),
-            );
-        })
-        ->walk();
-
-    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
-        ->toBe(['pint', 'deps-unchanged', 'phpstan'])
-        ->and($walk->notices)
-        ->toBeEmpty();
-});
-
-it('drops a transition whose anchor was removed, and reports it rather than promoting it', function (): void {
-    $walk = Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->remove(StaticAnalysis::class);
-        })
-        ->withSteps(function (Steps $steps): void {
-            $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
-            $steps->between(
-                Formatting::class,
-                StaticAnalysis::class,
-                Shell::run('true', id: 'deps-unchanged'),
-            );
-        })
-        ->walk();
-
-    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
-        ->and($walk->notices)->toHaveCount(1)
-        ->and($walk->notices[0])->toContain('deps-unchanged')
-        ->and($walk->notices[0])->toContain('dropped');
-});
-
 it('fails loudly on a duplicate step id across phases', function (): void {
     Pipeline::configure()
         ->withSteps(function (Steps $steps): void {
@@ -166,51 +126,6 @@ it('fails loudly on a duplicate step id across phases', function (): void {
         })
         ->walk();
 })->throws(InvalidPipelineConfigException::class, 'Duplicate step id [pint]');
-
-it('reports a transition whose anchors are registered but not adjacent', function (): void {
-    $walk = Pipeline::configure()
-        ->withSteps(function (Steps $steps): void {
-            $steps->in(Refactoring::class)->append(Shell::run('vendor/bin/rector process --dry-run'));
-            $steps->in(StaticAnalysis::class)->append(Shell::run('composer phpstan'));
-            // Formatting sits between these two, so there is no such join.
-            $steps->between(Refactoring::class, StaticAnalysis::class, Shell::run('true', id: 'non-adjacent'));
-        })
-        ->walk();
-
-    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))
-        ->toBe(['rector', 'phpstan'])
-        ->and($walk->notices)->toHaveCount(1)
-        ->and($walk->notices[0])->toContain('non-adjacent')
-        ->and($walk->notices[0])->toContain('not adjacent')
-        ->and($walk->notices[0])->toContain('Formatting');
-});
-
-it('reports a transition whose anchors are the wrong way round', function (): void {
-    $walk = Pipeline::configure()
-        ->withSteps(function (Steps $steps): void {
-            $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
-            $steps->between(StaticAnalysis::class, Formatting::class, Shell::run('true', id: 'reversed'));
-        })
-        ->walk();
-
-    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
-        ->and($walk->notices)->toHaveCount(1)
-        ->and($walk->notices[0])->toContain('reversed')
-        ->and($walk->notices[0])->toContain('comes before');
-});
-
-it('names the missing anchor precisely when only one is registered', function (): void {
-    $walk = Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->remove(Tests::class);
-        })
-        ->withSteps(function (Steps $steps): void {
-            $steps->between(StaticAnalysis::class, Tests::class, Shell::run('true', id: 'orphan'));
-        })
-        ->walk();
-
-    expect($walk->notices[0])->toContain('[Tests] is not registered');
-});
 
 it('says "after itself" rather than "not registered" for a self-anchor', function (): void {
     Pipeline::configure()
