@@ -42,7 +42,7 @@ trait PipelineTool
             'state' => $schema->string()->description(
                 'One of: open, running, awaiting, blocked, halted, complete. "complete" means the walk finished, NOT that everything passed.'
             ),
-            'position' => $schema->string()->description('Cursor position, as "n/total".'),
+            'position' => $schema->string()->description('Cursor position in steps, as "n/total", or "n-m/total" for a parallel group. Counts steps, not remaining calls.'),
             'all_verified' => $schema->boolean()->description(
                 'Present once the run has any result, in any state. True only when the walk finished AND every step was a pass the server itself verified against the code now on disk.'
             ),

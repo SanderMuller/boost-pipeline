@@ -374,6 +374,12 @@ run able to write, a stale report during a run can only mean something outside i
 That is a reason to prefer check mode beyond the obvious one, and a reason to keep a fix-mode step
 out of a pipeline whose receipt you intend to gate on.
 
+Inside a parallel group the mechanism can say a write happened and not which step did it. Every
+step in a group measures the same tree from before the group ran, so a stale report names the first
+of them that passed, whoever wrote. The message says so rather than letting the named step read as
+proof. It still fails closed: the run is not verified, and `pipeline:verify` exits 1. This is the
+undeclared case — a step that declares `->mutating()` cannot join a group at all.
+
 Order matters, and the run enforces it rather than asking nicely. Each pass records the tree it
 measured, so a rewrite landing after a check has already passed leaves that check describing code
 the run then changed, and the run says which step it was. Rewrite first, check second, which is
@@ -485,6 +491,7 @@ inspected nothing reports it: *"Inspected 0 files … passed without proving any
 |---|---|
 | `open_run` | Starts a run, returns the first step. Idempotent. |
 | `next_step` | Resolves the current position, returns the next, or the same one again. |
+| — | `position` counts steps, so a group reports the range it covers (`2-3/7`). It is not a count of remaining calls. |
 | `report_step` | Acknowledges a skill step. Only valid while `awaiting`. |
 | `status` | Position, per-step verdicts, verified versus acknowledged. |
 

@@ -116,6 +116,18 @@ final readonly class Walk
         return $this->steps[$cursor] ?? null;
     }
 
+    /** Whether the step shares its position with others, so it ran alongside them. */
+    public function isGrouped(string $stepId): bool
+    {
+        foreach ($this->steps as $walkStep) {
+            if ($walkStep->step->id() === $stepId) {
+                return $walkStep->batchId !== null;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Every step sharing the position at $cursor, in declaration order.
      *

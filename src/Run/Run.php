@@ -99,9 +99,24 @@ final class Run
         return $this->walk->positionAt($this->cursor);
     }
 
+    /**
+     * Where the cursor is, counted in steps.
+     *
+     * A parallel group reports the range it covers — `2-3/7` — because a single
+     * number there reads like a count of remaining handovers and is not one: a
+     * seven-step walk holding two groups takes five calls, not seven.
+     */
     public function position(): string
     {
-        return sprintf('%d/%d', min($this->cursor + 1, $this->walk->count()), $this->walk->count());
+        $total = $this->walk->count();
+        $first = min($this->cursor + 1, $total);
+        $width = count($this->walk->positionAt($this->cursor));
+
+        if ($width <= 1) {
+            return sprintf('%d/%d', $first, $total);
+        }
+
+        return sprintf('%d-%d/%d', $first, min($this->cursor + $width, $total), $total);
     }
 
     /**
@@ -354,8 +369,14 @@ final class Run
         foreach ($this->measuredAt as $stepId => $measuredAt) {
             if ($measuredAt !== null && $measuredAt !== $now) {
                 return sprintf(
-                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Either something edited files, or a step that rewrites code is missing ->mutating() — and a rewrite belongs before the checks that must see it. Open a new run.',
+                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Either something edited files, or a step that rewrites code is missing ->mutating() — and a rewrite belongs before the checks that must see it.%s Open a new run.',
                     $stepId,
+                    // Naming a step in a group would read as identifying the writer.
+                    // Every step in a group measures the same tree from before the
+                    // group ran, so the one named is simply the first that passed.
+                    $this->walk->isGrouped($stepId)
+                        ? ' That step ran in a parallel group, so it is the first of the group that passed rather than the one identified as writing: the group shares a single measurement and cannot tell its members apart.'
+                        : '',
                 );
             }
         }

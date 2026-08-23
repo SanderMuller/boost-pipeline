@@ -3,12 +3,17 @@
 declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Contracts\Step;
+use SanderMuller\BoostPipeline\Contracts\StepRunner;
+use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Defaults\Agent;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
 use SanderMuller\BoostPipeline\Phases\StepCollection;
 use SanderMuller\BoostPipeline\Phases\Steps;
+use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
@@ -18,6 +23,16 @@ use SanderMuller\BoostPipeline\Walk\WalkStep;
  * enforced when the config loads, not when the run reaches it, so a bad group
  * names its offending step before any work is paid for.
  */
+/** @return list<WalkStep> */
+/** Passes everything, so the tests can be about position and staleness. */
+final class PassingRunner implements StepRunner
+{
+    public function run(Step $step, string $runId): Result
+    {
+        return Result::passed($step->id(), 'ok');
+    }
+}
+
 /** @return list<WalkStep> */
 function parallelWalk(Closure $group): array
 {
@@ -142,4 +157,69 @@ it('does not put a skill step anywhere near a group by accident', function (): v
 
     expect($walk->positionAt(2))->toHaveCount(1)
         ->and($walk->positionAt(2)[0]->step->id())->toBe('evaluate');
+});
+
+it('reports a group as the range of steps it covers', function (): void {
+    // A single number here reads as a count of handovers left and is not one: a
+    // three-step walk holding one group of two takes two calls, not three.
+    $run = Run::start(
+        Pipeline::configure()
+            ->withSteps(function (Steps $steps): void {
+                $steps->in(Formatting::class)->append(Shell::run('true', id: 'lone'));
+                $steps->in(StaticAnalysis::class)->parallel(function (StepCollection $steps): void {
+                    $steps->append(Shell::run('true', id: 'a'));
+                    $steps->append(Shell::run('true', id: 'b'));
+                });
+            })
+            ->walk(),
+        new PassingRunner,
+        'r-position',
+    );
+
+    expect($run->position())->toBe('1/3');
+
+    $run->resolveCurrent();
+
+    expect($run->position())->toBe('2-3/3');
+
+    $run->resolveCurrent();
+
+    expect($run->position())->toBe('3/3');
+});
+
+it('says a stale verdict inside a group cannot name the writer', function (): void {
+    // Every step in a group measures the same tree from before the group ran, so
+    // the step named is the first of the group that passed. Reading it as the
+    // identified writer would be reading more than the mechanism knows.
+    $tree = new class implements TreeFingerprint
+    {
+        public string $digest = 'tree-a';
+
+        public function capture(): string
+        {
+            return $this->digest;
+        }
+    };
+
+    $run = Run::start(
+        Pipeline::configure()
+            ->withSteps(function (Steps $steps): void {
+                $steps->in(StaticAnalysis::class)->parallel(function (StepCollection $steps): void {
+                    $steps->append(Shell::run('true', id: 'a'));
+                    $steps->append(Shell::run('true', id: 'b'));
+                });
+            })
+            ->walk(),
+        new PassingRunner,
+        'r-stale-group',
+        tree: $tree,
+    );
+
+    $run->resolveCurrent();
+
+    $tree->digest = 'tree-b';
+
+    expect($run->verification()['stale'])->toContain('parallel group')
+        ->and($run->verification()['stale'])->toContain('cannot tell its members apart')
+        ->and($run->verification()['all_verified'])->toBeFalse();
 });
