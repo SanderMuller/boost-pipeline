@@ -7,28 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- A run's log files are now named after the run id the server reports. The service provider used
-  to mint a second id of its own and hand it to the step runner, so every log was named after an
-  id no response ever mentioned, and the id in a payload could not be used to find that run's
-  logs. The provider's id was also scoped to the process rather than to the run, so any second run
-  through the same runner reused the first run's filenames. `RunManager` keeps one run and its
-  `open()` is idempotent, so the MCP path could not reach that second run — it was latent, not
-  live.
-
-- A log filename now reduces the run id and step id to filename-safe text. Only a derived step id
-  was slugged, so an explicit `Shell::run(id: ...)` reached the path verbatim and could put
-  separators or `..` into it. Ids that get rewritten also carry a short hash, so two ids that
-  differ only in stripped characters keep separate files.
-
-### Changed
-
-- **Breaking:** `StepRunner::run()` takes the run id as a second argument,
-  `run(Step $step, string $runId)`. The id now flows from `Run`, which owns it, to the only place
-  that uses it. `ProcessStepRunner`'s `runId` constructor argument is gone. An implementation of
-  the interface needs the extra parameter; a consumer that only configures steps is unaffected.
-
 ## v0.1.0 - 2026-08-22
 
 First release. A verification pipeline that runs as an MCP server: the server executes each
