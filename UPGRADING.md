@@ -2,7 +2,33 @@
 
 ## From 0.4 to 0.5
 
-Additive. No migration needed.
+### Changed
+
+- `Skill::run()`'s third parameter is renamed from `description` to `instruction`. Only affects code
+  that passed it by name.
+
+  ```php
+  // before
+  Skill::run('/code-review', description: 'Review the error handling.');
+
+  // after
+  Skill::run('/code-review', instruction: 'Review the error handling.');
+  ```
+
+  Worth knowing why, because the behaviour changed too: nothing ever sent that string to the agent.
+  `description()` was read only by `WalkStep::toArray()`, which had no callers, so the argument was
+  write-only. It now reaches the agent in the step payload as `instruction`, which is what it was
+  always for — a step that says "review only the error handling in files changed since main" narrows
+  attention the way a bare `/code-review` cannot.
+
+  `Step::description()` is unchanged on the contract, and `Shell` still uses it as a description.
+
+- The `note` on a skill step's payload is reworded. It used to say only that the step is "recorded as
+  acknowledged, not verified"; it now leads with the guarantee that exists — the step arrived on its
+  own, in order, and nothing follows until it resolves. If you assert on that string, update the
+  expectation.
+
+### Added (no migration needed)
 
 `Pipeline::withPhases()` and `Pipeline::phases()` are back, with `Phases::append()`, `prepend()`,
 `remove()`, `moveAfter()` and the `PhasePosition` class. If you migrated away from them for 0.4,
