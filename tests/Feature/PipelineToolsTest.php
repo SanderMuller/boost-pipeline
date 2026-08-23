@@ -176,7 +176,7 @@ it('awaits a skill step, holds until report_step, then completes', function (): 
     PipelineServer::tool(NextStep::class)
         ->assertSee('"state":"awaiting"')
         ->assertSee('evaluate')
-        ->assertSee('acknowledged, not verified');
+        ->assertSee('acknowledged rather than verified');
 
     // Calling next_step again must not advance past an unacknowledged skill step.
     PipelineServer::tool(NextStep::class)->assertSee('"state":"awaiting"');

@@ -155,7 +155,21 @@ final readonly class StepPayload
 
         if ($current->step instanceof Skill) {
             $step['invoke'] = $current->step->invocation();
-            $step['note'] = 'Acknowledge with report_step when done. This step is recorded as acknowledged, not verified.';
+
+            // The instruction IS the product. A step handed over as a bare
+            // invocation makes the agent run a broad skill, which then presents
+            // its own list of concerns — reproducing inside the step the wall of
+            // context the cursor exists to break up. This field was reachable
+            // from config and read by nothing, so the narrowing never happened.
+            $step['instruction'] = $current->step->description();
+
+            // Says what the server guarantees rather than what it cannot do.
+            // "Recorded as acknowledged, not verified" is true, and repeating it
+            // as the only note on every step framed the normal outcome for
+            // judgement work as a shortfall.
+            $step['note'] = 'Do this step now, then call report_step. Nothing else is handed over until you do. '
+                .'The server guarantees this step was delivered on its own and in order — not that its finding is correct, '
+                .'so the verdict is acknowledged rather than verified.';
         }
 
         return ['step' => $step];

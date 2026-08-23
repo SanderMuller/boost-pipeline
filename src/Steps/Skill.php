@@ -20,14 +20,22 @@ final readonly class Skill implements Step
     private function __construct(
         private string $invocation,
         private string $id,
-        private ?string $description,
+        private ?string $instruction,
         private bool $mutates = false,
         private ?string $proof = null,
     ) {}
 
-    public static function run(string $invocation, ?string $id = null, ?string $description = null): self
+    /**
+     * @param  string|null  $instruction  What this step is for, handed to the agent verbatim.
+     *                                    This is the focus mechanism: a step that says
+     *                                    "review only the error handling in files changed
+     *                                    since main" narrows attention the way a broad
+     *                                    skill invocation cannot. Reaches the agent in the
+     *                                    step payload, so write it for the agent to act on.
+     */
+    public static function run(string $invocation, ?string $id = null, ?string $instruction = null): self
     {
-        return new self($invocation, $id ?? self::deriveId($invocation), $description);
+        return new self($invocation, $id ?? self::deriveId($invocation), $instruction);
     }
 
     /**
@@ -42,7 +50,7 @@ final readonly class Skill implements Step
      */
     public function mutating(): self
     {
-        return new self($this->invocation, $this->id, $this->description, true, $this->proof);
+        return new self($this->invocation, $this->id, $this->instruction, true, $this->proof);
     }
 
     /**
@@ -62,7 +70,7 @@ final readonly class Skill implements Step
      */
     public function proving(string $command): self
     {
-        return new self($this->invocation, $this->id, $this->description, $this->mutates, $command);
+        return new self($this->invocation, $this->id, $this->instruction, $this->mutates, $command);
     }
 
     public function proof(): ?string
@@ -80,9 +88,10 @@ final readonly class Skill implements Step
         return $this->id;
     }
 
+    /** The instruction where one was given, and a bare invocation otherwise. */
     public function description(): string
     {
-        return $this->description ?? "Invoke {$this->invocation}";
+        return $this->instruction ?? "Invoke {$this->invocation}";
     }
 
     public function kind(): StepKind
