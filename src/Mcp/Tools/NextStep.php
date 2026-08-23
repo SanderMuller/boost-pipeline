@@ -56,7 +56,11 @@ final class NextStep extends Tool
         return match ($run->state()) {
             RunState::Complete => Response::structured(StepPayload::complete($run)),
             RunState::Awaiting => Response::structured(StepPayload::awaiting($run)),
-            RunState::Halted => Response::error($this->explainHalt($run)),
+            // Retried, not refused. A halt means the tool could not run — a missing
+            // binary, a bad path — and that is exactly the kind of thing the agent
+            // then fixes. Refusing forever meant the only way out was restarting
+            // the server, which in practice means restarting the session.
+            RunState::Halted => $this->resolve($run),
             default => $this->resolve($run),
         };
     }
@@ -78,20 +82,12 @@ final class NextStep extends Tool
         // check look like a broken server and invite the client to retry it.
         if ($result->verdict === Verdict::Error) {
             return Response::error(sprintf(
-                "Step [%s] could not run: %s\nRun state: halted — calling again will not change this.",
+                "Step [%s] could not run: %s\nRun state: halted. The cursor stays here — fix what stopped it and call next_step again.",
                 $result->stepId,
                 $result->reason ?? $result->summary,
             ));
         }
 
         return Response::structured(StepPayload::afterResolution($run, $result));
-    }
-
-    private function explainHalt(Run $run): string
-    {
-        $stepId = $run->currentStep()?->step->id() ?? 'unknown';
-        $reason = $run->resultFor($stepId)->reason ?? 'see status for detail';
-
-        return "This run halted on step [{$stepId}]: {$reason}. A tool that could not run is not a tool that found nothing — calling again changes nothing.";
     }
 }
