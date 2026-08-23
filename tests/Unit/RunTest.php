@@ -23,7 +23,7 @@ final class FakeRunner implements StepRunner
     /** @param array<string, Verdict> $verdicts */
     public function __construct(private array $verdicts = [], public int $calls = 0) {}
 
-    public function run(Step $step): Result
+    public function run(Step $step, string $runId): Result
     {
         $this->calls++;
 

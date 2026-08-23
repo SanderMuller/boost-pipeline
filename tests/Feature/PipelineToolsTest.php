@@ -61,7 +61,7 @@ beforeEach(function (): void {
     {
         public function __construct(private VerdictScript $script) {}
 
-        public function run(Step $step): Result
+        public function run(Step $step, string $runId): Result
         {
             return match ($this->script->for($step->id())) {
                 Verdict::Failed => Result::failed($step->id(), 'problems found', 1, filesInspected: 0),

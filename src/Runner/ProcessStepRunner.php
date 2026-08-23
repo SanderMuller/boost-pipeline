@@ -40,11 +40,10 @@ final readonly class ProcessStepRunner implements StepRunner
         private LogWriter $logs,
         private OutputSummariser $summariser,
         private EnvironmentScrubber $environment,
-        private string $runId,
         private float $timeoutSeconds = self::DEFAULT_TIMEOUT_SECONDS,
     ) {}
 
-    public function run(Step $step): Result
+    public function run(Step $step, string $runId): Result
     {
         if ($step->kind() !== StepKind::Shell || ! $step instanceof Shell) {
             // A skill step is resolved by the agent acknowledging it, never here.
@@ -57,7 +56,7 @@ final readonly class ProcessStepRunner implements StepRunner
             return Result::error($step->id(), "Step setup failed: {$throwable->getMessage()}");
         }
 
-        $result = $this->execute($step);
+        $result = $this->execute($step, $runId);
 
         try {
             $step->after($result);
@@ -68,7 +67,7 @@ final readonly class ProcessStepRunner implements StepRunner
         return $result;
     }
 
-    private function execute(Shell $step): Result
+    private function execute(Shell $step, string $runId): Result
     {
         $scope = $this->resolveScope($step);
 
@@ -87,7 +86,7 @@ final readonly class ProcessStepRunner implements StepRunner
         }
 
         $output = $this->combinedOutput($process);
-        $logPath = $this->logs->write($this->runId, $step->id(), $output);
+        $logPath = $this->logs->write($runId, $step->id(), $output);
         $exitCode = $process->getExitCode() ?? 1;
 
         if (in_array($exitCode, self::UNRUNNABLE_EXIT_CODES, true)) {

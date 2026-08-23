@@ -24,7 +24,7 @@ function toolNamed(string $name): Tool
         Pipeline::configure(),
         new class implements StepRunner
         {
-            public function run(Step $step): Result
+            public function run(Step $step, string $runId): Result
             {
                 return Result::passed($step->id(), 'ok');
             }

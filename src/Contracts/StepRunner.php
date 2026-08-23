@@ -15,5 +15,12 @@ use SanderMuller\BoostPipeline\Results\Result;
  */
 interface StepRunner
 {
-    public function run(Step $step): Result;
+    /**
+     * @param  string  $runId  The id of the run this step belongs to. Passed in
+     *                         rather than held by the runner so that anything the
+     *                         runner writes is named after the run the agent is
+     *                         told about, and a second run cannot overwrite the
+     *                         first one's artifacts.
+     */
+    public function run(Step $step, string $runId): Result;
 }

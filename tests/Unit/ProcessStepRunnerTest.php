@@ -20,10 +20,19 @@ beforeEach(function (): void {
         logs: new LogWriter($this->logDir),
         summariser: new OutputSummariser,
         environment: new EnvironmentScrubber(sys_get_temp_dir()),
-        runId: 'r-test',
         timeoutSeconds: 20.0,
     );
 });
+
+/**
+ * The runner takes the run id per call, so every test passes the same one and log
+ * names stay predictable. `RunLogNamingTest` is what proves the id actually comes
+ * from the run rather than from anywhere else.
+ */
+function runStep(ProcessStepRunner $runner, Step $step): Result
+{
+    return $runner->run($step, 'r-test');
+}
 
 afterEach(function (): void {
     if (! is_dir($this->logDir)) {
@@ -40,7 +49,7 @@ afterEach(function (): void {
 });
 
 it('passes a step that exits 0', function (): void {
-    $result = $this->runner->run(Shell::run('echo all good', id: 'ok'));
+    $result = runStep($this->runner, Shell::run('echo all good', id: 'ok'));
 
     expect($result->verdict)->toBe(Verdict::Passed)
         ->and($result->exitCode)->toBe(0)
@@ -49,7 +58,7 @@ it('passes a step that exits 0', function (): void {
 });
 
 it('fails a step that exits non-zero, and keeps it distinct from an error', function (): void {
-    $result = $this->runner->run(Shell::run('echo problem found; exit 3', id: 'nonzero'));
+    $result = runStep($this->runner, Shell::run('echo problem found; exit 3', id: 'nonzero'));
 
     expect($result->verdict)->toBe(Verdict::Failed)
         ->and($result->exitCode)->toBe(3)
@@ -59,7 +68,7 @@ it('fails a step that exits non-zero, and keeps it distinct from an error', func
 });
 
 it('reports a missing binary as an error, never as a failure or a pass', function (): void {
-    $result = $this->runner->run(Shell::run('definitely-not-a-real-binary-xyz', id: 'missing'));
+    $result = runStep($this->runner, Shell::run('definitely-not-a-real-binary-xyz', id: 'missing'));
 
     expect($result->verdict)->toBe(Verdict::Error)
         ->and($result->verdict)->not->toBe(Verdict::Failed)
@@ -74,11 +83,10 @@ it('reports a timeout as an error', function (): void {
         logs: new LogWriter($this->logDir),
         summariser: new OutputSummariser,
         environment: new EnvironmentScrubber(sys_get_temp_dir()),
-        runId: 'r-test',
         timeoutSeconds: 0.3,
     );
 
-    $result = $fast->run(Shell::run('sleep 3', id: 'slow'));
+    $result = runStep($fast, Shell::run('sleep 3', id: 'slow'));
 
     expect($result->verdict)->toBe(Verdict::Error)
         ->and($result->reason)->toContain('Timed out')
@@ -90,14 +98,14 @@ it('reports a timeout as an error', function (): void {
 });
 
 it('refuses to execute a skill step', function (): void {
-    $result = $this->runner->run(Skill::run('/evaluate'));
+    $result = runStep($this->runner, Skill::run('/evaluate'));
 
     expect($result->verdict)->toBe(Verdict::Error)
         ->and($result->reason)->toContain('Only shell steps');
 });
 
 it('writes the full output to a log and names the path when truncating', function (): void {
-    $result = $this->runner->run(Shell::run('seq 1 100; exit 1', id: 'noisy'));
+    $result = runStep($this->runner, Shell::run('seq 1 100; exit 1', id: 'noisy'));
 
     expect($result->logPath)->not->toBeNull()
         ->and(file_exists((string) $result->logPath))->toBeTrue()
@@ -108,14 +116,14 @@ it('writes the full output to a log and names the path when truncating', functio
 });
 
 it('leaves files_inspected unknown when a step declares no scope', function (): void {
-    $result = $this->runner->run(Shell::run('echo hi', id: 'unscoped'));
+    $result = runStep($this->runner, Shell::run('echo hi', id: 'unscoped'));
 
     expect($result->filesInspected)->toBeNull()
         ->and($result->toArray())->not->toHaveKey('files_inspected');
 });
 
 it('counts the files a scoped step will inspect', function (): void {
-    $result = $this->runner->run(
+    $result = runStep($this->runner,
         Shell::run('echo checked', id: 'scoped')->inspecting('printf "a.ts\nb.ts\n"')
     );
 
@@ -126,7 +134,7 @@ it('counts the files a scoped step will inspect', function (): void {
 it('says so out loud when a scoped step inspected nothing but still passed', function (): void {
     // The `yarn lint` shape: git-diff-scoped, so with no matching changes it
     // exits 0 having linted nothing. A bare pass here is a pass it did not earn.
-    $result = $this->runner->run(
+    $result = runStep($this->runner,
         Shell::run('exit 0', id: 'vacuous')->inspecting('true')
     );
 
@@ -141,7 +149,7 @@ it('still runs the command when the declared scope is empty, and still reports i
     // Regression: an earlier implementation returned a pass BEFORE running the
     // command whenever the scope resolved to zero. A typo'd scope glob then
     // disabled the gate permanently, which is a false green by construction.
-    $result = $this->runner->run(
+    $result = runStep($this->runner,
         Shell::run('echo REAL FAILURE >&2; exit 9', id: 'empty-scope-fails')->inspecting('true')
     );
 
@@ -155,7 +163,7 @@ it('errors rather than passing when the scope command cannot run', function (): 
     // A broken scope command produced zero lines, which read as "empty scope"
     // and handed back a pass. A declared scope that cannot be computed is a
     // broken config, not an empty one.
-    $result = $this->runner->run(
+    $result = runStep($this->runner,
         Shell::run('echo would have run', id: 'broken-scope')->inspecting('not-a-real-command-xyz')
     );
 
@@ -164,7 +172,7 @@ it('errors rather than passing when the scope command cannot run', function (): 
 });
 
 it('keeps stderr on its own line rather than gluing it to stdout', function (): void {
-    $result = $this->runner->run(Shell::run('printf "on-stdout"; printf "on-stderr" >&2; exit 1', id: 'streams'));
+    $result = runStep($this->runner, Shell::run('printf "on-stdout"; printf "on-stderr" >&2; exit 1', id: 'streams'));
 
     expect($result->summary)->toContain('on-stdout
 on-stderr');
@@ -198,7 +206,7 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
         public function after(Result $result): void {}
     };
 
-    $result = $this->runner->run($step);
+    $result = runStep($this->runner, $step);
 
     // Not a Shell instance, so the runner refuses it before before() is reached —
     // which is itself the guarantee: only a real Shell step can be executed.
@@ -209,7 +217,7 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
 it('lets a step pin its own environment, which is the point of the scrubber', function (): void {
     // Documented in the README before it existed: the override path on
     // EnvironmentScrubber had no public route from a step until now.
-    $result = $this->runner->run(
+    $result = runStep($this->runner,
         Shell::run('printf "%s" "$PIPELINE_PINNED"', id: 'pinned')
             ->withEnv(['PIPELINE_PINNED' => 'my_tp_phpunit_iso'])
     );

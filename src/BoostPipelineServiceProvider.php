@@ -37,7 +37,6 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             logs: new LogWriter($this->app->storagePath('logs/pipeline')),
             summariser: new OutputSummariser,
             environment: new EnvironmentScrubber($this->app->basePath()),
-            runId: 'r-'.substr(bin2hex(random_bytes(4)), 0, 6),
         ));
 
         $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(

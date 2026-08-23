@@ -81,7 +81,7 @@ final class Run
             return null;
         }
 
-        $result = $this->runner->run($current->step);
+        $result = $this->runner->run($current->step, $this->id);
         $this->record($result);
 
         return $result;
