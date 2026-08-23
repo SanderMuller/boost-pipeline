@@ -5,6 +5,55 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.0 - 2026-08-23
+
+<!-- verified-sha: 9499030d4d2e02af852a69ee385bbd39e982ba7f -->
+A dogfooding release. Using the pipeline on a real change surfaced that a run's logs could not be
+found from the run the server reported, and fixing that properly meant changing one interface.
+
+### Breaking
+
+- `StepRunner::run()` takes the run id as a second argument: `run(Step $step, string $runId)`.
+  `ProcessStepRunner` no longer takes a `runId` constructor argument.
+  
+  This affects you only if you implement `StepRunner` or construct `ProcessStepRunner` yourself. A
+  pipeline that configures steps in `.config/pipeline.php` needs no changes. See
+  [UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+  before and after.
+  
+
+### Fixed
+
+- A run's log files are named after the run id the server reports. The service provider minted an
+  id of its own and handed it to the step runner, while `Run` minted the id every response
+  carries — so each log was named after an id no response ever mentioned, and the path returned in
+  a result could not be traced back to the run that produced it.
+  
+  That id was also scoped to the process rather than the run, so a second run through the same
+  runner reused the first run's filenames. `RunManager` holds one run and its `open()` is
+  idempotent, so the MCP path could not reach a second run — the collision was latent, and closing
+  it now keeps a future reset or restart flow from making it live.
+  
+- A run id and step id are reduced to filename-safe text before reaching the log path. Only a
+  derived step id was slugged, so an explicit `Shell::run(id: ...)` arrived verbatim and could put
+  separators or `..` into the path. An id that gets rewritten also carries a short hash of the
+  original, because `a/b` and `a b` reduce to the same text while the walk checks uniqueness on
+  the raw values.
+  
+  Visible effect: if you pass an explicit step id containing characters outside `A-Za-z0-9._-`,
+  that step's log filename changes. The step id itself is untouched, so `status` and every response
+  still report what you configured.
+  
+
+### Documentation
+
+- The README explains why the server hands over one step at a time, not just why it owns the
+  verdict. A list of checks competes for attention with the work it arrives beside, and the checks
+  near the bottom get whatever is left — the run comes back partial while the report says done.
+- `UPGRADING.md`, and changelog and security pointers in the README.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.1.0...v0.2.0
+
 ## [Unreleased]
 
 ## v0.1.0 - 2026-08-22
