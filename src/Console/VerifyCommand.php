@@ -7,6 +7,7 @@ namespace SanderMuller\BoostPipeline\Console;
 use Illuminate\Console\Command;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Run\Receipt;
 
 /**
@@ -55,11 +56,7 @@ final class VerifyCommand extends Command
         }
 
         if (! $receipt->allVerified) {
-            $this->components->error(sprintf(
-                'Run [%s] finished in state [%s] without verifying every step.',
-                $receipt->runId,
-                $receipt->state,
-            ));
+            $this->components->error($this->explainUnverified($receipt));
 
             return self::FAILURE;
         }
@@ -71,5 +68,47 @@ final class VerifyCommand extends Command
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Why the run is not verified — and whether re-running could change that.
+     *
+     * These are two different answers wearing one message. A failed step is
+     * fixable: fix it, run again, exit 0. An acknowledged step is structural —
+     * the server never verified it and never will, so this pipeline cannot exit 0
+     * however many times it runs. A consumer told only "without verifying every
+     * step" reads the second as the first, wires up a gate that can never pass,
+     * and learns to skip it. That is worse than having no gate.
+     */
+    private function explainUnverified(Receipt $receipt): string
+    {
+        $acknowledged = array_keys(array_filter(
+            $receipt->verdicts,
+            static fn (string $verdict): bool => $verdict === Verdict::Acknowledged->value,
+        ));
+
+        $unverified = array_filter(
+            $receipt->verdicts,
+            static fn (string $verdict): bool => $verdict !== Verdict::Passed->value
+                && $verdict !== Verdict::Acknowledged->value,
+        );
+
+        if ($acknowledged === [] || $unverified !== []) {
+            return sprintf(
+                'Run [%s] finished in state [%s] without verifying every step.',
+                $receipt->runId,
+                $receipt->state,
+            );
+        }
+
+        return sprintf(
+            'Run [%s] passed every step the server ran, but %s only acknowledged, never verified. '
+            .'This pipeline cannot verify a tree: give %s a proof with Skill::proving(), or gate those steps outside the pipeline.',
+            $receipt->runId,
+            count($acknowledged) === 1
+                ? sprintf('step [%s] was', $acknowledged[0])
+                : sprintf('%d steps were ([%s])', count($acknowledged), implode('], [', $acknowledged)),
+            count($acknowledged) === 1 ? 'it' : 'them',
+        );
     }
 }

@@ -569,6 +569,14 @@ php artisan pipeline:verify || exit 1
 CI's job is different and unchanged: it runs the checks itself rather than asking whether someone
 else did.
 
+**It is only a gate for a pipeline the server can verify end to end.** A skill step with no proof is
+`acknowledged`, so `all_verified` stays false and the command exits 1 no matter how many times it
+runs. That is the contract working, not a bug — but a gate that can never pass is worse than no
+gate, because a reader learns to skip it. The command says which steps are acknowledged and that
+re-running will not help, so the choice is visible: give those steps a proof, or run them outside
+the pipeline and keep the pipeline's receipt meaningful. A pipeline of shell steps is the shape this
+command was built for.
+
 **A receipt is not proof a run happened.** It is a file in the working copy, so anything that can
 run a shell step can write one — an agent able to forge it could already claim a pass in prose, so
 this closes no trust hole that was open. What it carries is the part prose could never get right:

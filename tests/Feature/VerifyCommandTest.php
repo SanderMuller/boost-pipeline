@@ -97,6 +97,47 @@ it('fails when the walk finished without verifying every step', function (): voi
     expect(Artisan::call('pipeline:verify'))->toBe(1);
 });
 
+it('says an acknowledged run is structural, not a shortfall to fix', function (): void {
+    // The two reasons a run is unverified used to share one message. A failed
+    // step is fixable; an acknowledged one is not, so a consumer reading the
+    // generic wording wires up a gate that can never pass and learns to skip it.
+    receiptStoreHolding(new Receipt(
+        runId: 'r-ack',
+        state: 'complete',
+        allVerified: false,
+        tree: 'tree-a',
+        stale: null,
+        verdicts: ['pint' => 'passed', 'review' => 'acknowledged'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[review]')
+        ->and($output)->toContain('cannot verify');
+});
+
+it('still reports a plain failure as a failure, not as a design limit', function (): void {
+    // A failing step alongside an acknowledged one must not be excused as
+    // "structural" — re-running can fix this, and the message has to say so.
+    receiptStoreHolding(new Receipt(
+        runId: 'r-mixed',
+        state: 'blocked',
+        allVerified: false,
+        tree: 'tree-a',
+        stale: null,
+        verdicts: ['pint' => 'failed', 'review' => 'acknowledged'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+    ));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(1)
+        ->and(Artisan::output())->toContain('without verifying every step');
+});
+
 it('succeeds only when the recorded run verified this exact tree', function (): void {
     receiptStoreHolding(receipt());
     treeReporting('tree-a');
