@@ -10,6 +10,50 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.3.2 - 2026-08-23
+
+<!-- verified-sha: d72ab491614b6c27373b09bb660972d9918dd73b -->
+Consumer feedback on 0.3.1. Two fixes for what a first-time adopter runs into, and the package now
+applies to itself a check it had only been recommending.
+
+### Fixed
+
+- **A pipeline-config error no longer writes onto the protocol stream.** For a stdio MCP server
+  stdout *is* the JSON-RPC channel, and an invalid `.config/pipeline.php` had the framework's
+  exception renderer print a rendered trace there — a client received one valid frame followed by a
+  run of malformed ones. What the operator then saw depended on their client: one surfaces
+  unparseable stdout and reports the real cause, another only says the server failed to start.
+  
+  The message goes to stderr and the server is not registered. This applies to the validation
+  errors this package raises; a syntax error or a `TypeError` in your config still fails loudly,
+  because those are defects in your own code and hiding one behind a tidy message would be worse
+  than the trace.
+  
+  Checked only when starting the server, so an unrelated artisan command does not execute your
+  config — including when an artisan command *is* a pipeline step.
+  
+
+### Documentation
+
+- **The `.config/` note now covers the formatter, which is the half that bites.** Pint skips
+  dot-directories on its default scan, so `vendor/bin/pint --test` reports clean with a formatting
+  violation sitting in `.config/pipeline.php`. The path has to be an argument:
+  
+  ```bash
+  vendor/bin/pint --test . .config
+  
+  ```
+  An `exclude` entry in `pint.json` is unrelated — there is no `include`. Naming the analyser
+  alone, as the 0.3.1 note did, was half the advice.
+  
+
+### Internal
+
+- This package now analyses and formats its own `.config/`, in the composer scripts and in CI,
+  having recommended it without doing it.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.3.1...v0.3.2
+
 ## v0.3.1 - 2026-08-23
 
 Consumer feedback on 0.3.0. Nothing here changes what a verdict means; it closes the gaps two
