@@ -23,6 +23,7 @@ final readonly class Skill implements Step
         private string $id,
         private ?string $description,
         private bool $mutates = false,
+        private ?string $proof = null,
     ) {}
 
     public static function run(string $invocation, ?string $id = null, ?string $description = null): self
@@ -42,7 +43,32 @@ final readonly class Skill implements Step
      */
     public function mutating(): self
     {
-        return new self($this->invocation, $this->id, $this->description, true);
+        return new self($this->invocation, $this->id, $this->description, true, $this->proof);
+    }
+
+    /**
+     * A command that must exit 0 before this step counts as done.
+     *
+     * This is the only way a skill step earns `passed` rather than
+     * `acknowledged`. Where the work leaves a side effect — screenshots on disk,
+     * a harness log, a commit — the server can check for it and produce a verdict
+     * it owns, with no model call and nothing taken on trust:
+     *
+     *     Skill::run('/eye-verification')
+     *         ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
+     *
+     * A failing proof blocks the run and returns the same step, so "I did it"
+     * without the artifact is not a way past the cursor. Steps whose work leaves
+     * nothing to find keep `acknowledged`, which is the honest verdict for them.
+     */
+    public function proving(string $command): self
+    {
+        return new self($this->invocation, $this->id, $this->description, $this->mutates, $command);
+    }
+
+    public function proof(): ?string
+    {
+        return $this->proof;
     }
 
     public function mutates(): bool

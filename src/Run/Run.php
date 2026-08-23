@@ -11,6 +11,8 @@ use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Steps\Shell;
+use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
 
@@ -136,7 +138,7 @@ final class Run
         // what the skill measured — or produced, where it declared as much.
         $measuredAt = $this->tree?->capture();
 
-        $result = Result::acknowledged($current->step->id(), $summary);
+        $result = $this->proveOrAcknowledge($current->step, $summary);
         $this->record($result, $current->step, $measuredAt);
 
         return $result;
@@ -156,6 +158,39 @@ final class Run
         }
 
         $this->lastSeen = $this->tree?->capture();
+    }
+
+    /**
+     * Check a declared proof, or fall back to taking the agent's word.
+     *
+     * The proof runs through the same runner as any shell step, so it inherits
+     * the logging, output bounding and timeout — and, more to the point, the
+     * server owns the verdict. A step with a proof therefore reports `passed`
+     * rather than `acknowledged`: it is the one path by which agent work becomes
+     * something the run actually verified.
+     */
+    private function proveOrAcknowledge(Step $step, string $summary): Result
+    {
+        $proof = $step instanceof Skill ? $step->proof() : null;
+
+        if ($proof === null) {
+            return Result::acknowledged($step->id(), $summary);
+        }
+
+        $result = $this->runner->run(Shell::run($proof, id: $step->id()), $this->id);
+
+        // A failing proof is returned as it stands, so the cursor holds and the
+        // agent is handed the same step again. Claiming done without the artifact
+        // must not be a way past it.
+        if ($result->verdict !== Verdict::Passed) {
+            return $result;
+        }
+
+        return Result::passed(
+            $step->id(),
+            sprintf('%s — proof passed: %s', $summary, $result->summary),
+            logPath: $result->logPath,
+        );
     }
 
     /** @return array<string, Result> */

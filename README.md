@@ -521,6 +521,28 @@ exposure as running the tool by hand in that shell, and step commands come from
 allowlist, but one that omits `PATH` or `HOME` turns a misconfiguration into "the tool did not
 run", so it is not a prototype default.
 
+## Proving an agent step
+
+A skill step reports `acknowledged` because the server cannot check that a skill ran — which is
+honest, and also means the steps doing the actual judgement are the ones carrying no verdict. Where
+the work leaves a side effect, the server can check for it instead:
+
+```php
+$steps->in(Agent::class)->append(
+    Skill::run('/eye-verification')
+        ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
+);
+```
+
+The proof runs through the same runner as any shell step, so a step with one reports **`passed`**,
+not `acknowledged` — the server ran a command and read an exit code. No model call, nothing taken
+on trust. A failing proof blocks the run and returns the same step, so "I did it" without the
+artifact is not a way past the cursor.
+
+Pick something the work cannot avoid producing: screenshots newer than the last commit, a harness
+log, a review commit. Steps whose work genuinely leaves nothing to find keep `acknowledged`, which
+is the right verdict for them.
+
 ## Letting something else read the run
 
 Run state is in-process, so for the first four releases every guarantee the server produced died
