@@ -30,9 +30,35 @@ final readonly class OutputSummariser
     /** @return list<string> */
     private function split(string $output): array
     {
-        $lines = preg_split('/\R/', trim($output));
+        $lines = preg_split('/\R/', trim($this->readable($output)));
 
         return $lines === false ? [] : $lines;
+    }
+
+    /**
+     * Strip what a terminal would have consumed rather than displayed.
+     *
+     * A tool that draws — a progress bar, a dot per test — writes colour codes
+     * and rewrites one line with carriage returns. Captured to a pipe, none of
+     * that renders: a PHPUnit summary arrives as an escape-wrapped dot repeated
+     * to the truncation limit, and Rector's is almost entirely redraw frames. The
+     * summary is the only output the agent sees without opening the log, so left
+     * as-is it spends the whole budget saying nothing.
+     *
+     * Only the last segment of a carriage-return sequence survives, which is what
+     * the terminal would have left on screen.
+     */
+    private function readable(string $output): string
+    {
+        // Colour and cursor-movement escapes: '\e[' then parameters then a letter.
+        $stripped = preg_replace('/\e\[[0-9;?]*[a-zA-Z]/', '', $output);
+        $output = $stripped ?? $output;
+
+        // Keep only what survived the last carriage return on each line, which is
+        // what the terminal would have been left showing.
+        $collapsed = preg_replace('/^.*\r(?!\n)/m', '', $output);
+
+        return $collapsed ?? $output;
     }
 
     /**

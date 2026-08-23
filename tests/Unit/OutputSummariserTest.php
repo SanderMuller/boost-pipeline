@@ -64,3 +64,28 @@ it('shows everything, with no elision marker, when the output fits', function ()
         ->and($result['shown_lines'])->toBe(3)
         ->and($result['summary'])->toBe("one\ntwo\nthree");
 });
+
+it('strips the escapes a terminal would have consumed, so a drawing tool says something', function (): void {
+    // What a real run returned for the phpunit step: an escape-wrapped dot per
+    // test, repeated to the truncation limit, with the verdict pushed out of view.
+    $output = str_repeat("\033[90;1m.\033[39;22m", 40)."\n\033[31;1mFAILED\033[39;22m  153 failed, 8250 passed";
+
+    $result = new OutputSummariser()->summarise($output, maxLines: 6);
+
+    expect($result['summary'])->not->toContain("\033")
+        ->and($result['summary'])->toContain('FAILED  153 failed, 8250 passed');
+});
+
+it('keeps only the last frame of a redrawn line', function (): void {
+    // A progress bar rewrites one line with carriage returns. Captured to a pipe
+    // every frame survives, and the useful last one is what gets truncated away.
+    $result = new OutputSummariser()->summarise("processing\r 10/60 files\r 60/60 files\nDone: 0 changed", maxLines: 6);
+
+    expect($result['summary'])->toBe("60/60 files\nDone: 0 changed");
+});
+
+it('leaves output that never drew anything untouched', function (): void {
+    $result = new OutputSummariser()->summarise("Line 1\nLine 2", maxLines: 6);
+
+    expect($result['summary'])->toBe("Line 1\nLine 2");
+});
