@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Mcp\Tools\Concerns;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\JsonSchema\Types\ObjectType;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 
 trait PipelineTool
@@ -57,15 +58,27 @@ trait PipelineTool
     protected function stepSchema(JsonSchema $schema): array
     {
         return [
-            'step' => $schema->object([
-                'id' => $schema->string(),
-                'phase' => $schema->string(),
-                'kind' => $schema->string()->description('shell (the server executes it) or skill (you invoke it).'),
-                'command' => $schema->string()->description('Present for a shell step. Do not run it yourself.'),
-                'invoke' => $schema->string()->description('Present for a skill step: the skill to invoke.'),
-                'note' => $schema->string(),
-            ])->description('The step at the cursor. Never a step beyond it.'),
+            'step' => $this->stepObjectSchema($schema)
+                ->description('The step at the cursor, when the position holds one. Never a step beyond it.'),
+            'steps' => $schema->array()
+                ->items($this->stepObjectSchema($schema))
+                ->description('Present instead of `step` when the position is a parallel group. Every one of them is at the cursor, and they resolve together on one next_step call.'),
+            'parallel' => $schema->boolean()
+                ->description('Present and true alongside `steps`. The server runs them at the same time; you still do nothing for a shell step.'),
         ];
+    }
+
+    protected function stepObjectSchema(JsonSchema $schema): ObjectType
+    {
+        return $schema->object([
+            'id' => $schema->string(),
+            'phase' => $schema->string(),
+            'kind' => $schema->string()->description('shell (the server executes it) or skill (you invoke it).'),
+            'command' => $schema->string()->description('Present for a shell step. Do not run it yourself.'),
+            'invoke' => $schema->string()->description('Present for a skill step: the skill to invoke.'),
+            'instruction' => $schema->string()->description("Present for a skill step: what this step is for. Act on this, not on the skill's own breadth."),
+            'note' => $schema->string(),
+        ]);
     }
 
     /**
@@ -74,20 +87,29 @@ trait PipelineTool
     protected function resultSchema(JsonSchema $schema): array
     {
         return [
-            'result' => $schema->object([
-                'verdict' => $schema->string()->description('passed, failed, error or acknowledged.'),
-                'step_id' => $schema->string(),
-                'summary' => $schema->string(),
-                'exit_code' => $schema->integer(),
-                'log' => $schema->string()->description('Full output on disk, when it was captured.'),
-                'files_inspected' => $schema->integer()->description(
-                    'Omitted when unknown. A 0 means the step inspected nothing and so proved nothing.'
-                ),
-                'server_run' => $schema->boolean()->description(
-                    'Whether the server produced this verdict. True for failed and error too — it answers who ran it, not whether it passed.'
-                ),
-                'reason' => $schema->string(),
-            ]),
+            'result' => $this->resultObjectSchema($schema)
+                ->description('The verdict, when the position held one step.'),
+            'results' => $schema->array()
+                ->items($this->resultObjectSchema($schema))
+                ->description('Present instead of `result` when a parallel group resolved. One verdict per step, so every failure in the group is visible at once.'),
         ];
+    }
+
+    protected function resultObjectSchema(JsonSchema $schema): ObjectType
+    {
+        return $schema->object([
+            'verdict' => $schema->string()->description('passed, failed, error or acknowledged.'),
+            'step_id' => $schema->string(),
+            'summary' => $schema->string(),
+            'exit_code' => $schema->integer(),
+            'log' => $schema->string()->description('Full output on disk, when it was captured.'),
+            'files_inspected' => $schema->integer()->description(
+                'Omitted when unknown. A 0 means the step inspected nothing and so proved nothing.'
+            ),
+            'server_run' => $schema->boolean()->description(
+                'Whether the server produced this verdict. True for failed and error too — it answers who ran it, not whether it passed.'
+            ),
+            'reason' => $schema->string(),
+        ]);
     }
 }

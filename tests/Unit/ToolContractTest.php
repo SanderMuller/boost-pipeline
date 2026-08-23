@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
+use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Server\Tool;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Step;
@@ -57,6 +58,29 @@ it('documents state and all_verified on every tool, so complete cannot read as g
 it('describes a step payload without ever promising more than the cursor', function (): void {
     expect(schemaFor('next_step'))->toHaveKeys(['step', 'result']);
 });
+
+it('declares every key a payload can actually contain', function (): void {
+    // The schema is what a client reads to know what it may receive. Sending a key
+    // it does not declare is the same drift as documentation disagreeing with
+    // behaviour, and two keys had already shipped undeclared: `instruction`, which
+    // is the whole point of a skill step, and the parallel-group shape.
+    expect(schemaFor('next_step'))->toHaveKeys(['step', 'steps', 'parallel', 'result', 'results'])
+        ->and(schemaTextFor('next_step', 'step'))->toContain('instruction')
+        ->and(schemaTextFor('next_step', 'steps'))->toContain('instruction')
+        ->and(schemaTextFor('next_step', 'results'))->toContain('verdict');
+});
+
+/** One schema entry rendered, so its declared properties can be asserted. */
+function schemaTextFor(string $name, string $key): string
+{
+    $type = schemaFor($name)[$key] ?? null;
+
+    // The expectation narrows the mixed value and fails the test if a schema
+    // entry is ever something other than a schema type.
+    expect($type)->toBeInstanceOf(Type::class);
+
+    return $type->toString();
+}
 
 it('exposes total_steps on open_run but no later step identity', function (): void {
     expect(schemaFor('open_run'))->toHaveKey('total_steps');
