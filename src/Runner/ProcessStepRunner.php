@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Runner;
 
+use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\Step;
-use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Steps\Shell;
@@ -21,7 +21,7 @@ use Throwable;
  * timeout and a thrown exception all produce Verdict::Error, never Failed and
  * never Passed.
  */
-final readonly class ProcessStepRunner implements StepRunner
+final readonly class ProcessStepRunner implements BatchStepRunner
 {
     /**
      * Under the MCP per-call wall clock, which the spec pins at 600000ms in
@@ -53,6 +53,67 @@ final readonly class ProcessStepRunner implements StepRunner
         return $this->execute($step, $runId);
     }
 
+    /**
+     * Runs every step at once, then collects the verdicts in declaration order.
+     *
+     * Scope commands stay sequential. They are capped at a minute and usually
+     * take milliseconds, and keeping them out of the concurrent path keeps the
+     * part that can go wrong small.
+     *
+     * @param  list<Step>  $steps
+     * @return array<string, Result>
+     */
+    public function runBatch(array $steps, string $runId): array
+    {
+        $results = [];
+        $pending = [];
+
+        foreach ($steps as $step) {
+            if ($step->kind() !== StepKind::Shell || ! $step instanceof Shell) {
+                $results[$step->id()] = Result::error($step->id(), 'Only shell steps can be executed by the server.');
+
+                continue;
+            }
+
+            $scope = $this->resolveScope($step);
+
+            if ($scope instanceof Result) {
+                $results[$step->id()] = $scope;
+
+                continue;
+            }
+
+            $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
+            $process = $this->start($step, $timeout);
+
+            if ($process instanceof Result) {
+                $results[$step->id()] = $process;
+
+                continue;
+            }
+
+            $pending[$step->id()] = [$process, $step, $scope, $timeout];
+        }
+
+        // Everything is already running, so waiting in order costs nothing beyond
+        // the slowest step.
+        foreach ($pending as $id => [$process, $step, $scope, $timeout]) {
+            $timedOut = $this->settle($process, $id, $timeout);
+
+            $results[$id] = $timedOut instanceof Result
+                ? $timedOut
+                : $this->verdictFor($step, $process, $scope, $runId);
+        }
+
+        $ordered = [];
+
+        foreach ($steps as $step) {
+            $ordered[$step->id()] = $results[$step->id()];
+        }
+
+        return $ordered;
+    }
+
     private function execute(Shell $step, string $runId): Result
     {
         $scope = $this->resolveScope($step);
@@ -61,21 +122,29 @@ final readonly class ProcessStepRunner implements StepRunner
             return $scope;
         }
 
+        $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
+
         // The command ALWAYS runs. An empty scope annotates the verdict; it never
         // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
         // scope command that silently matches nothing, permanently disables the
         // gate — a false green of exactly the kind this pipeline exists to stop.
-        $process = $this->process(
-            $step->id(),
-            $step->command(),
-            $step->timeoutSeconds() ?? $this->timeoutSeconds,
-            $step->env(),
-        );
+        $process = $this->start($step, $timeout);
 
         if ($process instanceof Result) {
             return $process;
         }
 
+        $timedOut = $this->settle($process, $step->id(), $timeout);
+
+        if ($timedOut instanceof Result) {
+            return $timedOut;
+        }
+
+        return $this->verdictFor($step, $process, $scope, $runId);
+    }
+
+    private function verdictFor(Shell $step, Process $process, ?int $scope, string $runId): Result
+    {
         $output = $this->combinedOutput($process);
         $logPath = $this->logs->write($runId, $step->id(), $output);
         $exitCode = $process->getExitCode() ?? 1;
@@ -140,17 +209,38 @@ final readonly class ProcessStepRunner implements StepRunner
         return count($this->nonEmptyLines($process->getOutput()));
     }
 
+    /** Started but not waited on, so a caller can have several running at once. */
+    private function start(Shell $step, float $timeout): Process|Result
+    {
+        try {
+            $process = $this->processFor($step->command(), $timeout, $step->env());
+            $process->start();
+
+            return $process;
+        } catch (Throwable $throwable) {
+            return Result::error($step->id(), "Could not run: {$throwable->getMessage()}");
+        }
+    }
+
+    /** A Result when the step never produced a verdict, null when it did. */
+    private function settle(Process $process, string $stepId, float $timeout): ?Result
+    {
+        try {
+            $process->wait();
+
+            return null;
+        } catch (ProcessTimedOutException) {
+            return Result::error($stepId, "Timed out after {$timeout}s.");
+        } catch (Throwable $exception) {
+            return Result::error($stepId, "Could not run: {$exception->getMessage()}");
+        }
+    }
+
     /** @param array<string, string> $env */
     private function process(string $stepId, string $command, float $timeout, array $env = []): Process|Result
     {
         try {
-            $process = Process::fromShellCommandline(
-                $command,
-                $this->workingDirectory,
-                $this->environment->forStep($env),
-                timeout: $timeout,
-            );
-
+            $process = $this->processFor($command, $timeout, $env);
             $process->run();
 
             return $process;
@@ -159,6 +249,17 @@ final readonly class ProcessStepRunner implements StepRunner
         } catch (Throwable $exception) {
             return Result::error($stepId, "Could not run: {$exception->getMessage()}");
         }
+    }
+
+    /** @param array<string, string> $env */
+    private function processFor(string $command, float $timeout, array $env): Process
+    {
+        return Process::fromShellCommandline(
+            $command,
+            $this->workingDirectory,
+            $this->environment->forStep($env),
+            timeout: $timeout,
+        );
     }
 
     private function combinedOutput(Process $process): string

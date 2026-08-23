@@ -31,6 +31,17 @@ final class Steps
     }
 
     /**
+     * The phase's steps with parallel groups still grouped, for building the walk.
+     *
+     * @param  class-string<Phase>  $phase
+     * @return list<Step|StepBatch>
+     */
+    public function entriesForPhase(string $phase): array
+    {
+        return isset($this->inPhase[$phase]) ? $this->inPhase[$phase]->entries() : [];
+    }
+
+    /**
      * Every phase that steps were declared into, registered or not.
      *
      * @return list<class-string<Phase>>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
@@ -19,7 +20,7 @@ use SanderMuller\BoostPipeline\Walk\WalkStep;
 /**
  * One pipeline execution.
  *
- * The cursor advances in exactly one place — {@see self::resolveCurrentStep()}.
+ * The cursor advances in exactly one place — {@see self::resolveCurrent()}.
  * That is the whole guarantee: the server only ever executes the step at the
  * cursor, and only a resolution moves it. Duplicating this logic per tool would
  * make the guarantee only as strong as its weakest copy.
@@ -88,38 +89,80 @@ final class Run
         return $this->walk->at($this->cursor);
     }
 
+    /**
+     * Every step sharing the position at the cursor, in declaration order.
+     *
+     * @return list<WalkStep>
+     */
+    public function currentPosition(): array
+    {
+        return $this->walk->positionAt($this->cursor);
+    }
+
     public function position(): string
     {
         return sprintf('%d/%d', min($this->cursor + 1, $this->walk->count()), $this->walk->count());
     }
 
     /**
-     * THE chokepoint. Resolves the step at the cursor and advances only if the
-     * verdict says to. Nothing else in the codebase may move the cursor.
+     * THE chokepoint. Resolves the position at the cursor and advances only if
+     * every verdict says to. Nothing else in the codebase may move the cursor.
+     *
+     * A position is usually one step. A parallel group is several, and resolves as
+     * a unit: all of them run, all of their verdicts are recorded, and the cursor
+     * moves past the whole group or not at all.
+     *
+     * @return list<Result> empty when there was nothing to resolve
      */
-    public function resolveCurrentStep(): ?Result
+    public function resolveCurrent(): array
     {
-        $current = $this->currentStep();
+        $position = $this->walk->positionAt($this->cursor);
 
-        if (! $current instanceof WalkStep) {
+        if ($position === []) {
             $this->state = RunState::Complete;
 
-            return null;
+            return [];
         }
 
-        // A skill step is resolved by acknowledgement, never by the server.
-        if ($current->step->kind() === StepKind::Skill) {
+        // A skill step is resolved by acknowledgement, never by the server. Only
+        // a lone step can be one, because a batch refuses them at config time.
+        if ($position[0]->step->kind() === StepKind::Skill) {
             $this->state = RunState::Awaiting;
 
-            return null;
+            return [];
         }
 
         $measuredAt = $this->tree?->capture();
+        $steps = array_map(static fn (WalkStep $walkStep): Step => $walkStep->step, $position);
 
-        $result = $this->runner->run($current->step, $this->id);
-        $this->record($result, $current->step, $measuredAt);
+        return $this->record($this->resolveSteps($steps), $steps, $measuredAt);
+    }
 
-        return $result;
+    /**
+     * @param  list<Step>  $steps
+     * @return array<string, Result>
+     */
+    private function resolveSteps(array $steps): array
+    {
+        if (count($steps) === 1) {
+            $step = $steps[0];
+
+            return [$step->id() => $this->runner->run($step, $this->id)];
+        }
+
+        // A custom runner that does not implement the batch contract still works;
+        // its group resolves one step after another, which is correct and slower.
+        if ($this->runner instanceof BatchStepRunner) {
+            return $this->runner->runBatch($steps, $this->id);
+        }
+
+        $results = [];
+
+        foreach ($steps as $step) {
+            $results[$step->id()] = $this->runner->run($step, $this->id);
+        }
+
+        return $results;
     }
 
     /**
@@ -139,7 +182,7 @@ final class Run
         $measuredAt = $this->tree?->capture();
 
         $result = $this->proveOrAcknowledge($current->step, $summary);
-        $this->record($result, $current->step, $measuredAt);
+        $this->record([$result->stepId => $result], [$current->step], $measuredAt);
 
         return $result;
     }
@@ -369,38 +412,74 @@ final class Run
         ));
     }
 
-    private function record(Result $result, Step $step, ?string $measuredAt): void
+    /**
+     * @param  array<string, Result>  $results
+     * @param  list<Step>  $steps
+     * @return list<Result>
+     */
+    private function record(array $results, array $steps, ?string $measuredAt): array
     {
-        $this->results[$result->stepId] = $result;
-        // Only a pass asserts something about the tree. An acknowledgement was
-        // never verified, and a failure or error is already keeping the run from
-        // being green — stamping those just produces a stale message about a
-        // receipt that claims nothing.
-        $assertsTreeState = $result->verdict->isVerified() && ! $step->mutates();
+        foreach ($steps as $step) {
+            $result = $results[$step->id()];
+            $this->results[$step->id()] = $result;
 
-        $this->measuredAt[$result->stepId] = $assertsTreeState ? $measuredAt : null;
+            // Only a pass asserts something about the tree. An acknowledgement was
+            // never verified, and a failure or error is already keeping the run from
+            // being green — stamping those just produces a stale message about a
+            // receipt that claims nothing.
+            $assertsTreeState = $result->verdict->isVerified() && ! $step->mutates();
+
+            $this->measuredAt[$step->id()] = $assertsTreeState ? $measuredAt : null;
+        }
+
         $this->lastSeen = $this->tree?->capture() ?? $measuredAt ?? $this->lastSeen;
 
-        $this->settleState($result);
+        $this->settleState(array_values($results), count($steps));
 
         // Written last, once the state is final. Persisting it before the
         // transition recorded a finished run as still running, and
         // `all_verified` ends on `state === Complete` — so every green run was
         // written to disk as unverified and `pipeline:verify` could never exit 0.
         $this->recordReceipt();
+
+        return array_values($results);
     }
 
-    private function settleState(Result $result): void
+    /**
+     * The position advances only if every verdict in it does.
+     *
+     * A group holds if any one of its steps failed, and holds at the group's first
+     * step so the next call re-runs the whole group. Re-running a passing sibling
+     * costs time and keeps the rule simple: a position either resolved or it did
+     * not.
+     *
+     * @param  list<Result>  $results
+     */
+    private function settleState(array $results, int $width): void
     {
-        if (! $result->verdict->advancesCursor()) {
-            $this->state = $result->verdict->isTerminalForRun()
+        $blocking = null;
+
+        foreach ($results as $result) {
+            if ($result->verdict->advancesCursor()) {
+                continue;
+            }
+
+            // An error outranks a failure: a tool that never ran is the more
+            // urgent thing to report, and it decides the state for the position.
+            if ($blocking === null || $result->verdict->isTerminalForRun()) {
+                $blocking = $result;
+            }
+        }
+
+        if ($blocking instanceof Result) {
+            $this->state = $blocking->verdict->isTerminalForRun()
                 ? RunState::Halted
                 : RunState::Blocked;
 
             return;
         }
 
-        $this->cursor++;
+        $this->cursor += $width;
 
         $next = $this->currentStep();
 

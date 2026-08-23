@@ -159,7 +159,7 @@ in gets an honestly empty tool list rather than errors at call time.
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Phases\Defaults\{Refactoring, Formatting, StaticAnalysis, Tests,
 Agent};
-use SanderMuller\BoostPipeline\Phases\Steps;
+use SanderMuller\BoostPipeline\Phases\{StepCollection, Steps};
 use SanderMuller\BoostPipeline\Steps\{Shell, Skill};
 
 return Pipeline::configure()
@@ -194,6 +194,42 @@ position, nothing more, so put a step in whichever phase runs at the right point
 | 3 | `StaticAnalysis` | PHPStan, Larastan, `tsc`, Mago |
 | 4 | `Tests` | Pest, PHPUnit, Vitest, Dusk |
 | 5 | `Agent` | Skills the agent invokes, such as `/evaluate` or an eye-verify command |
+
+### Steps that run at the same time
+
+Independent checks do not need to wait for each other. A parallel group occupies one position in
+the walk and resolves as a unit:
+
+```php
+$steps->in(StaticAnalysis::class)->parallel(function (StepCollection $steps): void {
+    $steps->append(Shell::run('composer phpstan'));
+    $steps->append(Shell::run('node_modules/.bin/tsc --noEmit'));
+});
+```
+
+One `next_step` call runs both and returns both verdicts. This costs the agent nothing, which is why
+it is allowed: the agent does not perform a shell step, it calls `next_step` and waits, so three
+commands running at once is still one thing in front of it.
+
+The wall clock is the obvious gain. The better one is that **a group reports every failure in one
+pass**. A sequence blocks at the first failure and hides the rest behind a fix and a re-run.
+
+A group holds the position if any step in it does not pass, and the next call re-runs the whole
+group. Re-running a passing sibling costs a little time and keeps the rule simple: a position either
+resolved or it did not.
+
+Two things a group refuses, when the config loads rather than when the run reaches it:
+
+- **A skill step.** Several lenses handed over at once is the wall of context the cursor exists to
+  break up, and the server cannot fan them out to separate agent contexts to avoid that. Declare
+  skill steps on their own.
+- **A step that declares `->mutating()`.** Its siblings would run against a tree it is rewriting,
+  with no ordering between them to attribute the change to, so every sibling verdict would describe
+  code that no longer exists. Run a fix-mode step on its own, before the checks that must see its
+  result.
+
+A custom `StepRunner` that does not implement `BatchStepRunner` still works. Its groups resolve one
+step after another, which is correct and slower.
 
 ### Why that order
 
@@ -448,7 +484,7 @@ inspected nothing reports it: *"Inspected 0 files … passed without proving any
 | Tool | What it does |
 |---|---|
 | `open_run` | Starts a run, returns the first step. Idempotent. |
-| `next_step` | Resolves the current step, returns the next, or the same one again. |
+| `next_step` | Resolves the current position, returns the next, or the same one again. |
 | `report_step` | Acknowledges a skill step. Only valid while `awaiting`. |
 | `status` | Position, per-step verdicts, verified versus acknowledged. |
 

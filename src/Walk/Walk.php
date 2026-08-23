@@ -8,6 +8,7 @@ use SanderMuller\BoostPipeline\Contracts\Phase;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Phases;
+use SanderMuller\BoostPipeline\Phases\StepBatch;
 use SanderMuller\BoostPipeline\Phases\Steps;
 
 /**
@@ -43,12 +44,25 @@ final readonly class Walk
     private static function buildWalk(array $registered, Steps $steps): array
     {
         $walk = [];
+        $batchId = 0;
 
         foreach ($registered as $phaseClass) {
             $phase = self::instantiate($phaseClass);
 
-            foreach ($steps->forPhase($phaseClass) as $step) {
-                $walk[] = new WalkStep($step, $phase->id(), $phase->name());
+            foreach ($steps->entriesForPhase($phaseClass) as $entry) {
+                if (! $entry instanceof StepBatch) {
+                    $walk[] = new WalkStep($entry, $phase->id(), $phase->name());
+
+                    continue;
+                }
+
+                // A new id per batch even when a phase holds several, so two
+                // adjacent batches never merge into one position.
+                $batchId++;
+
+                foreach ($entry->steps as $step) {
+                    $walk[] = new WalkStep($step, $phase->id(), $phase->name(), $batchId);
+                }
             }
         }
 
@@ -100,6 +114,41 @@ final readonly class Walk
     public function at(int $cursor): ?WalkStep
     {
         return $this->steps[$cursor] ?? null;
+    }
+
+    /**
+     * Every step sharing the position at $cursor, in declaration order.
+     *
+     * One element for an ordinary step. For a batch, all of its steps — and the
+     * cursor only ever sits on the first of them, because a position resolves as
+     * a unit.
+     *
+     * @return list<WalkStep>
+     */
+    public function positionAt(int $cursor): array
+    {
+        $first = $this->at($cursor);
+
+        if (! $first instanceof WalkStep) {
+            return [];
+        }
+
+        if ($first->batchId === null) {
+            return [$first];
+        }
+
+        $position = [];
+        $counter = count($this->steps);
+
+        for ($index = $cursor; $index < $counter; $index++) {
+            if ($this->steps[$index]->batchId !== $first->batchId) {
+                break;
+            }
+
+            $position[] = $this->steps[$index];
+        }
+
+        return $position;
     }
 
     /** @param class-string<Phase> $phaseClass */

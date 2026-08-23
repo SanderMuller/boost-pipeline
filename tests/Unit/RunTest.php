@@ -94,7 +94,7 @@ it('starts open on the first step and reveals nothing beyond it', function (): v
 
 it('advances by exactly one on a pass', function (): void {
     $run = threeStepRun(new FakeRunner);
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->currentStep()?->step->id())->toBe('phpstan')
         ->and($run->state())->toBe(RunState::Running);
@@ -103,24 +103,24 @@ it('advances by exactly one on a pass', function (): void {
 it('holds the cursor on a failure and returns the same step however often it is called', function (): void {
     $runner = (new FakeRunner)->fail('phpstan');
     $run = threeStepRun($runner);
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     foreach (range(1, 4) as $ignored) {
-        $run->resolveCurrentStep();
+        $run->resolveCurrent();
         expect($run->currentStep()?->step->id())->toBe('phpstan')
             ->and($run->state())->toBe(RunState::Blocked);
     }
 
     // Fixing it lets the walk continue from exactly where it stopped.
     $runner->pass('phpstan');
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->currentStep()?->step->id())->toBe('evaluate');
 });
 
 it('halts on an error, distinctly from blocking on a failure', function (): void {
     $run = threeStepRun(new FakeRunner(['pint' => Verdict::Error]));
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->state())->toBe(RunState::Halted)
         ->and($run->state())->not->toBe(RunState::Blocked)
@@ -130,8 +130,8 @@ it('halts on an error, distinctly from blocking on a failure', function (): void
 it('enters awaiting the moment the cursor lands on a skill step', function (): void {
     $runner = new FakeRunner;
     $run = threeStepRun($runner);
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->state())->toBe(RunState::Awaiting)
         ->and($run->currentStep()?->step->id())->toBe('evaluate');
@@ -140,21 +140,21 @@ it('enters awaiting the moment the cursor lands on a skill step', function (): v
 it('never executes a skill step, however often next_step is called', function (): void {
     $runner = new FakeRunner;
     $run = threeStepRun($runner);
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     $callsBefore = $runner->calls;
 
-    expect($run->resolveCurrentStep())->toBeNull()
-        ->and($run->resolveCurrentStep())->toBeNull()
+    expect($run->resolveCurrent())->toBeEmpty()
+        ->and($run->resolveCurrent())->toBeEmpty()
         ->and($run->state())->toBe(RunState::Awaiting)
         ->and($runner->calls)->toBe($callsBefore);
 });
 
 it('advances a skill step only on acknowledgement', function (): void {
     $run = threeStepRun(new FakeRunner);
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     $result = $run->acknowledgeCurrentStep('ran /evaluate, fixed 2 issues');
 
@@ -171,8 +171,8 @@ it('refuses an acknowledgement for a shell step', function (): void {
 
 it('reports complete but NOT all_verified when a run ends on acknowledgements', function (): void {
     $run = threeStepRun(new FakeRunner);
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
     $run->acknowledgeCurrentStep('done');
 
     expect($run->state())->toBe(RunState::Complete)
@@ -190,7 +190,7 @@ it('reports all_verified only when every step was a server-verified pass', funct
         'r-test',
     );
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->state())->toBe(RunState::Complete)
         ->and($run->allVerified())->toBeTrue();
@@ -198,7 +198,7 @@ it('reports all_verified only when every step was a server-verified pass', funct
 
 it('counts a failed step under server_run, not under acknowledged', function (): void {
     $run = threeStepRun(new FakeRunner(['pint' => Verdict::Failed]));
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->serverRunTally())->toBe(['passed' => 0, 'failed' => 1, 'error' => 0])
         ->and($run->acknowledgedCount())->toBe(0);
@@ -222,7 +222,7 @@ it('refuses to claim all_verified when a declared step was dropped before the wa
     });
 
     $run = Run::start($pipeline->walk(), new FakeRunner, 'r-dropped');
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->state())->toBe(RunState::Complete)
         ->and($run->walk->notices)->toHaveCount(1)

@@ -68,6 +68,6 @@ final class ReportStep extends Tool
             return Response::error($acknowledgementNotAllowed->getMessage());
         }
 
-        return Response::structured(StepPayload::afterResolution($run, $result));
+        return Response::structured(StepPayload::afterResolution($run, [$result]));
     }
 }

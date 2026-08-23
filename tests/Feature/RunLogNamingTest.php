@@ -63,22 +63,22 @@ afterEach(function (): void {
 
 it('names a log file after the run id it reports, so the two can be correlated', function (): void {
     $run = $this->manager->open();
-    $result = $run->resolveCurrentStep();
+    $result = $run->resolveCurrent()[0];
 
-    expect($result?->logPath)->not->toBeNull()
-        ->and(basename((string) $result?->logPath))->toBe("{$run->id}-echo.log");
+    expect($result->logPath)->not->toBeNull()
+        ->and(basename((string) $result->logPath))->toBe("{$run->id}-echo.log");
 });
 
 it('scopes logs per run, so a second run cannot overwrite the first one', function (): void {
     $first = $this->manager->open();
-    $firstLog = $first->resolveCurrentStep()?->logPath;
+    $firstLog = $first->resolveCurrent()[0]->logPath;
 
     // A second run through the SAME runner, with the same step id. That is the
     // arrangement that used to collide: one id held by the runner, reused for
     // every run in the process.
     $second = new RunManager(pipelineEchoing('again'), $this->runner)->open();
 
-    $secondLog = $second->resolveCurrentStep()?->logPath;
+    $secondLog = $second->resolveCurrent()[0]->logPath;
 
     expect($second->id)->not->toBe($first->id)
         ->and($secondLog)->not->toBe($firstLog)

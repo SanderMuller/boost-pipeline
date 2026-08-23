@@ -1,5 +1,37 @@
 # Upgrading
 
+## From 0.5 to 0.6
+
+### Changed
+
+- `Run::resolveCurrentStep()` is now `Run::resolveCurrent()` and returns `list<Result>` rather than
+  `?Result`. Only affects code driving a `Run` directly; the MCP tools are unchanged from the
+  outside.
+
+  ```php
+  // before
+  $result = $run->resolveCurrentStep();
+  if ($result instanceof Result) { /* ... */ }
+
+  // after
+  $results = $run->resolveCurrent();
+  if ($results !== []) { /* ... */ }
+  ```
+
+  A position in the walk can now hold several steps, so it resolves to several verdicts. The name
+  changed with it: "current step" was no longer what the method resolves.
+
+- `StepCollection::all()` still returns `list<Step>` with parallel groups flattened. Use the new
+  `entries()` where the grouping matters.
+
+### Added (no migration needed)
+
+- `StepCollection::parallel()` declares steps that share one position and run at the same time. See
+  the README section on steps that run at the same time.
+
+- `BatchStepRunner` extends `StepRunner` with `runBatch()`. A custom runner that does not implement
+  it keeps working: its groups resolve one step after another.
+
 ## From 0.4 to 0.5
 
 ### Changed

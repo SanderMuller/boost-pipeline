@@ -50,7 +50,7 @@ function runWithSkill(Skill $skill, ProcessStepRunner $runner): Run
     });
 
     $run = Run::start($pipeline->walk(), $runner, 'r-proof');
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     return $run;
 }

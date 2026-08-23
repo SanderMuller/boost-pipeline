@@ -196,7 +196,7 @@ it('exits 0 for a receipt a real run actually wrote', function (): void {
         receipts: $store,
     );
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     try {
         expect(Artisan::call('pipeline:verify'))->toBe(0)

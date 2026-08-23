@@ -48,9 +48,10 @@ acknowledgements reaches `complete`, and there is a test for exactly that.
 
 ### 4. The cursor advances in exactly one place
 
-`Run::resolveCurrentStep()` and `Run::record()` are the only code that moves the cursor. The
-guarantee is only as strong as its weakest copy, so if that logic ends up duplicated per tool,
-stop and restructure.
+`Run::resolveCurrent()` and `Run::settleState()` are the only code that moves the cursor, and
+`settleState()` moves it by the width of the position so a parallel group advances or holds as one
+unit. The guarantee is only as strong as its weakest copy, so if that logic ends up duplicated per
+tool, stop and restructure.
 
 ### 5. An advisory tool is never a strict gate without its fail flag
 
@@ -165,6 +166,20 @@ Caught only by driving the real server. See
 [laravel-mcp-notes.md](laravel-mcp-notes.md#tool-names-default-to-kebab-case).
 
 ## Test discipline that caught the above
+
+### A test file never imports a global class
+
+Pest test files sit in the global namespace, so `use Closure;` or `use RuntimeException;` in one is
+a redundant import. PHP raises a compile warning, `phpunit.xml` sets `failOnWarning`, and the suite
+exits 1.
+
+The trap is what that looks like: the agent output formatter still prints
+`{"tool":"pest","result":"passed"}` with the real failure only in `warnings`, so reading the verdict
+instead of the exit code says the suite is green. This has turned the build red three times.
+
+Reference a global class directly in a test file, and check `$?` rather than the formatter's
+`result` key.
+
 
 **Mutation-check the guards; do not just run the tests.** A test that passes without exercising
 the change is not coverage. Every invariant above has a test whose failure was confirmed by

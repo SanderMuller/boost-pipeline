@@ -84,8 +84,8 @@ function declaredMutatingPipeline(): Pipeline
 it('verifies a run whose tree never moved', function (): void {
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', new SettableFingerprint);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -98,8 +98,8 @@ it('still verifies a run whose steps declared that they rewrite code', function 
     $tree = new SettableFingerprint;
     $run = Run::start(declaredMutatingPipeline()->walk(), new RewritesTheTree($tree), 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -114,8 +114,8 @@ it('refuses to verify when a read-only step is the one that changed the tree', f
     $tree = new SettableFingerprint;
     $run = Run::start(twoStepPipeline()->walk(), new RewritesTheTree($tree), 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toContain('Step [first] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
@@ -125,13 +125,13 @@ it('refuses to verify when the tree changed between two steps', function (): voi
     $tree = new SettableFingerprint;
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', $tree);
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     // Nothing ran in this gap, so the change is the agent's: the first step's
     // verdict now describes code that is no longer on disk.
     $tree->value = 'edited';
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toContain('Step [first] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
@@ -141,8 +141,8 @@ it('refuses to verify when the tree changed after the walk finished', function (
     $tree = new SettableFingerprint;
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->allVerified())->toBeTrue();
 
@@ -157,8 +157,8 @@ it('does not expire anything when the tree cannot be fingerprinted', function ()
     // existed, rather than a run that can never be verified.
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', new SettableFingerprint(null));
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -168,7 +168,7 @@ it('hands back the same run while the tree sits still', function (): void {
     $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, new SettableFingerprint);
 
     $first = $manager->open();
-    $first->resolveCurrentStep();
+    $first->resolveCurrent();
 
     expect($manager->open()->id)->toBe($first->id);
 });
@@ -181,7 +181,7 @@ it('starts a fresh run once the tree has moved, which is what the fix loop needs
     $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, $tree);
 
     $first = $manager->open();
-    $first->resolveCurrentStep();
+    $first->resolveCurrent();
 
     $tree->value = 'after-the-fix';
 
@@ -207,8 +207,8 @@ it('refuses to verify when a rewriting step runs after a check already passed', 
 
     $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toContain('Step [checks] measured a different working tree')
         ->and($run->allVerified())->toBeFalse();
@@ -227,8 +227,8 @@ it('verifies the fix chain, where rewriting steps come first', function (): void
 
     $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -248,8 +248,8 @@ it('does not invalidate a run when a rewriting step found nothing to rewrite', f
 
     $run = Run::start($pipeline->walk(), new AlwaysPasses, 'r-test', $tree);
 
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -281,10 +281,10 @@ it('does not hold a fixed run stale for having been fixed', function (): void {
 
     $run = Run::start($pipeline->walk(), $failsUntilFixed, 'r-test', $tree);
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     $tree->value = 'the-fix';
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
@@ -302,7 +302,7 @@ it('credits a declared mutating skill for the edit it was asked to make', functi
 
     $run = Run::start($pipeline->walk(), new AlwaysPasses, 'r-test', $tree);
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     $tree->value = 'fixed-by-evaluate';
     $run->acknowledgeCurrentStep('fixed two things');
@@ -323,9 +323,9 @@ it('does not treat an acknowledgement as a check a later rewrite invalidates', f
 
     $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
 
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
     $run->acknowledgeCurrentStep('reviewed');
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
 
     expect($run->staleReason())->toBeNull();
 });
@@ -357,8 +357,8 @@ it('never reports verified and stale from different readings of the tree', funct
     };
 
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', $shifting);
-    $run->resolveCurrentStep();
-    $run->resolveCurrentStep();
+    $run->resolveCurrent();
+    $run->resolveCurrent();
 
     $verification = $run->verification();
 

@@ -29,12 +29,22 @@ final readonly class StepPayload
         ];
     }
 
-    /** @return array<string, mixed> */
-    public static function afterResolution(Run $run, Result $result): array
+    /**
+     * @param  list<Result>  $results
+     * @return array<string, mixed>
+     */
+    public static function afterResolution(Run $run, array $results): array
     {
+        // One step keeps the singular key it has always had. A parallel group
+        // reports `results`, because collapsing several verdicts into one would
+        // hide the failures the group was declared to surface together.
+        $resolved = count($results) === 1
+            ? ['result' => $results[0]->toArray()]
+            : ['results' => array_map(static fn (Result $result): array => $result->toArray(), $results)];
+
         return [
             ...self::envelope($run),
-            'result' => $result->toArray(),
+            ...$resolved,
             ...self::currentStep($run),
         ];
     }
@@ -137,12 +147,28 @@ final readonly class StepPayload
     /** @return array<string, mixed> */
     private static function currentStep(Run $run): array
     {
-        $current = $run->currentStep();
+        $position = $run->currentPosition();
 
-        if (! $current instanceof WalkStep) {
+        if ($position === []) {
             return [];
         }
 
+        // A group is handed over whole. The agent runs none of it, so several
+        // commands cost it no more attention than one, and naming them all is what
+        // lets it see why the position held when one of them fails.
+        if (count($position) > 1) {
+            return ['steps' => array_map(
+                self::describe(...),
+                $position,
+            ), 'parallel' => true];
+        }
+
+        return ['step' => self::describe($position[0])];
+    }
+
+    /** @return array<string, mixed> */
+    private static function describe(WalkStep $current): array
+    {
         $step = [
             'id' => $current->step->id(),
             'phase' => $current->phaseName,
@@ -172,6 +198,6 @@ final readonly class StepPayload
                 .'so the verdict is acknowledged rather than verified.';
         }
 
-        return ['step' => $step];
+        return $step;
     }
 }

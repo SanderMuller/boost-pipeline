@@ -65,9 +65,9 @@ final class NextStep extends Tool
 
     private function resolve(Run $run): Response|ResponseFactory
     {
-        $result = $run->resolveCurrentStep();
+        $results = $run->resolveCurrent();
 
-        if (! $result instanceof Result) {
+        if ($results === []) {
             // Resolving revealed a skill step (now awaiting) or the walk's end.
             return $run->state() === RunState::Awaiting
                 ? Response::structured(StepPayload::awaiting($run))
@@ -78,14 +78,29 @@ final class NextStep extends Tool
         // on MCP's error channel. A `failed` verdict is a SUCCESSFUL call
         // reporting a real finding; marking that isError would make every failing
         // check look like a broken server and invite the client to retry it.
-        if ($result->verdict === Verdict::Error) {
+        //
+        // A group reports on the error channel if any one of its steps could not
+        // run, and names every one that could not: the whole group re-runs, so the
+        // agent needs all of them, not the first.
+        $errors = array_values(array_filter(
+            $results,
+            static fn (Result $result): bool => $result->verdict === Verdict::Error,
+        ));
+
+        if ($errors !== []) {
             return Response::error(sprintf(
-                "Step [%s] could not run: %s\nRun state: halted. The cursor stays here — fix what stopped it and call next_step again.",
-                $result->stepId,
-                $result->reason ?? $result->summary,
+                "%s\nRun state: halted. The cursor stays here — fix what stopped it and call next_step again.",
+                implode("\n", array_map(
+                    static fn (Result $result): string => sprintf(
+                        'Step [%s] could not run: %s',
+                        $result->stepId,
+                        $result->reason ?? $result->summary,
+                    ),
+                    $errors,
+                )),
             ));
         }
 
-        return Response::structured(StepPayload::afterResolution($run, $result));
+        return Response::structured(StepPayload::afterResolution($run, $results));
     }
 }

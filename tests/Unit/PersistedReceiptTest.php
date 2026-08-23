@@ -77,7 +77,7 @@ function drain(Run $run): void
             continue;
         }
 
-        $run->resolveCurrentStep();
+        $run->resolveCurrent();
     }
 }
 
