@@ -5,6 +5,57 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.1 - 2026-08-23
+
+<!-- verified-sha: e61b53701ff35780b4c4ec6dccb07de021eb486d -->
+Consumer feedback on 0.3.0. Nothing here changes what a verdict means; it closes the gaps two
+projects hit while wiring it up.
+
+### Added
+
+- **`Pipeline::configure()->withTimeout(seconds)`** sets the ceiling for every step that does not
+  set its own. A per-step `->timeout()` already covered the one slow step, but a project whose
+  suite is slow throughout had to repeat itself on every step, and the runner's own default was not
+  reachable from configuration at all. A step's own value still wins.
+  
+- `withTimeout()` and `Shell::run(...)->timeout()` reject zero or less. The process runner reads
+  zero as *no* limit, so what looks like tightening a cap removed it — and a step that never
+  returns holds the tool call open until the client gives up.
+  
+
+### Changed
+
+- **`all_verified` is answered from the first result onward, in any state**, rather than only once
+  the walk finished. `blocked` and `halted` are both retryable, so a run sits in them while the
+  agent decides what to do next — which is exactly when a consumer asks whether the run can be
+  trusted, and an absent key left "absent" and "false" to be told apart. `acknowledged` and
+  `stale` travel with it. A run with no results yet still omits all three: there is nothing to
+  answer.
+
+### Fixed
+
+- **`all_verified` and `stale` come from a single reading of the tree.** Each used to read for
+  itself, so a change landing between the two produced one response carrying `all_verified: true`
+  beside a `stale` message. A payload that contradicts itself is worse than either field being
+  wrong alone, because it leaves no way to decide which half to believe.
+  
+- `open_run` keeps its run id when the tree changes before any step has run. A run with no
+  receipts has no verdict to lose, so it adopts the new tree instead of being replaced — opening,
+  editing, and opening again used to hand back three different ids.
+  
+
+### Documentation
+
+- Add `.config/` to the paths your static analyser and formatter cover. `.config/pipeline.php` is
+  PHP that runs in your application but sits outside the paths most projects analyse, so a real
+  config shipped a `shell_exec()` its own project bans — invisible to a full-project run.
+  
+- The empty-test-selection warning shipped in 0.3.0 but was missing from its notes: a selection
+  command that prints nothing and exits 0 collapses `php artisan test $(...)` to the whole suite.
+  
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.3.0...v0.3.1
+
 ## [Unreleased]
 
 ### Added
@@ -22,10 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly when a consumer asks whether the run can be trusted, and the key being absent left
   "absent" and "false" to be told apart. A run with no results yet still omits it: there is
   nothing to answer.
-
+  
 - `withTimeout()` and `Shell->timeout()` reject a value of zero or less. Symfony's process runner
   treats zero as no limit, so accepting it removed the ceiling instead of tightening it — and a
   step that never returns holds the tool call open until the client gives up.
+  
 
 ### Documentation
 
@@ -40,10 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separately, so a change landing between the two could produce one response carrying
   `all_verified: true` beside a `stale` message — the two fields contradicting each other in the
   same payload.
-
+  
 - `open_run` keeps its run id when the tree changes before any step has run. A run with no
   receipts has no verdict to lose, so it adopts the new tree instead of being replaced, which
   stops run ids churning while the agent is still deciding what to run.
+  
 
 ## v0.3.0 - 2026-08-23
 
