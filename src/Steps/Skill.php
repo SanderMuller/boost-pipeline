@@ -22,11 +22,32 @@ final readonly class Skill implements Step
         private string $invocation,
         private string $id,
         private ?string $description,
+        private bool $mutates = false,
     ) {}
 
     public static function run(string $invocation, ?string $id = null, ?string $description = null): self
     {
         return new self($invocation, $id ?? self::deriveId($invocation), $description);
+    }
+
+    /**
+     * Declare that the agent is expected to change code during this step.
+     *
+     * A fixing skill — `/evaluate` and the like — genuinely rewrites the tree, so
+     * without this the run reports stale every time the skill does its job. Note
+     * what declaring it costs: verdicts earned BEFORE this step were measured
+     * against different code, and saying the change is expected does not make
+     * them true again. Put fixing steps ahead of the checks that must see the
+     * result, which is what the default phase order already does.
+     */
+    public function mutating(): self
+    {
+        return new self($this->invocation, $this->id, $this->description, true);
+    }
+
+    public function mutates(): bool
+    {
+        return $this->mutates;
     }
 
     public function id(): string

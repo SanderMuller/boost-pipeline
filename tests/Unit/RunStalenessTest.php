@@ -54,6 +54,16 @@ function twoStepPipeline(): Pipeline
     });
 }
 
+/** The same walk, with both steps declaring that they rewrite code. */
+function declaredMutatingPipeline(): Pipeline
+{
+    return Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)
+            ->append(Shell::run('true', id: 'first')->mutating())
+            ->append(Shell::run('true', id: 'second')->mutating());
+    });
+}
+
 it('verifies a run whose tree never moved', function (): void {
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', new SettableFingerprint);
 
@@ -64,19 +74,34 @@ it('verifies a run whose tree never moved', function (): void {
         ->and($run->allVerified())->toBeTrue();
 });
 
-it('still verifies a run whose own steps rewrote the tree', function (): void {
-    // The case a single fingerprint per step gets wrong. Both steps here change
-    // the tree while running, which is what a fix-mode step does — attributing
-    // that to the agent would report a false stale on every such run, and a gate
-    // that cries stale when nothing is wrong stops being believed.
+it('still verifies a run whose steps declared that they rewrite code', function (): void {
+    // `pint` and `rector process` change the tree as their normal job. Counting
+    // that against the run would report stale on every clean run using one, and a
+    // gate that cries stale when nothing is wrong stops being read.
     $tree = new SettableFingerprint;
-    $run = Run::start(twoStepPipeline()->walk(), new RewritesTheTree($tree), 'r-test', $tree);
+    $run = Run::start(declaredMutatingPipeline()->walk(), new RewritesTheTree($tree), 'r-test', $tree);
 
     $run->resolveCurrentStep();
     $run->resolveCurrentStep();
 
     expect($run->staleReason())->toBeNull()
         ->and($run->allVerified())->toBeTrue();
+});
+
+it('refuses to verify when a read-only step is the one that changed the tree', function (): void {
+    // The case timing cannot catch. Attributing a change to "whatever step was
+    // running" absorbs an edit made DURING a step — and a blocked run is exactly
+    // when files get edited, against a step that can take half a minute. Either
+    // the step rewrites code and must say so, or something edited mid-run; both
+    // mean the verdict is not proven for the code that now exists.
+    $tree = new SettableFingerprint;
+    $run = Run::start(twoStepPipeline()->walk(), new RewritesTheTree($tree), 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toContain('does not declare that it rewrites code')
+        ->and($run->allVerified())->toBeFalse();
 });
 
 it('refuses to verify when the tree changed between two steps', function (): void {
@@ -91,7 +116,7 @@ it('refuses to verify when the tree changed between two steps', function (): voi
 
     $run->resolveCurrentStep();
 
-    expect($run->staleReason())->toContain('while this run was in progress')
+    expect($run->staleReason())->toContain('does not declare that it rewrites code')
         ->and($run->allVerified())->toBeFalse();
 });
 

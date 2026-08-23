@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- `Step` gained `mutates(): bool`, and a step that rewrites code must declare it with
+  `->mutating()`. See UPGRADING.md.
+
 ### Added
 
 - A run's verdicts expire when the working tree changes. Each resolution fingerprints the tree —
@@ -15,9 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   during the walk or after it. "This run passed" now means "this passed against the code that is
   on disk".
 
-  The fingerprint is taken before *and* after each step, so a step that rewrites code is not
-  mistaken for an edit. `pint` and `rector process` change the tree as their normal job; a single
-  reading per step would report stale on every clean run that uses one.
+  Attribution is by declaration, not timing. A step that rewrites code says so with
+  `->mutating()` and its writes are absorbed; a change nothing declared is a finding, because
+  either the step lied or something edited files mid-run, and both mean the verdict is not proven
+  for the code that now exists. Timing cannot separate those — a blocked run is precisely when
+  files get edited, against steps that take half a minute — so the config decides rather than the
+  clock. It also costs one tree reading per step instead of two.
 
   No git means no fingerprint and no expiry, rather than a run that can never be verified.
 
@@ -32,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool could not run, which is the kind of thing that then gets fixed; the cursor stays on the
   step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
   open.
+
+- A step summary strips the escape sequences and carriage-return redraws a terminal would have
+  consumed. A tool that draws returned nothing usable over MCP: a PHPUnit summary arrived as an
+  escape-wrapped dot repeated to the truncation limit with the verdict pushed out of view, and a
+  Rector summary was almost entirely redraw frames. The summary is the only step output visible
+  without opening the log.
 
 - A truncated step summary keeps the head *and* the tail of the output, with an inline count of the
   omitted lines. Tools disagree about where the useful part is — static analysis leads with

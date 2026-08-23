@@ -198,6 +198,11 @@ it('reports a step whose setup throws as an error, not a failure', function (): 
             return StepKind::Shell;
         }
 
+        public function mutates(): bool
+        {
+            return false;
+        }
+
         public function before(): void
         {
             throw new RuntimeException('setup exploded');

@@ -251,11 +251,19 @@ server ← { state: "complete", all_verified: false,
                    describe the code on disk. Open a new run." }
 ```
 
-A step that rewrites code is not an edit. `pint` and `rector process` change the tree as their
-normal job, so the fingerprint is taken before *and* after each step: a change while a step ran is
-that step's, and a change between two steps is yours. Without that split, every pipeline using a
-fix-mode step would report stale on a clean run — and a gate that cries stale when nothing is wrong
-stops being read.
+A step that rewrites code declares it, and then its own writes do not count against the run:
+
+```php
+$steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint')->mutating());
+```
+
+Attribution is by declaration, not by timing. "Whatever step was running must have done it" would
+absorb an edit made *while* a step ran — and a blocked run is exactly when you go and change
+something, against steps that take half a minute. So a change nothing declared is reported rather
+than explained away: either the step rewrites code and should say so, or something edited files
+mid-run, and both mean the verdict is not proven for the code that exists now.
+
+Check-mode steps need nothing, which is the usual case — a gate uses `pint --test`, not `pint`.
 
 `open_run` uses the same signal. It returns the run already open while the tree sits still, and
 starts a fresh one once you have changed something — which is what makes the fix loop work: run,

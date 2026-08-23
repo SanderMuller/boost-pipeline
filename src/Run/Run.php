@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\StepKind;
@@ -34,13 +35,13 @@ final class Run
     /**
      * The tree as it stood after the last resolution, or at the start.
      *
-     * This moves forward on purpose. A step that rewrites code — `pint`, or
-     * `rector process` — changes the tree as its normal job, and holding the
-     * original would report every such run as stale.
+     * It moves forward only where a change is attributable: at the start, and
+     * after a step that DECLARED it rewrites code. Holding the original instead
+     * would report every run using a formatter as stale.
      */
     private ?string $baseline;
 
-    private bool $editedMidRun = false;
+    private bool $unexplainedChange = false;
 
     private function __construct(
         public readonly string $id,
@@ -96,10 +97,10 @@ final class Run
             return null;
         }
 
-        $this->noteEditsSinceLastStep();
+        $this->accountForTree();
 
         $result = $this->runner->run($current->step, $this->id);
-        $this->record($result);
+        $this->record($result, $current->step);
 
         return $result;
     }
@@ -116,10 +117,10 @@ final class Run
             throw AcknowledgementNotAllowed::forState($this->state);
         }
 
-        $this->noteEditsSinceLastStep();
+        $this->accountForTree();
 
         $result = Result::acknowledged($current->step->id(), $summary);
-        $this->record($result);
+        $this->record($result, $current->step);
 
         return $result;
     }
@@ -204,8 +205,8 @@ final class Run
      */
     public function staleReason(): ?string
     {
-        if ($this->editedMidRun) {
-            return 'The working tree changed while this run was in progress, so earlier steps no longer describe the code on disk. Open a new run.';
+        if ($this->unexplainedChange) {
+            return 'The working tree changed during a step that does not declare that it rewrites code, so this run no longer describes the code on disk. Either something edited files mid-run, or a step needs ->mutating(). Open a new run.';
         }
 
         if ($this->treeHasMoved()) {
@@ -239,11 +240,15 @@ final class Run
     }
 
     /**
-     * An edit between two steps is the agent's, not the pipeline's: nothing ran
-     * in that gap. Attributing it to the run — as a single fingerprint taken per
-     * step would — is what makes a fix-mode step look like tampering.
+     * Read the tree at a step boundary and decide whether the difference is
+     * explained.
+     *
+     * A declared-mutating step rebaselines the moment it records, so anything
+     * left over here is a change nothing accounted for. One reading per boundary
+     * is therefore enough — and no guessing from timing, which cannot tell a
+     * formatter apart from an edit made while a step was running.
      */
-    private function noteEditsSinceLastStep(): void
+    private function accountForTree(): void
     {
         if (! $this->tree instanceof TreeFingerprint) {
             return;
@@ -255,20 +260,21 @@ final class Run
             return;
         }
 
-        if ($this->baseline !== null && $now !== $this->baseline && $this->results !== []) {
-            $this->editedMidRun = true;
+        if ($this->baseline !== null && $now !== $this->baseline) {
+            $this->unexplainedChange = true;
         }
 
         $this->baseline = $now;
     }
 
-    private function record(Result $result): void
+    private function record(Result $result, Step $step): void
     {
         $this->results[$result->stepId] = $result;
 
-        // Whatever the step itself wrote is expected, so it becomes the new
-        // baseline rather than counting as an edit against the run.
-        $this->baseline = $this->tree?->capture() ?? $this->baseline;
+        // Only a step that said it rewrites code gets its changes absorbed.
+        if ($step->mutates()) {
+            $this->baseline = $this->tree?->capture() ?? $this->baseline;
+        }
 
         if (! $result->verdict->advancesCursor()) {
             $this->state = $result->verdict->isTerminalForRun()

@@ -1,5 +1,41 @@
 # Upgrading
 
+## From 0.2 to 0.3
+
+### Changed
+
+- `Step` gained `mutates(): bool`. Add it to any implementation of the interface.
+  `Shell` and `Skill` already have it, so a pipeline that only configures steps needs no
+  changes.
+
+  ```php
+  // after
+  public function mutates(): bool
+  {
+      return false;   // true if the step rewrites code
+  }
+  ```
+
+- A step that rewrites code must declare it, or the run reports itself stale.
+
+  ```php
+  // before — a fix-mode step, silently trusted
+  $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint'));
+
+  // after
+  $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint')->mutating());
+  ```
+
+  Check-mode steps (`pint --test`, `rector process --dry-run`, `phpstan`, a test runner)
+  need nothing — they do not change the tree, which is the whole reason a gate uses check
+  mode. Only declare `->mutating()` where the step genuinely rewrites files, including a
+  fixing skill step such as `Skill::run('/evaluate')->mutating()`.
+
+  Declaring it means the step's own writes stop counting against the run. It does not make
+  a verdict earned *before* that step true again — those ran against different code — so
+  keep fixing steps ahead of the checks that must see their result, which is what the
+  default phase order already does.
+
 ## From 0.1 to 0.2
 
 Only affects code that implements `StepRunner` or constructs `ProcessStepRunner` itself. A pipeline

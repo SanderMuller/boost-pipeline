@@ -23,6 +23,8 @@ final class Shell implements Step
     /** @var array<string, string> */
     private array $env = [];
 
+    private bool $mutates = false;
+
     private function __construct(
         private readonly string $command,
         private readonly string $id,
@@ -93,6 +95,23 @@ final class Shell implements Step
     public function env(): array
     {
         return $this->env;
+    }
+
+    /**
+     * Declare that this step rewrites code, the way `pint` or `rector process`
+     * do, so the tree changing while it runs is its own work rather than an edit
+     * that invalidates the run.
+     */
+    public function mutating(): self
+    {
+        $this->mutates = true;
+
+        return $this;
+    }
+
+    public function mutates(): bool
+    {
+        return $this->mutates;
     }
 
     public function before(): void {}
