@@ -10,6 +10,99 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.5.0 - 2026-08-23
+
+A skill step can finally say what it is for. The field that carries that was reachable from config
+and read by nothing, so the package delivered steps one at a time without ever narrowing them.
+
+### Breaking
+
+Pre-1.0, so this lands in a minor. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+migration.
+
+- **`Skill::run()`'s third parameter is renamed from `description` to `instruction`.** Only code
+  that passed it by name is affected, and nothing can have depended on its effect, because it had
+  none.
+
+### Added
+
+- **A skill step carries its own instruction, and the agent receives it.** `Skill::run()` has always
+  taken a third argument for what the step is for, and `Step::description()` has always been on the
+  contract. The only reader was `WalkStep::toArray()`, which has no callers — so the string never
+  reached the agent.
+  
+  That is the difference between sequencing and focus. A step handed over as a bare `/code-review`
+  makes the agent run a broad skill, which arrives with its own list of concerns, so the wall of
+  context the cursor exists to break up reappears inside the step.
+  
+  ```php
+  $steps->in(Agent::class)
+      ->append(Skill::run('/code-review', id: 'errors',
+          instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
+      ->append(Skill::run('/code-review', id: 'tests',
+          instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
+  ```
+  Give each step an explicit `id` when several invoke the same skill: an id is derived from the
+  invocation, so two `/code-review` steps both derive `code-review`, and a duplicate id throws when
+  the run opens.
+  
+- **`Pipeline::withPhases()` and `Pipeline::phases()` are back**, with `Phases::append()`,
+  `prepend()`, `remove()`, `moveAfter()` and the `PhasePosition` class. The five defaults suit a
+  pipeline of mechanical checks. A pipeline that sequences review work does not fit them, because its
+  steps are not refactoring or formatting or tests, and six review lenses all reporting phase `Agent`
+  tell a reader nothing.
+  
+  They were removed because no consumer called them. That was true and it was the wrong measure:
+  configuring phases only matters to the pipelines the defaults do not describe, so counting callers
+  measures which pipelines exist rather than whether the seam earns its place.
+  
+  Review lenses are deliberately **not** shipped as default phases. What a good review decomposes
+  into belongs to the skills, not to this package.
+  
+
+### Fixed
+
+- **The note on a skill step states the guarantee that exists.** It used to say only that the step is
+  "recorded as acknowledged, not verified". True, and the wrong thing to repeat on every step of a
+  pipeline whose steps are meant to be judgement work: it framed the normal outcome as a shortfall.
+  It now leads with what the server does promise — this step arrived on its own, in order, and
+  nothing follows until it resolves.
+  
+- **`pipeline:verify` no longer advises removing skill steps from the pipeline.** For a verification
+  gate that was sound. For a pipeline that sequences review work it says: stop using the feature.
+  The message now says an acknowledged step is expected, that the walk still guarantees order and
+  one-at-a-time delivery, and points at `status`. The exit contract is untouched: exit 0 still
+  requires every step verified.
+  
+- **`pipeline:verify` stops claiming a retryable run finished.** A blocked or halted run has not
+  finished — `next_step` hands the same step back — so "finished in state [halted]" contradicted the
+  server it reports on. It now names the state and the steps that were not verified. The
+  acknowledged-step message also had its parenthetical between the verb and its complement.
+  
+
+### Documentation
+
+- **The README describes current behaviour rather than its own release history.** It had accumulated
+  what the receipt did for earlier releases, a config that reached production with a banned call, a
+  driver that hung on a withdrawn server, a suite that measured 336s. Two of those were also wrong:
+  "the set is fixed" described the phases one commit before they became configurable again, and the
+  worked example quoted a skill-step note that no longer exists.
+  
+- **The framing leads with sequencing.** The tagline said "a verification pipeline", which is the
+  smaller half. Handing over one step at a time is the point, and the instruction on a skill step now
+  has prose of its own instead of appearing only inside two code samples.
+  
+
+### Verified
+
+172 tests, 423 assertions. PHPStan level max, Rector and Pint clean, `composer validate --strict`
+valid. CI green on this commit across all four matrix legs: PHP 8.4 and 8.5, Laravel 12 and 13,
+`prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.4.2...v0.5.0
+
 ## v0.4.2 - 2026-08-23
 
 `pipeline:verify` told a consumer nothing useful when their pipeline could never satisfy it. The
@@ -197,6 +290,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -254,6 +348,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
