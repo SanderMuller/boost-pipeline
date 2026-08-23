@@ -158,7 +158,9 @@ return Pipeline::configure()
     });
 ```
 
-Five phases ship, in this order, holding no steps until you add them:
+Five phases ship, in this order, holding no steps until you add them. The set is fixed — a phase
+is only a named, ordered group, so a step that wants different company goes in whichever phase
+runs at the right point:
 
 | # | Phase | For |
 |---|---|---|
@@ -178,9 +180,9 @@ first would mean formatting code Rector is about to rewrite.
 ### `withSteps()` order is not execution order
 
 Steps run in phase order, then in `append`/`prepend` order within a phase. Declaring
-`in(Formatting::class)` before `in(Refactoring::class)` changes nothing, because only
-`withPhases()` orders phases. Group your `in()` calls in phase order so the file reads the way it
-runs. This catches people out.
+`in(Formatting::class)` before `in(Refactoring::class)` changes nothing, because the phase order
+decides. Group your `in()` calls in phase order so the file reads the way it runs. This catches
+people out.
 
 ### Analyse the config, it is real code
 
@@ -237,19 +239,12 @@ Note that a *failed* step is `server_run: true`. That key answers *who produced 
 
 ## Extending
 
-A phase is nothing but a named, ordered group of steps, which is why adding one costs nothing:
+Two seams, both narrow on purpose. Implement `Step` for a step the server resolves some other way,
+and `StepRunner` to replace how a shell step runs — bind your own over the container's and every
+step goes through it:
 
 ```php
-final class ImpactAnalysis implements Phase
-{
-    public function id(): string { return 'impact-analysis'; }
-    public function name(): string { return 'Impact analysis'; }
-}
-
-Pipeline::configure()
-    ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class))
-    ->withSteps(fn (Steps $steps) => $steps->in(ImpactAnalysis::class)
-        ->append(Shell::run('php artisan richter:detect-changes --fail-on=high')));
+$this->app->singleton(StepRunner::class, fn () => new MyRunner);
 ```
 
 A dropped step is always reported. Declare a step into a phase that is not registered and it does

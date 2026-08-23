@@ -49,46 +49,6 @@ it('ships no steps by default, so an out-of-the-box pipeline is immediately comp
         ->and($walk->at(0))->toBeNull();
 });
 
-it('drops a phase with remove', function (): void {
-    $pipeline = Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->remove(Refactoring::class);
-        });
-
-    expect($pipeline->phases()->all())->not->toContain(Refactoring::class)
-        ->and($pipeline->phases()->all())->toHaveCount(4);
-});
-
-it('lands a custom phase directly after its anchor', function (): void {
-    $pipeline = Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class);
-        });
-
-    expect($pipeline->phases()->all())->toBe([
-        Refactoring::class,
-        Formatting::class,
-        StaticAnalysis::class,
-        ImpactAnalysis::class,
-        Tests::class,
-        Agent::class,
-    ]);
-});
-
-it('fails loudly when positioning after a phase that is not registered', function (): void {
-    Pipeline::configure()->withPhases(function (Phases $phases): void {
-        $phases->remove(StaticAnalysis::class);
-        $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class);
-    });
-})->throws(InvalidPipelineConfigException::class, 'no such phase is registered');
-
-it('fails loudly when a phase is positioned after itself', function (): void {
-    Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class);
-        });
-})->throws(InvalidPipelineConfigException::class);
-
 it("walks each phase's steps in order, skipping empty phases silently", function (): void {
     $walk = Pipeline::configure()
         ->withSteps(function (Steps $steps): void {
@@ -127,22 +87,13 @@ it('fails loudly on a duplicate step id across phases', function (): void {
         ->walk();
 })->throws(InvalidPipelineConfigException::class, 'Duplicate step id [pint]');
 
-it('says "after itself" rather than "not registered" for a self-anchor', function (): void {
-    Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class);
-        });
-})->throws(InvalidPipelineConfigException::class, 'after itself');
-
 it('reports steps declared into a phase that is not registered', function (): void {
-    // Same class of silent loss as a dropped transition: removing a phase would
-    // otherwise take its gates down without a word.
+    // The only way a declared step can be lost, and it must never be lost in
+    // silence: a typo'd phase class would otherwise take its gate down without a
+    // word.
     $walk = Pipeline::configure()
-        ->withPhases(function (Phases $phases): void {
-            $phases->remove(Refactoring::class);
-        })
         ->withSteps(function (Steps $steps): void {
-            $steps->in(Refactoring::class)->append(Shell::run('vendor/bin/rector process --dry-run'));
+            $steps->in(ImpactAnalysis::class)->append(Shell::run('vendor/bin/rector process --dry-run'));
             $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
         })
         ->walk();
@@ -150,7 +101,7 @@ it('reports steps declared into a phase that is not registered', function (): vo
     expect(array_map(fn (WalkStep $walkStep): string => $walkStep->step->id(), $walk->steps))->toBe(['pint'])
         ->and($walk->notices)->toHaveCount(1)
         ->and($walk->notices[0])->toContain('[rector]')
-        ->and($walk->notices[0])->toContain('Refactoring')
+        ->and($walk->notices[0])->toContain('ImpactAnalysis')
         ->and($walk->notices[0])->toContain('not registered');
 });
 

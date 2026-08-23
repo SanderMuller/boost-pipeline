@@ -37,14 +37,6 @@ final class Pipeline
         return new self;
     }
 
-    /** @param Closure(Phases): void $callback */
-    public function withPhases(Closure $callback): self
-    {
-        $callback($this->phases);
-
-        return $this;
-    }
-
     /** @param Closure(Steps): void $callback */
     public function withSteps(Closure $callback): self
     {
@@ -75,11 +67,6 @@ final class Pipeline
     public function timeoutSeconds(): ?float
     {
         return $this->timeoutSeconds;
-    }
-
-    public function phases(): Phases
-    {
-        return $this->phases;
     }
 
     public function steps(): Steps

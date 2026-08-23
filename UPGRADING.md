@@ -1,5 +1,69 @@
 # Upgrading
 
+## From 0.3 to 0.4
+
+This release removes configuration surface that nothing used. If your
+`.config/pipeline.php` only calls `withSteps()` — and both known consumers only do — you need no
+changes.
+
+### Removed
+
+- `Step::before()` and `Step::after()` are gone from the contract. Delete them from any
+  implementation of `Step`.
+
+  ```php
+  // before
+  final class MyStep implements Step
+  {
+      public function before(): void { /* ... */ }
+
+      public function after(Result $result): void { /* ... */ }
+  }
+
+  // after — both methods deleted
+  final class MyStep implements Step {}
+  ```
+
+  Leaving them in place is legal PHP and will not break, which is the reason to say so here: the
+  package stops calling them, so setup or teardown written inside one silently stops running. Move
+  that work into the step's own resolution, or into a shell step of its own.
+
+- `Steps::between()` is gone. Attach the step inside a phase instead.
+
+  ```php
+  // before
+  $steps->between(Formatting::class, StaticAnalysis::class,
+      Shell::run('git diff --quiet -- composer.lock'));
+
+  // after
+  $steps->in(StaticAnalysis::class)
+      ->prepend(Shell::run('git diff --quiet -- composer.lock'));
+  ```
+
+  `prepend()` on the later phase puts the step in the same place in the walk. Only the reported
+  phase label changes: the step now belongs to `StaticAnalysis` rather than to the join.
+
+- `Pipeline::withPhases()` and `Pipeline::phases()` are gone, with `Phases::append()`,
+  `prepend()`, `remove()`, `moveAfter()`, and the `PhasePosition` class. The five phases in
+  `Phases::DEFAULTS` are the whole set.
+
+  ```php
+  // before
+  Pipeline::configure()
+      ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class))
+      ->withSteps(fn (Steps $steps) => $steps->in(ImpactAnalysis::class)->append(Shell::run('...')));
+
+  // after — put the step in the phase that runs at the right point
+  Pipeline::configure()
+      ->withSteps(fn (Steps $steps) => $steps->in(StaticAnalysis::class)->append(Shell::run('...')));
+  ```
+
+  A phase is only a named, ordered group, so the step runs at the same point either way. What you
+  lose is the grouping label, and a phase you removed no longer stays removed.
+
+  A step declared into a phase outside that set is still dropped rather than run, still appears in
+  `open_run`'s `notices`, and still forces `all_verified: false`.
+
 ## From 0.2 to 0.3
 
 ### Changed
