@@ -51,11 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
   open.
 
+- A run reports itself stale when a step that rewrites code runs after a check has already passed.
+  Absorbing the rewrite kept the run looking current while that check described code the run then
+  changed — a false green, which is the one thing this package exists not to produce. The ordering
+  was previously advice in the docs; it is now enforced.
+
 - A step summary strips the escape sequences and carriage-return redraws a terminal would have
   consumed. A tool that draws returned nothing usable over MCP: a PHPUnit summary arrived as an
   escape-wrapped dot repeated to the truncation limit with the verdict pushed out of view, and a
   Rector summary was almost entirely redraw frames. The summary is the only step output visible
-  without opening the log.
+  without opening the log. Covers CSI colour and cursor sequences including the colon-form SGR
+  colours, OSC strings such as hyperlinks, and lone escapes; carriage-return handling keeps the
+  last frame of a line rather than emulating column-by-column overwrite. Input is capped before
+  scanning, so a tool that draws megabytes onto one line cannot make this expensive.
 
 - A truncated step summary keeps the head *and* the tail of the output, with an inline count of the
   omitted lines. Tools disagree about where the useful part is — static analysis leads with

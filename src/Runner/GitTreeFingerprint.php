@@ -15,6 +15,11 @@ use Throwable;
  * check passed and the agent then edited a file without committing. So the digest
  * also covers the contents of every path git reports as dirty or untracked.
  *
+ * Not covered: a submodule's own state. Git reports the submodule as one dirty
+ * directory, so a change to which commit it points at does not alter the digest.
+ * Neither consumer uses submodules, and reading them costs another git call on
+ * every step — stated here rather than silently assumed.
+ *
  * Ignored paths are excluded, which is what makes this usable at all: the run's
  * own logs live under `storage/logs/`, tool caches under `.cache/`, and neither
  * moves the fingerprint. A pipeline whose own writes expired its receipts would
@@ -39,7 +44,7 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
             return null;
         }
 
-        $status = $this->git(['status', '--porcelain', '--untracked-files=all']);
+        $status = $this->git(['status', '--porcelain=v1', '-z', '--untracked-files=all']);
 
         if ($status === null) {
             return null;
@@ -65,29 +70,36 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
     }
 
     /**
+     * Paths from `--porcelain=v1 -z`.
+     *
+     * The NUL form is not a nicety: without `-z`, git quotes any path holding a
+     * space, quote, backslash or non-ASCII byte and C-escapes the contents. A
+     * naive parse then names a file that does not exist, its contents never reach
+     * the digest, and every later edit to it is invisible — while its status line
+     * stays identical. The one case that must not silently stop being watched.
+     *
      * @return list<string>
      */
     private function dirtyPaths(string $status): array
     {
+        $records = explode("\0", $status);
         $paths = [];
+        $counter = count($records);
 
-        $lines = preg_split('/\R/', trim($status));
+        for ($i = 0; $i < $counter; $i++) {
+            $record = $records[$i];
 
-        foreach ($lines === false ? [] : $lines as $line) {
-            if (strlen($line) <= 3) {
+            if (strlen($record) <= 3) {
                 continue;
             }
 
-            // Porcelain v1 is 'XY <path>', and a rename is 'R  old -> new'. The
-            // destination is the side that has contents to hash.
-            $path = substr($line, 3);
-            $arrow = strpos($path, ' -> ');
+            $code = substr($record, 0, 2);
+            $paths[] = substr($record, 3);
 
-            if ($arrow !== false) {
-                $path = substr($path, $arrow + 4);
+            // A rename or copy is followed by its origin as a separate record.
+            if (str_contains($code, 'R') || str_contains($code, 'C')) {
+                $i++;
             }
-
-            $paths[] = trim($path, '"');
         }
 
         return $paths;

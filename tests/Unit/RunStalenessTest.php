@@ -45,6 +45,21 @@ final readonly class RewritesTheTree implements StepRunner
     }
 }
 
+/** Rewrites the tree exactly where the step declared that it would. */
+final readonly class RewritesWhenDeclared implements StepRunner
+{
+    public function __construct(private SettableFingerprint $tree) {}
+
+    public function run(Step $step, string $runId): Result
+    {
+        if ($step->mutates()) {
+            $this->tree->value = 'rewritten-by-'.$step->id();
+        }
+
+        return Result::passed($step->id(), 'ok');
+    }
+}
+
 function twoStepPipeline(): Pipeline
 {
     return Pipeline::configure()->withSteps(function (Steps $steps): void {
@@ -173,4 +188,46 @@ it('starts a fresh run once the tree has moved, which is what the fix loop needs
     expect($second->id)->not->toBe($first->id)
         ->and($second->results())
         ->toBeEmpty();
+});
+
+it('refuses to verify when a rewriting step runs after a check already passed', function (): void {
+    // The false green the ordering advice only asked for politely. The first step
+    // checks and passes against one tree; the second rewrites it. Absorbing the
+    // rewrite leaves the run looking current while the first verdict describes
+    // code that no longer exists.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)
+            ->append(Shell::run('true', id: 'checks'))
+            ->append(Shell::run('true', id: 'rewrites')->mutating());
+    });
+
+    $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toContain('after a check had already passed')
+        ->and($run->allVerified())->toBeFalse();
+});
+
+it('verifies the fix chain, where rewriting steps come first', function (): void {
+    // rector, then pint, then the checks — the default phase order. Both rewrites
+    // land before anything has checked, so nothing is invalidated.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)
+            ->append(Shell::run('true', id: 'rewrites')->mutating())
+            ->append(Shell::run('true', id: 'checks'));
+    });
+
+    $run = Run::start($pipeline->walk(), new RewritesWhenDeclared($tree), 'r-test', $tree);
+
+    $run->resolveCurrentStep();
+    $run->resolveCurrentStep();
+
+    expect($run->staleReason())->toBeNull()
+        ->and($run->allVerified())->toBeTrue();
 });

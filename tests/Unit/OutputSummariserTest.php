@@ -89,3 +89,20 @@ it('leaves output that never drew anything untouched', function (): void {
 
     expect($result['summary'])->toBe("Line 1\nLine 2");
 });
+
+it('strips the escape forms beyond plain colour codes', function (): void {
+    $summariser = new OutputSummariser;
+
+    expect($summariser->summarise("\033[38:2:255:0:0mred\033[0m done", 4)['summary'])->toBe('red done')
+        ->and($summariser->summarise("\033]8;;https://example.com\033\\link\033]8;;\033\\ done", 4)['summary'])->toBe('link done')
+        ->and($summariser->summarise("\033[?25lhidden\033[?25h done", 4)['summary'])->toBe('hidden done');
+});
+
+it('bounds the work when a tool draws megabytes onto one line', function (): void {
+    // No newlines, so nothing splits it. Every pass copies the string, and a
+    // summary that shows 20 lines has no reason to scan the rest.
+    $result = new OutputSummariser()->summarise(str_repeat('x', 5_000_000), 4);
+
+    expect($result['shown_lines'])->toBe(1)
+        ->and(strlen($result['summary']))->toBeLessThan(1000);
+});

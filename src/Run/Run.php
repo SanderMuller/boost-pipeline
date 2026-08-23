@@ -43,6 +43,8 @@ final class Run
 
     private bool $unexplainedChange = false;
 
+    private bool $rewroteAfterChecking = false;
+
     private function __construct(
         public readonly string $id,
         public readonly Walk $walk,
@@ -209,6 +211,10 @@ final class Run
             return 'The working tree changed during a step that does not declare that it rewrites code, so this run no longer describes the code on disk. Either something edited files mid-run, or a step needs ->mutating(). Open a new run.';
         }
 
+        if ($this->rewroteAfterChecking) {
+            return 'A step that rewrites code ran after a check had already passed, so that check describes code this run then changed. Put steps that rewrite code before the ones that check it — the default phase order does. Open a new run.';
+        }
+
         if ($this->treeHasMoved()) {
             return 'The working tree changed after this run resolved, so its verdicts no longer describe the code on disk. Open a new run.';
         }
@@ -229,6 +235,15 @@ final class Run
         $now = $this->tree->capture();
 
         return $now !== null && $now !== $this->baseline;
+    }
+
+    /**
+     * Whether any step so far produced a verdict about the code rather than
+     * changing it.
+     */
+    private function hasCheckedAnything(): bool
+    {
+        return array_any($this->walk->steps, fn (WalkStep $walkStep) => isset($this->results[$walkStep->step->id()]) && ! $walkStep->step->mutates());
     }
 
     public function acknowledgedCount(): int
@@ -273,6 +288,15 @@ final class Run
 
         // Only a step that said it rewrites code gets its changes absorbed.
         if ($step->mutates()) {
+            // ...but absorbing it does not make an earlier verdict true again. A
+            // check that passed before this step measured different code, so a
+            // rewrite arriving after one is the ordering error the phase defaults
+            // exist to prevent, and the run says so rather than trusting the
+            // config to have got it right.
+            if ($this->hasCheckedAnything()) {
+                $this->rewroteAfterChecking = true;
+            }
+
             $this->baseline = $this->tree?->capture() ?? $this->baseline;
         }
 

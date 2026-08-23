@@ -265,6 +265,10 @@ mid-run, and both mean the verdict is not proven for the code that exists now.
 
 Check-mode steps need nothing, which is the usual case — a gate uses `pint --test`, not `pint`.
 
+Order matters, and the run enforces it rather than asking nicely. A rewriting step that runs *after*
+a check has already passed makes that check describe code the run then changed, so the run reports
+itself stale. Rewrite first, check second — which is what the default phase order does.
+
 `open_run` uses the same signal. It returns the run already open while the tree sits still, and
 starts a fresh one once you have changed something — which is what makes the fix loop work: run,
 see a failure, fix it, run again, without restarting the server.

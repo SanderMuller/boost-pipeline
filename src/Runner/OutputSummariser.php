@@ -27,6 +27,9 @@ final readonly class OutputSummariser
 
     public const int MAX_LINE_LENGTH = 400;
 
+    /** Ceiling on the bytes worth scanning; what gets shown is far smaller. */
+    public const int MAX_BYTES = 2_000_000;
+
     /** @return list<string> */
     private function split(string $output): array
     {
@@ -50,12 +53,28 @@ final readonly class OutputSummariser
      */
     private function readable(string $output): string
     {
-        // Colour and cursor-movement escapes: '\e[' then parameters then a letter.
-        $stripped = preg_replace('/\e\[[0-9;?]*[a-zA-Z]/', '', $output);
+        // A single line can be megabytes when a tool draws without newlines, and
+        // every pass below copies the string. Cap first: far more than the line
+        // budget can ever show, and bounded.
+        if (strlen($output) > self::MAX_BYTES) {
+            $output = substr($output, 0, self::MAX_BYTES);
+        }
+
+        // CSI (colour, cursor movement) including colon-form SGR colours and
+        // sequences carrying intermediate bytes, then OSC strings such as
+        // hyperlinks, then any lone escape left over.
+        $stripped = preg_replace(
+            '/\e\[[0-9;:?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\\\)?|\e[@-Z\\\\-_]/',
+            '',
+            $output,
+        );
         $output = $stripped ?? $output;
 
-        // Keep only what survived the last carriage return on each line, which is
-        // what the terminal would have been left showing.
+        // Keep only what survived the last carriage return on a line. Not exact
+        // terminal rendering — a terminal overwrites column by column, so
+        // "abc\rxy" leaves "xyc" where this leaves "xy". The case that matters is
+        // a progress line rewritten whole; guessing at partial overwrites would
+        // invent output no tool produced.
         $collapsed = preg_replace('/^.*\r(?!\n)/m', '', $output);
 
         return $collapsed ?? $output;

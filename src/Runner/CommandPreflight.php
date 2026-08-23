@@ -70,9 +70,11 @@ final readonly class CommandPreflight
             return null;
         }
 
-        // An absolute path may legitimately live outside the project, and a
-        // substitution or variable is not a path at all until the shell runs it.
-        if (str_starts_with($first, '/') || preg_match('/[$`"\'()]/', $first) === 1) {
+        // An absolute path may legitimately live outside the project. Anything
+        // else carrying shell punctuation is not a filename yet: `vendor/bin/pint;
+        // composer test` would otherwise be checked as a file literally named
+        // `vendor/bin/pint;` and warn about a step that runs perfectly well.
+        if (str_starts_with($first, '/') || preg_match('#^[A-Za-z0-9._/-]+$#', $first) !== 1) {
             return null;
         }
 

@@ -78,3 +78,10 @@ it('ignores skill steps, which run no binary', function (): void {
     expect($this->preflight->warnings($walk))
         ->toBeEmpty();
 });
+
+it('stays quiet when the first token carries shell punctuation', function (): void {
+    // `vendor/bin/pint; composer test` would otherwise be checked as a file
+    // literally named `vendor/bin/pint;` and warn about a step that runs fine.
+    expect($this->preflight->warnings(walkOf('vendor/bin/pint; composer test')))
+        ->toBeEmpty();
+});
