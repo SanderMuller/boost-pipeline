@@ -35,12 +35,9 @@ final class Phases
         Agent::class,
     ];
 
-    /** @var list<class-string<Phase>> */
-    private array $phases = self::DEFAULTS;
-
     /** @return list<class-string<Phase>> */
     public function all(): array
     {
-        return $this->phases;
+        return self::DEFAULTS;
     }
 }

@@ -239,13 +239,16 @@ Note that a *failed* step is `server_run: true`. That key answers *who produced 
 
 ## Extending
 
-Two seams, both narrow on purpose. Implement `Step` for a step the server resolves some other way,
-and `StepRunner` to replace how a shell step runs — bind your own over the container's and every
-step goes through it:
+One seam: `StepRunner`. Bind your own over the container's and every step the server resolves goes
+through it, so a step kind the shipped runner refuses becomes yours to handle.
 
 ```php
 $this->app->singleton(StepRunner::class, fn () => new MyRunner);
 ```
+
+A custom `Step` needs that binding to be worth writing. `ProcessStepRunner` runs `Shell` and
+nothing else, and a step reporting `StepKind::Skill` is acknowledged by the agent rather than run —
+so with the shipped runner in place, a third kind of step has nowhere to resolve.
 
 A dropped step is always reported. Declare a step into a phase that is not registered and it does
 not run: the drop appears in `open_run`'s `notices` and forces `all_verified: false`. A gate you
