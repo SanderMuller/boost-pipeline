@@ -1,5 +1,19 @@
 # Upgrading
 
+## From 0.4 to 0.5
+
+Additive. No migration needed.
+
+`Pipeline::withPhases()` and `Pipeline::phases()` are back, with `Phases::append()`, `prepend()`,
+`remove()`, `moveAfter()` and the `PhasePosition` class. If you migrated away from them for 0.4,
+nothing is broken — the `withSteps()`-only form still works. If you were waiting for them, the
+"From 0.3 to 0.4" note below no longer applies to this part.
+
+They were removed in 0.4.0 because no consumer called them. That was true, and it was the wrong
+conclusion: every consumer at the time ran a pipeline of shell checks, where the five shipped phase
+names already fit. A pipeline that sequences review and evaluation work has no such luck, and
+grouping every review step under one phase called `Agent` tells a reader nothing.
+
 ## From 0.3 to 0.4
 
 This release removes configuration surface that nothing used. If your

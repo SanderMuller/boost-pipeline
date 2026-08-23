@@ -49,6 +49,72 @@ it('ships no steps by default, so an out-of-the-box pipeline is immediately comp
         ->and($walk->at(0))->toBeNull();
 });
 
+it('drops a phase with remove', function (): void {
+    $pipeline = Pipeline::configure()
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(Refactoring::class);
+        });
+
+    expect($pipeline->phases()->all())->not->toContain(Refactoring::class)
+        ->and($pipeline->phases()->all())->toHaveCount(4);
+});
+
+it('lands a custom phase directly after its anchor', function (): void {
+    $pipeline = Pipeline::configure()
+        ->withPhases(function (Phases $phases): void {
+            $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class);
+        });
+
+    expect($pipeline->phases()->all())->toBe([
+        Refactoring::class,
+        Formatting::class,
+        StaticAnalysis::class,
+        ImpactAnalysis::class,
+        Tests::class,
+        Agent::class,
+    ]);
+});
+
+it('fails loudly when positioning after a phase that is not registered', function (): void {
+    Pipeline::configure()->withPhases(function (Phases $phases): void {
+        $phases->remove(StaticAnalysis::class);
+        $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class);
+    });
+})->throws(InvalidPipelineConfigException::class, 'no such phase is registered');
+
+it('fails loudly when a phase is positioned after itself', function (): void {
+    Pipeline::configure()
+        ->withPhases(function (Phases $phases): void {
+            $phases->append(ImpactAnalysis::class)->after(ImpactAnalysis::class);
+        });
+})->throws(InvalidPipelineConfigException::class, 'after itself');
+
+it('lets a review pipeline name its own phases, which is why the set is open', function (): void {
+    // The reason `withPhases()` came back. Six review lenses all reporting
+    // phase "Agent" tells a reader nothing, and the package cannot know a
+    // project's review vocabulary.
+    $walk = Pipeline::configure()
+        ->withPhases(function (Phases $phases): void {
+            $phases->remove(Refactoring::class);
+            $phases->remove(Formatting::class);
+            $phases->remove(StaticAnalysis::class);
+            $phases->remove(Tests::class);
+            $phases->prepend(ImpactAnalysis::class);
+        })
+        ->withSteps(function (Steps $steps): void {
+            $steps->in(ImpactAnalysis::class)->append(
+                Skill::run('/code-review', id: 'blast-radius', instruction: 'Name what this change can break.'),
+            );
+            $steps->in(Agent::class)->append(
+                Skill::run('/code-review', id: 'tests', instruction: 'Judge the test coverage of the change only.'),
+            );
+        })
+        ->walk();
+
+    expect(array_map(fn (WalkStep $walkStep): string => $walkStep->phaseName, $walk->steps))
+        ->toBe(['Impact analysis', 'Agent']);
+});
+
 it("walks each phase's steps in order, skipping empty phases silently", function (): void {
     $walk = Pipeline::configure()
         ->withSteps(function (Steps $steps): void {

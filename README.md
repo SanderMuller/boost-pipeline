@@ -240,8 +240,33 @@ Note that a *failed* step is `server_run: true`. That key answers *who produced 
 
 ## Extending
 
-One seam: `StepRunner`. Bind your own over the container's and every step the server resolves goes
-through it, so a step kind the shipped runner refuses becomes yours to handle.
+### Your own phases
+
+The five defaults suit a pipeline of mechanical checks. A pipeline that sequences review work does
+not fit them — its steps are not refactoring or formatting or tests — so the set is open:
+
+```php
+final class BlastRadius implements Phase
+{
+    public function id(): string { return 'blast-radius'; }
+    public function name(): string { return 'Blast radius'; }
+}
+
+Pipeline::configure()
+    ->withPhases(fn (Phases $phases) => $phases->append(BlastRadius::class)->after(Tests::class))
+    ->withSteps(fn (Steps $steps) => $steps->in(BlastRadius::class)->append(
+        Skill::run('/code-review', id: 'blast-radius',
+            instruction: 'Name what this change can break, and nothing else.'),
+    ));
+```
+
+A phase is a name and a position, nothing more, so a custom one costs no machinery. `append()` and
+`prepend()` place it, `->after()` moves it, and `remove()` drops a default you have no steps for.
+
+### Your own runner
+
+`StepRunner` is the other seam. Bind your own over the container's and every step the server resolves
+goes through it, so a step kind the shipped runner refuses becomes yours to handle.
 
 ```php
 $this->app->singleton(StepRunner::class, fn () => new MyRunner);
