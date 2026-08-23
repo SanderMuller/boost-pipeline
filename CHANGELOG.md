@@ -10,6 +10,68 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.4.1 - 2026-08-23
+
+`pipeline:verify` could never exit 0. The command shipped in 0.4.0 as the way something outside the
+session could read a run, and an ordering bug made it unusable. Nothing unsafe shipped — it failed
+closed — but the gate itself did not work.
+
+### Fixed
+
+- **A run's receipt is written after the state transition, not before it.** `Run::record()`
+  persisted the receipt and only then assigned the run's state, while `all_verified` ends on
+  `state === Complete`. So a fully green run wrote itself to disk as
+  `{"state":"running","all_verified":false}`, and `pipeline:verify` reported a run that "finished in
+  state [running]" — a state a finished run cannot be in. Every green run was persisted as
+  unverified, so the command always exited 1.
+  
+  The state is now settled first and the receipt written once, at the end, on both paths — including
+  the early return for a `blocked` or `halted` verdict.
+  
+  The new tests assert the file on disk rather than the in-session payload. Every existing test read
+  `status`, which agreed with itself and hid this completely; all three of the new ones fail on the
+  old ordering.
+  
+- **A failing proof says which proof failed.** A proof returned exactly what the runner produced, so
+  a silent command such as `grep -q` or `test -f` reported `Failed with no output.` — naming neither
+  the command nor the fact that a proof was checked. The agent is handed that same step again and has
+  to act on the message, so it now carries the step id and the command. The verdict, exit code and
+  log path are unchanged.
+  
+
+### Documentation
+
+- **`pipeline:verify` is a local gate, and the README no longer suggests otherwise.** The example was
+  a GitHub Actions step. The receipt lives under `storage/logs/`, which every Laravel application
+  gitignores, so it never reaches CI: a job following that example finds no receipt and fails every
+  build. The example is now a pre-push hook or a pre-PR gate, with a note that CI's job is to run
+  the checks rather than ask whether someone else did.
+  
+- **`proving()` gained the caveat it needed.** A proof over an artifact the step creates only to
+  satisfy the proof turns `acknowledged` into `passed` while checking nothing — the same laundering
+  as reading `server_run: true` as "it passed". Review skills are the common case: steps that leave
+  the tree untouched have nothing to prove, so that configuration never reaches `all_verified`, and
+  that is the correct outcome rather than a gap to close.
+  
+- **Three places still said `proving()` did not exist.** The limitations table read "Verify an agent
+  step — reported as `acknowledged`, never `passed`", which would tell a reader `all_verified` is
+  unreachable for any configuration: the opposite of what 0.4.0 added. The verdicts table credited
+  `passed` to shell steps only, and the internal invariants doc used the release's own proof example
+  as its example of the unverifiable. All three now describe the boundary: a proof makes a step
+  `passed` where there is an artifact to check, and judgement that touches nothing keeps
+  `acknowledged`.
+  
+
+### Verified
+
+159 tests, 389 assertions. PHPStan level max, Rector and Pint clean. CI green on this commit across
+all four matrix legs — PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+Both fixes and both documentation corrections came from production dogfooding of 0.4.0, with the
+blocker traced to the line by the reporter.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.4.0...v0.4.1
+
 ## v0.4.0 - 2026-08-23
 
 A run can now be read from outside the session that produced it, a skill step can prove it did the
@@ -69,6 +131,7 @@ migration of each one.
           ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
   );
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -126,6 +189,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   ```
