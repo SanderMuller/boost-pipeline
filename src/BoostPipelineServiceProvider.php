@@ -12,6 +12,7 @@ use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\RunManager;
+use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
@@ -40,6 +41,11 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             summariser: new OutputSummariser,
             environment: new EnvironmentScrubber($this->app->basePath()),
         ));
+
+        $this->app->singleton(
+            CommandPreflight::class,
+            fn (): CommandPreflight => new CommandPreflight($this->app->basePath()),
+        );
 
         $this->app->singleton(
             TreeFingerprint::class,

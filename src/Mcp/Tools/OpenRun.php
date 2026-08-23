@@ -12,6 +12,7 @@ use Laravel\Mcp\Server\Tool;
 use SanderMuller\BoostPipeline\Mcp\StepPayload;
 use SanderMuller\BoostPipeline\Mcp\Tools\Concerns\PipelineTool;
 use SanderMuller\BoostPipeline\Run\RunManager;
+use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 
 final class OpenRun extends Tool
 {
@@ -21,7 +22,10 @@ final class OpenRun extends Tool
 
     protected string $description = 'Start a verification run for this working tree and get the first step. Call this before any other pipeline tool.';
 
-    public function __construct(private readonly RunManager $runs) {}
+    public function __construct(
+        private readonly RunManager $runs,
+        private readonly CommandPreflight $preflight,
+    ) {}
 
     /** @return array<string, mixed> */
     public function annotations(): array
@@ -39,6 +43,7 @@ final class OpenRun extends Tool
             ),
             ...$this->stepSchema($schema),
             'notices' => $schema->array()->description('Config problems found while resolving the walk, such as a dropped transition step.'),
+            'warnings' => $schema->array()->description('Problems that will bite later in this walk, such as a step whose binary is missing. Not a reason to stop, but install it before you pay for the earlier steps.'),
         ];
     }
 
@@ -52,6 +57,16 @@ final class OpenRun extends Tool
 
         if ($run->walk->notices !== []) {
             $payload['notices'] = $run->walk->notices;
+        }
+
+        // Separate from notices on purpose. A notice means the config asked for a
+        // gate that will not run, so the run can never be fully verified. This is
+        // only "you will halt at step three" — worth knowing before paying for
+        // steps one and two, but not a reason to call the run unverifiable.
+        $warnings = $this->preflight->warnings($run->walk);
+
+        if ($warnings !== []) {
+            $payload['warnings'] = $warnings;
         }
 
         return Response::structured($payload);

@@ -21,6 +21,7 @@ use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\RunManager;
+use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 
@@ -121,11 +122,11 @@ it('declines to register its tools at all when the project has not opted in', fu
     unlink($this->configPath);
 
     expect(resolve(PipelineLoader::class)->exists())->toBeFalse()
-        ->and(new OpenRun(resolve(RunManager::class))->shouldRegister())->toBeFalse();
+        ->and(new OpenRun(resolve(RunManager::class), resolve(CommandPreflight::class))->shouldRegister())->toBeFalse();
 });
 
 it('registers its tools when the project has opted in', function (): void {
-    expect(new OpenRun(resolve(RunManager::class))->shouldRegister())->toBeTrue();
+    expect(new OpenRun(resolve(RunManager::class), resolve(CommandPreflight::class))->shouldRegister())->toBeTrue();
 });
 
 it('resumes an already-open run rather than restarting it', function (): void {

@@ -13,6 +13,7 @@ use SanderMuller\BoostPipeline\Mcp\Tools\ReportStep;
 use SanderMuller\BoostPipeline\Mcp\Tools\Status;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\RunManager;
+use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 
 /**
  * Real instances rather than reflection: newInstanceWithoutConstructor() returns
@@ -32,7 +33,7 @@ function toolNamed(string $name): Tool
     );
 
     return match ($name) {
-        'open_run' => new OpenRun($runs),
+        'open_run' => new OpenRun($runs, new CommandPreflight(__DIR__)),
         'next_step' => new NextStep($runs),
         'report_step' => new ReportStep($runs),
         default => new Status($runs),
