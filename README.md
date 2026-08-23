@@ -13,8 +13,11 @@ order, before reporting the work as done.
 
 The usual approach is prose: a skill or instruction file listing the checks. An agent reads all of
 it at once, picks its own order, and afterwards reports whether it complied, judged from its own
-transcript. That last part is the problem. *"I ran the tests"* and *"the tests ran"* are different
-claims, and prose cannot tell them apart.
+transcript.
+
+Two things go wrong there. The list competes for attention with the task it arrives next to, so
+the checks near the bottom get whatever is left over — you get most of the work, most of the time.
+And *"I ran the tests"* and *"the tests ran"* are different claims, which prose cannot tell apart.
 
 This package makes the server run each check and own the verdict, and hands the agent one step
 at a time.
@@ -39,6 +42,23 @@ The guarantee is narrower, and does not depend on hiding anything:
 
 Reading ahead tells the agent what is coming. It does not let the agent obtain a receipt for it. A
 `passed` is something the server wrote after running a process and reading its exit code.
+
+---
+
+## One step at a time
+
+Handing an agent eight checks and handing it one check are different instructions, even when the
+eight are correct and well written. A list has to share the context window with the work itself,
+and attention thins out across it: some checks run properly, some get skimmed, one quietly does
+not happen. Nothing failed loudly — the run was simply partial, and the report still says done.
+
+A step at the cursor has nothing to share with. The agent receives one command, one phase, and
+one thing to report, and cannot be handed the next one until this one resolves. That is the part
+worth more than the verdicts on their own: `next_step` narrows the agent's attention to a single
+item, and the server keeps the ordering that the prose version could only suggest.
+
+Reading ahead is still allowed and still harmless. The point is not that the agent cannot see
+what is coming — it is that nothing else is in the way of the step it is on.
 
 ---
 
@@ -305,11 +325,12 @@ either put your own artefacts under `storage/logs/` too, or add `/storage/pipeli
 
 ### 3. An earlier step's log, which is already on disk
 
-Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`, and the path comes
-back in that step's result. A later step can read it without the producer doing anything special —
-but mind the run id: logs persist across runs, and a shell step has no way to receive the path
-from the earlier step's result, so a `*` glob can match logs from previous runs as well. Match on
-the current run id, or clear the directory at the start of a run:
+Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`, where `<run>` is
+the run id the server reports in every response, and the path comes back in that step's result. A
+later step can read it without the producer doing anything special — but mind the run id: logs
+persist across runs, and a shell step has no way to receive the path from the earlier step's
+result, so a `*` glob can match logs from previous runs as well. Match on the current run id, or
+clear the directory at the start of a run:
 
 ```php
 $steps->in(Tests::class)->append(
@@ -365,6 +386,15 @@ run", so it is not a prototype default.
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 
+## Why it is built this way
+
+`.ai/docs/` holds the design record: the decisions and what they were chosen over
+([design-history.md][design-history]), the rules a change must not break and the defects that
+already broke them ([invariants.md][invariants]), and verified `laravel/mcp` behaviour
+([laravel-mcp-notes.md][mcp-notes]).
+
+Read [invariants.md][invariants] before changing `src/Run/`, `src/Runner/` or `src/Mcp/`.
+
 ## Requirements
 
 - PHP 8.4+
@@ -380,3 +410,7 @@ composer test
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+[design-history]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/design-history.md
+[invariants]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/invariants.md
+[mcp-notes]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/laravel-mcp-notes.md
