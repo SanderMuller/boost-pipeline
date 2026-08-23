@@ -18,9 +18,17 @@ Conflating them with `passed` would make the pipeline worse than useless.
 
 ### 2. `acknowledged` is never reported as `passed`
 
-An agent step is a self-report. The server cannot verify that `/evaluate` ran, or that
-`/eye-verification` looked at a browser. Reporting either as a pass would launder a claim into a
-receipt, which is the exact fault this package exists to remove.
+An agent step with no proof is a self-report. The server cannot verify that `/evaluate` ran.
+Reporting that as a pass would launder a claim into a receipt, which is the exact fault this package
+exists to remove.
+
+A declared proof (`Skill::proving()`) does not bend this. The server runs a command and reads an exit
+code, so the step is `passed` because something was verified — never an `acknowledged` result
+relabelled. `proveOrAcknowledge()` returns one or the other and never converts between them. What a
+proof cannot do is make judgement checkable: it checks for an artifact, so a step whose work leaves
+no trace has nothing to prove and keeps `acknowledged`. A proof over an artifact that exists only
+because someone wrote the proof command is the laundering this invariant forbids, wearing the
+feature's clothes.
 
 `Verdict::isVerified()` is true for `Passed` **only**. Every pass/fail count goes through it, so
 no caller has to remember the rule.

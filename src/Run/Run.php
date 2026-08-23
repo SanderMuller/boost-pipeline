@@ -191,6 +191,7 @@ final class Run
                 summary: sprintf('Proof did not hold for [%s]: `%s`. %s', $step->id(), $proof, $result->summary),
                 exitCode: $result->exitCode,
                 logPath: $result->logPath,
+                filesInspected: $result->filesInspected,
                 reason: $result->reason,
             );
         }

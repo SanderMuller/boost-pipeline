@@ -216,18 +216,19 @@ this file until you have seen it fail.
 
 | Verdict | Meaning | Cursor |
 |---|---|---|
-| `passed` | Shell step exited 0 | Advances |
-| `failed` | Shell step ran and found problems | Holds (`blocked`) |
+| `passed` | Shell step exited 0, or a skill step whose declared proof exited 0 | Advances |
+| `failed` | The step ran and found problems, or a declared proof did not hold | Holds (`blocked`) |
 | `error` | Shell step **did not run** (missing binary, timeout, exception) | Holds (`halted`) |
-| `acknowledged` | Skill step the agent reports it invoked. **Not verified.** | Advances |
+| `acknowledged` | Skill step with no proof, which the agent reports it invoked. **Not verified.** | Advances |
 
 **`error` is not `failed`.** A tool that did not run is not a tool that found nothing. An `error`
 travels on MCP's error channel; a `failed` verdict deliberately does not, because a failing check
 is a *successful* tool call reporting a finding. Flagging that as a protocol error would make
 every red check look like a broken server and invite the client to retry it.
 
-**`acknowledged` is not `passed`.** The server cannot verify that `/evaluate` really ran, so it
-does not pretend to. Consequently:
+**`acknowledged` is not `passed`.** The server cannot verify that `/evaluate` really ran, so it does
+not pretend to — unless the step declares a proof, which is the one way agent work becomes something
+the server checked (see [Proving an agent step](#proving-an-agent-step)). Without one:
 
 - `state: complete` means **the walk finished**, never "everything passed".
 - Every response carrying a result also carries `all_verified`, true only when every step was a server-verified
@@ -579,7 +580,7 @@ without asking anybody. A consumer that must not trust the working copy runs the
 | Not yet | Why it matters |
 |---|---|
 | Tolerate failures that predate your change | Every step is strict, so use the tool's own baseline (e.g. `phpstan-baseline.neon`) |
-| Verify an agent step | Reported as `acknowledged`, never `passed` |
+| Verify an agent step whose work leaves no trace | A declared proof makes a step `passed`, but only where there is an artifact to check. Judgement that touches nothing stays `acknowledged` |
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
