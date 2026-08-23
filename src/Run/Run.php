@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
+use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
@@ -30,19 +31,33 @@ final class Run
 
     private RunState $state = RunState::Open;
 
+    /**
+     * The tree as it stood after the last resolution, or at the start.
+     *
+     * This moves forward on purpose. A step that rewrites code — `pint`, or
+     * `rector process` — changes the tree as its normal job, and holding the
+     * original would report every such run as stale.
+     */
+    private ?string $baseline;
+
+    private bool $editedMidRun = false;
+
     private function __construct(
         public readonly string $id,
         public readonly Walk $walk,
         private readonly StepRunner $runner,
+        private readonly ?TreeFingerprint $tree = null,
     ) {
+        $this->baseline = $this->tree?->capture();
+
         if ($walk->isEmpty()) {
             $this->state = RunState::Complete;
         }
     }
 
-    public static function start(Walk $walk, StepRunner $runner, ?string $id = null): self
+    public static function start(Walk $walk, StepRunner $runner, ?string $id = null, ?TreeFingerprint $tree = null): self
     {
-        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner);
+        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree);
     }
 
     public function state(): RunState
@@ -81,6 +96,8 @@ final class Run
             return null;
         }
 
+        $this->noteEditsSinceLastStep();
+
         $result = $this->runner->run($current->step, $this->id);
         $this->record($result);
 
@@ -98,6 +115,8 @@ final class Run
         if (! $current instanceof WalkStep || $current->step->kind() !== StepKind::Skill) {
             throw AcknowledgementNotAllowed::forState($this->state);
         }
+
+        $this->noteEditsSinceLastStep();
 
         $result = Result::acknowledged($current->step->id(), $summary);
         $this->record($result);
@@ -132,6 +151,11 @@ final class Run
     public function allVerified(): bool
     {
         if ($this->results === [] || $this->walk->notices !== []) {
+            return false;
+        }
+
+        // A receipt is only about the code that was there when the step ran.
+        if ($this->staleReason() !== null) {
             return false;
         }
 
@@ -170,6 +194,42 @@ final class Run
         return $tally;
     }
 
+    /**
+     * Why the receipts no longer describe the tree, or null when they still do.
+     *
+     * Two different events, and the wording separates them because the fix is
+     * different: an edit DURING the walk means earlier steps ran against code
+     * that has since changed, while an edit after the walk finished means the
+     * whole run describes a tree that no longer exists.
+     */
+    public function staleReason(): ?string
+    {
+        if ($this->editedMidRun) {
+            return 'The working tree changed while this run was in progress, so earlier steps no longer describe the code on disk. Open a new run.';
+        }
+
+        if ($this->treeHasMoved()) {
+            return 'The working tree changed after this run resolved, so its verdicts no longer describe the code on disk. Open a new run.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether the tree differs from the last resolution — the signal `open_run`
+     * uses to decide between resuming this run and starting a fresh one.
+     */
+    public function treeHasMoved(): bool
+    {
+        if (! $this->tree instanceof TreeFingerprint || $this->baseline === null) {
+            return false;
+        }
+
+        $now = $this->tree->capture();
+
+        return $now !== null && $now !== $this->baseline;
+    }
+
     public function acknowledgedCount(): int
     {
         return count(array_filter(
@@ -178,9 +238,37 @@ final class Run
         ));
     }
 
+    /**
+     * An edit between two steps is the agent's, not the pipeline's: nothing ran
+     * in that gap. Attributing it to the run — as a single fingerprint taken per
+     * step would — is what makes a fix-mode step look like tampering.
+     */
+    private function noteEditsSinceLastStep(): void
+    {
+        if (! $this->tree instanceof TreeFingerprint) {
+            return;
+        }
+
+        $now = $this->tree->capture();
+
+        if ($now === null) {
+            return;
+        }
+
+        if ($this->baseline !== null && $now !== $this->baseline && $this->results !== []) {
+            $this->editedMidRun = true;
+        }
+
+        $this->baseline = $now;
+    }
+
     private function record(Result $result): void
     {
         $this->results[$result->stepId] = $result;
+
+        // Whatever the step itself wrote is expected, so it becomes the new
+        // baseline rather than counting as an edit against the run.
+        $this->baseline = $this->tree?->capture() ?? $this->baseline;
 
         if (! $result->verdict->advancesCursor()) {
             $this->state = $result->verdict->isTerminalForRun()

@@ -9,9 +9,11 @@ use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
+use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
+use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
 use SanderMuller\BoostPipeline\Runner\OutputSummariser;
 use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
@@ -39,9 +41,15 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             environment: new EnvironmentScrubber($this->app->basePath()),
         ));
 
+        $this->app->singleton(
+            TreeFingerprint::class,
+            fn (): TreeFingerprint => new GitTreeFingerprint($this->app->basePath()),
+        );
+
         $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(
             $this->app->make(Pipeline::class),
             $this->app->make(StepRunner::class),
+            $this->app->make(TreeFingerprint::class),
         ));
     }
 
