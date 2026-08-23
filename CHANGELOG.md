@@ -10,6 +10,93 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.4.0 - 2026-08-23
+
+<!-- verified-sha: 4c7295a3289be4775b51fe6cf24de9f125562651 -->
+A run can now be read from outside the session that produced it, a skill step can prove it did the
+work, and configuration surface that two consuming applications never touched is gone.
+
+### Breaking
+
+Pre-1.0, so these land in a minor. Every removal is configuration or contract surface that no known
+consumer used; a `.config/pipeline.php` that only calls `withSteps()` needs no changes. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+migration of each one.
+
+- **`Step::before()` and `Step::after()` are removed from the contract.** Every custom step had to
+  implement both, and no shipped step ever put anything in either. The test written to cover "a step
+  whose setup throws" recorded why: the runner refuses a non-`Shell` step before it reaches
+  `before()`, so the path it asserted was already unreachable. Leaving the methods on a custom step
+  is legal PHP and breaks nothing loudly — which is the reason to read the upgrade note, because the
+  package stops calling them and setup written inside one quietly stops running.
+  
+- **`Steps::between()` is removed.** It anchored a step at the join between two phases.
+  `prepend()` on the later phase puts the step at the same point in the walk; only the reported
+  phase label changes. Most of what goes with it is the machinery that kept the position honest —
+  the splice, the placed-transition bookkeeping, and the five match arms that each named a different
+  way anchors could fail to describe a real join.
+  
+- **`Pipeline::withPhases()` and `Pipeline::phases()` are removed**, with `Phases::append()`,
+  `prepend()`, `remove()`, `moveAfter()`, and the `PhasePosition` class. `Phases::DEFAULTS` is the
+  whole set. A phase is only a named, ordered group of steps, so a step runs at the same point
+  whether it gets its own phase or joins the one that already runs there.
+  
+
+### Added
+
+- **A run leaves a receipt, and `php artisan pipeline:verify` turns it into an exit code.** Until
+  now a run's verdicts were readable only by the MCP session that produced them, so a commit hook or
+  a CI gate had nothing to ask. The command exits 0 only when a recorded run verified the tree that
+  is on disk now, and it fails on four counts: no receipt, a different tree, a run that reports
+  itself stale, and a run where not every step was verified.
+  
+  **No run is a failure.** That is the whole reason for the command — a gate that reads a missing
+  answer as "nothing to check" passes exactly the run that never happened.
+  
+  A receipt is a file in the working copy, so anything that can run a shell step can write one. It
+  is not evidence that a run happened and it closes no trust hole; an agent able to forge it could
+  already claim a pass in prose. What it carries is the part prose cannot get right: which tree the
+  verdicts describe.
+  
+- **A skill step can prove itself with `->proving()`.** A skill step is normally `acknowledged`,
+  never `passed`, because the server cannot verify that the agent invoked anything. A declared proof
+  changes what the server knows: it runs the command and reads an exit code, so the step reports
+  `passed`. A failing proof blocks and returns the same step, so "I did it" without the artifact is
+  not a way past the cursor.
+  
+  ```php
+  $steps->in(Agent::class)->append(
+      Skill::run('/eye-verification')
+          ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
+  );
+  
+  ```
+  A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
+  configuration with an `Agent` phase.
+  
+
+### Fixed
+
+- **An invalid `.config/pipeline.php` no longer leaves an error on the protocol stream.** The server
+  used to decline to register, and the resulting `ERROR ... not found` went to stdout — which for a
+  stdio MCP server *is* the JSON-RPC channel. One consumer's client reported a confusing cause; the
+  other's driver hung on the unparseable frame. A degraded server now registers in its place and
+  returns the configuration error through the protocol, as an error to the tool call that asked.
+
+### Documentation
+
+- The Extending section described two extension points where the shipped runner only has one.
+  `ProcessStepRunner` runs `Shell` and refuses everything else, and a step reporting
+  `StepKind::Skill` is acknowledged by the agent rather than run — so a custom `Step` has nowhere to
+  resolve until a custom `StepRunner` is bound too. The section now says which binding to replace.
+
+### Verified
+
+155 tests, 379 assertions. PHPStan level max, Rector and Pint clean. CI green on this commit across
+all four matrix legs — PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.3.2...v0.4.0
+
 ## v0.3.2 - 2026-08-23
 
 Consumer feedback on 0.3.1. Two fixes for what a first-time adopter runs into, and the package now
@@ -40,6 +127,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   ```
   An `exclude` entry in `pint.json` is unrelated — there is no `include`. Naming the analyser
