@@ -5,9 +5,10 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## v0.3.0 - 2026-08-23
 
-<!-- verified-sha: 7610fef462af75763e8d8b643d19bfabc9843ab2 -->
 A run's verdicts now expire, and a session is no longer limited to a single run. Before this, a run
 that went green stayed green while you edited the code it was about — so "this run passed" meant
 "this passed at some earlier moment", which is not something a gate can act on. And because
@@ -67,79 +68,6 @@ pipeline needed a server restart.
 Unchanged: PHP 8.4+, Laravel 12.41+ or 13.
 
 **Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.2.0...v0.3.0
-
-## [Unreleased]
-
-### Breaking
-
-- `Step` gained `mutates(): bool`, and a step that rewrites code must declare it with
-  `->mutating()`. `OpenRun` takes a `CommandPreflight` as a second constructor argument. See
-  UPGRADING.md.
-
-### Added
-
-- A run's verdicts expire when the working tree changes. Each resolution fingerprints the tree —
-  the commit plus the contents of everything dirty or untracked, ignoring what git ignores, and
-  working before the first commit as well —
-  `all_verified` turns false once it moves, with a `stale` key saying whether the edit landed
-  during the walk or after it. "This run passed" now means "this passed against the code that is
-  on disk".
-  
-  Attribution is by declaration, not timing. A step that rewrites code says so with
-  `->mutating()` and its writes are absorbed; a change nothing declared is a finding, because
-  either the step lied or something edited files mid-run, and both mean the verdict is not proven
-  for the code that now exists. Timing cannot separate those — a blocked run is precisely when
-  files get edited, against steps that take half a minute — so the config decides rather than the
-  clock. It also costs one tree reading per step instead of two.
-  
-  No git means no fingerprint and no expiry, rather than a run that can never be verified.
-  
-- `open_run` starts a fresh run when the tree has changed since the open one, and returns the
-  existing run while it has not. A session was previously limited to exactly one run, which made
-  the fix loop — run, see a failure, fix it, verify again — impossible without restarting the
-  server, and in Claude Code that means restarting the session.
-  
-- `Shell::run(...)->timeout(seconds)` overrides the runner's 540s cap for one step. A single cap has
-  to be set for the slowest step, which leaves it far too loose for every other — a real suite
-  measured 336s against that default.
-  
-- `open_run` returns a `warnings` array naming any step whose binary is not on disk. A walk used to
-  pay for every earlier step before finding out step three could not run; a real run lost two
-  minutes of server-verified receipts that way. Only commands whose first token is a relative path
-  are checked, since PATH-resolved ones cannot be answered honestly.
-  
-
-### Changed
-
-- `next_step` retries a halted step instead of refusing for the rest of the session. `error` means
-  the tool could not run, which is the kind of thing that then gets fixed; the cursor stays on the
-  step, so only it re-runs and earlier verdicts stand. Resolves the resume question the spec left
-  open.
-  
-- A run reports itself stale, naming the step, when a pass measured a tree other than the one on
-  disk. Each pass records what it measured, so the comparison is per receipt: a rewriting step is
-  exempt (it reports that the tool ran, not that the tree is in some state), an acknowledgement and
-  a failure are exempt (neither claims verification), and a receipt replaced by a retry takes the
-  retry's tree with it. Fixing a blocked step and retrying it is therefore not mistaken for
-  tampering, and a clean fix-mode step invalidates nothing.
-  Absorbing the rewrite kept the run looking current while that check described code the run then
-  changed — a false green, which is the one thing this package exists not to produce. The ordering
-  was previously advice in the docs; it is now enforced.
-  
-- A step summary strips the escape sequences and carriage-return redraws a terminal would have
-  consumed. A tool that draws returned nothing usable over MCP: a PHPUnit summary arrived as an
-  escape-wrapped dot repeated to the truncation limit with the verdict pushed out of view, and a
-  Rector summary was almost entirely redraw frames. The summary is the only step output visible
-  without opening the log. Covers CSI colour and cursor sequences including the colon-form SGR
-  colours, OSC strings such as hyperlinks, and lone escapes; carriage-return handling keeps the
-  last frame of a line rather than emulating column-by-column overwrite. Input is capped before
-  scanning, so a tool that draws megabytes onto one line cannot make this expensive.
-  
-- A truncated step summary keeps the head *and* the tail of the output, with an inline count of the
-  omitted lines. Tools disagree about where the useful part is — static analysis leads with
-  findings, a test runner leads with progress noise and ends with the failure — so head-only
-  truncation dropped exactly what mattered for the second kind.
-  
 
 ## v0.2.0 - 2026-08-23
 
