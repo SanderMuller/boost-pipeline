@@ -532,6 +532,14 @@ Pick something the work cannot avoid producing: screenshots newer than the last 
 log, a review commit. Steps whose work genuinely leaves nothing to find keep `acknowledged`, which
 is the right verdict for them.
 
+**A proof over an artifact the step creates only to satisfy the proof is worse than no proof.** It
+turns `acknowledged` into `passed` while checking nothing about whether the work was done — the same
+laundering as reading `server_run: true` as "it passed". Review skills are the common case: a
+self-review, a code review and a Codex review can all leave the tree untouched, so there is nothing
+to test for, and a run whose judgement steps are honest about that never reaches `all_verified`.
+That is the correct outcome, not a gap to close. Ask whether the artifact would exist if nobody had
+written a proof command; if the answer is no, leave the step acknowledged.
+
 ## Letting something else read the run
 
 Run state is in-process, so for the first four releases every guarantee the server produced died
@@ -547,12 +555,18 @@ the receipt describes a different tree, when the run recorded itself stale, and 
 finished without verifying every step. That first case is the point: a gate that treats a missing
 answer as "nothing to check" passes exactly the run that never happened.
 
-Wire it wherever your other gates live:
+**This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which every Laravel
+application gitignores, so it does not travel with a push — a CI job would find no receipt and fail
+every build. Wire it where the working copy is the thing being judged: a pre-commit or pre-push
+hook, or a closeout check an agent runs before it opens a pull request.
 
-```yaml
-- name: Pipeline verified this tree
-  run: php artisan pipeline:verify
+```bash
+# .git/hooks/pre-push, or a pre-PR gate in your agent's flow
+php artisan pipeline:verify || exit 1
 ```
+
+CI's job is different and unchanged: it runs the checks itself rather than asking whether someone
+else did.
 
 **A receipt is not proof a run happened.** It is a file in the working copy, so anything that can
 run a shell step can write one — an agent able to forge it could already claim a pass in prose, so
