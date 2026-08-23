@@ -32,7 +32,9 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    foreach (glob($this->dir.'/logs/*.log') ?: [] as $log) {
+    $logs = glob($this->dir.'/logs/*.log');
+
+    foreach ($logs === false ? [] : $logs as $log) {
         unlink($log);
     }
 
