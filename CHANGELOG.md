@@ -10,6 +10,89 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.6.0 - 2026-08-23
+
+Independent steps can share a position and run at the same time. Concurrency costs the agent
+nothing here, which is why it is allowed at all: the agent does not perform a shell step, it calls
+`next_step` and waits.
+
+### Breaking
+
+Pre-1.0, so this lands in a minor. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+migration.
+
+- **`Run::resolveCurrentStep()` is now `Run::resolveCurrent()` and returns `list<Result>`.** A
+  position can hold several steps, so it resolves to several verdicts, and "current step" stopped
+  describing what the method does. Only affects code driving a `Run` directly; the MCP tools are
+  unchanged from the outside.
+
+### Added
+
+- **`parallel()` declares steps that run at the same time.**
+  
+  ```php
+  $steps->in(StaticAnalysis::class)->parallel(function (StepCollection $steps): void {
+      $steps->append(Shell::run('composer phpstan'));
+      $steps->append(Shell::run('node_modules/.bin/tsc --noEmit'));
+  });
+  
+  ```
+  One `next_step` call runs both and returns both verdicts. Three commands running at once is still
+  one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
+  
+  Wall clock is the obvious gain. The better one is that a group reports **every** failure in one
+  pass, where a sequence blocks at the first and hides the rest behind a fix and a re-run.
+  
+  A group holds the position if any step in it does not pass, and holds at the group's first step so
+  the next call re-runs the whole group. Re-running a passing sibling costs a little time and keeps
+  the rule simple: a position either resolved or it did not. An error outranks a failure in deciding
+  the state, because a tool that never ran is the more urgent report.
+  
+  Two things a group refuses, when the config loads rather than when the run reaches it:
+  
+  - **A skill step.** Several lenses handed over at once is the wall of context the cursor exists to
+    break up, and the server cannot fan them out to separate agent contexts to avoid that.
+  - **A step declaring `->mutating()`.** Its siblings would run against a tree it is rewriting, with
+    no ordering between them to attribute the change to, so every sibling verdict would describe
+    code that no longer exists.
+  
+- **`BatchStepRunner` extends `StepRunner` with `runBatch()`.** `ProcessStepRunner` implements it,
+  starting every process before waiting on any. A custom runner that does not implement it keeps
+  working: its groups resolve one step after another, which is correct and slower.
+  
+
+### Fixed
+
+- **The output schema declares the keys the payload actually sends.** The schema is what a client
+  reads to know what it can receive, so a key sent but not declared is the same drift as
+  documentation disagreeing with behaviour. `instruction` had shipped undeclared since 0.5.0 — the
+  field a skill step exists to carry. The parallel group added `steps`, `parallel` and `results`.
+  A test now asserts every key is declared, and renders the nested entries rather than checking only
+  the top level.
+
+### Internal
+
+- Scope commands stay sequential inside a group. They are capped at a minute and usually take
+  milliseconds, so keeping them out of the concurrent path keeps the part that can go wrong small.
+  
+- `phpVersion` is pinned to the range `composer.json` declares. PHPStan otherwise analyses at
+  whatever PHP is running it, so a developer on 8.5 and a CI job on 8.4 perform two different
+  analyses and each misses what the other catches. The test matrix covers both versions; the
+  analyser now does too.
+  
+
+### Verified
+
+191 tests, 480 assertions. PHPStan level max, Rector and Pint clean, `composer validate --strict`
+valid. CI green on this commit across all four matrix legs: PHP 8.4 and 8.5, Laravel 12 and 13,
+`prefer-lowest` and `prefer-stable`.
+
+The concurrency claim is checked by wall clock: three one-second steps in a group complete in under
+two and a half seconds, where running them in sequence takes over three.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.5.0...v0.6.0
+
 ## v0.5.0 - 2026-08-23
 
 A skill step can finally say what it is for. The field that carries that was reachable from config
@@ -42,6 +125,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   ```
   Give each step an explicit `id` when several invoke the same skill: an id is derived from the
@@ -291,6 +375,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -348,6 +433,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
