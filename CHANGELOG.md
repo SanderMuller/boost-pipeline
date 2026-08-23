@@ -10,6 +10,70 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.4.2 - 2026-08-23
+
+`pipeline:verify` told a consumer nothing useful when their pipeline could never satisfy it. The
+exit contract is unchanged; what it says when it fails is not.
+
+### Fixed
+
+- **`pipeline:verify` tells a run that cannot ever verify apart from one that failed.** Both got
+  `finished in state [x] without verifying every step`. A failed step is fixable — fix it, run again,
+  exit 0. An acknowledged step is not: the server never verified it and never will, so that pipeline
+  cannot exit 0 however often it runs.
+  
+  A consumer wired the command into a closeout gate for a pipeline holding three review skills, and
+  it could never pass. The generic wording reads as a shortfall to fix, so the gate looked broken
+  rather than structurally unsatisfiable — and a gate that always fails teaches a reader to skip it,
+  which is worse than not having one.
+  
+  The receipt already carries every verdict, so the command now names the acknowledged steps, says
+  re-running will not help, and gives the two real options: declare a proof, or run those steps
+  outside the pipeline. A failure alongside an acknowledgement still reports as a failure, because
+  that one is fixable.
+  
+  **Exit 0 still requires `all_verified`.** A third exit code or a "close enough" mode would make
+  exit 0 mean two things, which is the laundering this package exists to prevent. The contract was
+  right; the diagnosis was useless.
+  
+
+### Documentation
+
+- **`pipeline:verify` states its precondition.** It is a gate for a pipeline the server can verify
+  end to end, and a pipeline of shell steps is the shape it was built for. Two documented positions
+  were in tension: a review-skill configuration was described as correct for never reaching
+  `all_verified`, while the gate treated that same configuration as failure. Both are defensible
+  alone, and together they told a reader that a correct pipeline is a failing one.
+  
+- **What an all-check-mode pipeline buys.** The stale report offers two causes — something edited
+  files, or a fix-mode step is missing `->mutating()`. Where no step declares it, the second is
+  impossible by construction, so a stale report during a run can only mean something outside the run
+  wrote to the tree. That is a reason to prefer check mode beyond the obvious one, and a reason to
+  keep a fix-mode step out of a pipeline you intend to gate on.
+  
+
+### Internal
+
+- **The join between a run and the command that reads it is tested.** Every case in the verify
+  command's suite handed it a receipt built by hand, so it asserted what a correct receipt does and
+  never what `Run` produces — the exact seam 0.4.0 shipped broken through, with both halves testing
+  clean. Restoring the old ordering now fails that one test while its six siblings still pass, which
+  is the measure of what they could see.
+  
+- **The halted path's receipt is pinned.** State settling returns early for both blocked and halted
+  and only blocked was covered. The 0.4.0 fault was a persisted state being wrong on an untested
+  path, so its sibling is no longer one.
+  
+
+### Verified
+
+163 tests, 399 assertions. PHPStan level max, Rector and Pint clean. CI green on this commit across
+all four matrix legs — PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+Both fixes came from production dogfooding of 0.4.1.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.4.1...v0.4.2
+
 ## v0.4.1 - 2026-08-23
 
 `pipeline:verify` could never exit 0. The command shipped in 0.4.0 as the way something outside the
@@ -132,6 +196,7 @@ migration of each one.
   );
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -189,6 +254,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
