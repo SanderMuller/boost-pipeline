@@ -326,6 +326,16 @@ one whose runaway takes nine minutes to report. Set it where it differs:
 $steps->in(Tests::class)->append(Shell::run('php artisan test')->timeout(1800));
 ```
 
+Move the floor for every step when your suite is slow throughout, rather than repeating yourself:
+
+```php
+return Pipeline::configure()
+    ->withTimeout(1800)
+    ->withSteps(function (Steps $steps): void { /* ... */ });
+```
+
+A step's own `->timeout()` wins over that; the runner's 540s applies when neither is set.
+
 A timeout is an `error`, not a `failed`: the step did not produce a verdict, so the run halts
 rather than treating "no answer" as a finding.
 

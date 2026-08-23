@@ -238,3 +238,22 @@ it('reports steps declared into a phase that is not registered', function (): vo
         ->and($walk->notices[0])->toContain('Refactoring')
         ->and($walk->notices[0])->toContain('not registered');
 });
+
+it('carries a default timeout for steps that do not set their own', function (): void {
+    expect(Pipeline::configure()->timeoutSeconds())->toBeNull()
+        ->and(Pipeline::configure()->withTimeout(900.0)->timeoutSeconds())->toBe(900.0);
+});
+
+it('refuses a timeout of zero, which would remove the ceiling rather than tighten it', function (): void {
+    // Symfony's runner treats zero as no limit, so accepting it would turn a
+    // configured cap into no cap at all.
+    expect(fn (): Pipeline => Pipeline::configure()->withTimeout(0))
+        ->toThrow(InvalidPipelineConfigException::class, 'must be greater than zero');
+});
+
+it('refuses a negative or zero per-step timeout too', function (): void {
+    expect(fn (): Shell => Shell::run('true')->timeout(0))
+        ->toThrow(InvalidPipelineConfigException::class)
+        ->and(fn (): Shell => Shell::run('true')->timeout(-5))
+        ->toThrow(InvalidPipelineConfigException::class);
+});

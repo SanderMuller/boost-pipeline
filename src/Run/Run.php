@@ -177,11 +177,33 @@ final class Run
      */
     public function allVerified(): bool
     {
+        return $this->verifiedGiven($this->staleReason());
+    }
+
+    /**
+     * Both answers from ONE reading of the tree.
+     *
+     * Asking separately let the tree move between them, so a single response
+     * could carry `all_verified: true` beside a `stale` message — the two fields
+     * contradicting each other in the same payload, which is worse than either
+     * being wrong on its own.
+     *
+     * @return array{all_verified: bool, stale: string|null}
+     */
+    public function verification(): array
+    {
+        $stale = $this->staleGiven($this->tree?->capture());
+
+        return ['all_verified' => $this->verifiedGiven($stale), 'stale' => $stale];
+    }
+
+    private function verifiedGiven(?string $stale): bool
+    {
         if ($this->results === [] || $this->walk->notices !== []) {
             return false;
         }
 
-        if ($this->staleReason() !== null) {
+        if ($stale !== null) {
             return false;
         }
 
@@ -225,8 +247,11 @@ final class Run
      */
     public function staleReason(): ?string
     {
-        $now = $this->tree?->capture();
+        return $this->staleGiven($this->tree?->capture());
+    }
 
+    private function staleGiven(?string $now): ?string
+    {
         if ($now === null) {
             return null;
         }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Config;
 
 use Closure;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Phases;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Walk\Walk;
@@ -17,11 +18,13 @@ use SanderMuller\BoostPipeline\Walk\Walk;
  * force replaying completed steps and make every step carry an idempotency
  * requirement.
  */
-final readonly class Pipeline
+final class Pipeline
 {
-    private Phases $phases;
+    private readonly Phases $phases;
 
-    private Steps $steps;
+    private readonly Steps $steps;
+
+    private ?float $timeoutSeconds = null;
 
     private function __construct()
     {
@@ -48,6 +51,30 @@ final readonly class Pipeline
         $callback($this->steps);
 
         return $this;
+    }
+
+    /**
+     * The ceiling for any step that does not set its own.
+     *
+     * Per-step `->timeout()` covers the one step that needs headroom, but a
+     * project whose suite is slow everywhere had no way to move the floor except
+     * by repeating itself on every step — and the runner's own default was not
+     * reachable from configuration at all.
+     */
+    public function withTimeout(float $seconds): self
+    {
+        if ($seconds <= 0.0) {
+            throw InvalidPipelineConfigException::timeoutNotPositive($seconds);
+        }
+
+        $this->timeoutSeconds = $seconds;
+
+        return $this;
+    }
+
+    public function timeoutSeconds(): ?float
+    {
+        return $this->timeoutSeconds;
     }
 
     public function phases(): Phases

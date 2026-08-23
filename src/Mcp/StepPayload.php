@@ -111,13 +111,17 @@ final readonly class StepPayload
             // Never true before the walk finishes: `complete` means it finished,
             // not that everything passed, and this is what stops a consumer
             // reading the state alone as green.
-            $envelope['all_verified'] = $run->allVerified();
+            // One reading of the tree for both, so they cannot contradict each other
+            // in the same payload.
+            $verification = $run->verification();
+
+            $envelope['all_verified'] = $verification['all_verified'];
             $envelope['acknowledged'] = $run->acknowledgedCount();
 
             // all_verified: false with no reason reads as a broken pipeline rather
             // than a stale run, and those need opposite responses.
-            if ($run->staleReason() !== null) {
-                $envelope['stale'] = $run->staleReason();
+            if ($verification['stale'] !== null) {
+                $envelope['stale'] = $verification['stale'];
             }
 
             // Without this, a run that dropped a declared step reports

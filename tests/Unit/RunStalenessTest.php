@@ -341,3 +341,26 @@ it('keeps the run id when the tree moves before anything has been recorded', fun
 
     expect($manager->open()->id)->toBe($first->id);
 });
+
+it('never reports verified and stale from different readings of the tree', function (): void {
+    // Asking separately let the tree move between the two questions, so one
+    // payload could carry all_verified: true beside a stale message. A fingerprint
+    // that changes on every read is the sharpest version of that race.
+    $shifting = new class implements TreeFingerprint
+    {
+        private int $reads = 0;
+
+        public function capture(): string
+        {
+            return 'tree-'.$this->reads++;
+        }
+    };
+
+    $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-test', $shifting);
+    $run->resolveCurrentStep();
+    $run->resolveCurrentStep();
+
+    $verification = $run->verification();
+
+    expect($verification['all_verified'] && $verification['stale'] !== null)->toBeFalse();
+});

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Pipeline::configure()->withTimeout(seconds)` sets the ceiling for every step that does not set
+  its own. Per-step `->timeout()` covered the one step needing headroom, but a project whose suite
+  is slow throughout had to repeat itself on every step, and the runner's own default was not
+  reachable from configuration at all.
+
 ### Changed
 
 - `all_verified` (with `acknowledged`, and `stale` where it applies) is reported from the first
@@ -16,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "absent" and "false" to be told apart. A run with no results yet still omits it: there is
   nothing to answer.
 
+- `withTimeout()` and `Shell->timeout()` reject a value of zero or less. Symfony's process runner
+  treats zero as no limit, so accepting it removed the ceiling instead of tightening it — and a
+  step that never returns holds the tool call open until the client gives up.
+
 ### Documentation
 
 - The README says to add `.config/` to the paths your static analyser and formatter cover.
@@ -24,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-project run.
 
 ### Fixed
+
+- `all_verified` and `stale` are derived from a single reading of the tree. Each was asking
+  separately, so a change landing between the two could produce one response carrying
+  `all_verified: true` beside a `stale` message — the two fields contradicting each other in the
+  same payload.
 
 - `open_run` keeps its run id when the tree changes before any step has run. A run with no
   receipts has no verdict to lose, so it adopts the new tree instead of being replaced, which
@@ -84,6 +100,12 @@ pipeline needed a server restart.
   refactoring tool's was almost entirely progress frames. The summary is the only step output
   visible without opening a log.
   
+
+### Documentation
+
+- The README warns that an empty test selection runs the whole suite. `php artisan test $(...)`
+  with a selection command that prints nothing and exits 0 collapses to `php artisan test` — the
+  entire suite, passing slowly. Shipped in this release; omitted from its release notes.
 
 ### Requirements
 

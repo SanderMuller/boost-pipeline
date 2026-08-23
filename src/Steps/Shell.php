@@ -6,6 +6,7 @@ namespace SanderMuller\BoostPipeline\Steps;
 
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Results\Result;
 
 final class Shell implements Step
@@ -126,6 +127,10 @@ final class Shell implements Step
      */
     public function timeout(float $seconds): self
     {
+        if ($seconds <= 0.0) {
+            throw InvalidPipelineConfigException::timeoutNotPositive($seconds);
+        }
+
         $this->timeoutSeconds = $seconds;
 
         return $this;

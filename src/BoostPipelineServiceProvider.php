@@ -40,6 +40,8 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             logs: new LogWriter($this->app->storagePath('logs/pipeline')),
             summariser: new OutputSummariser,
             environment: new EnvironmentScrubber($this->app->basePath()),
+            timeoutSeconds: $this->app->make(Pipeline::class)->timeoutSeconds()
+                ?? ProcessStepRunner::DEFAULT_TIMEOUT_SECONDS,
         ));
 
         $this->app->singleton(
