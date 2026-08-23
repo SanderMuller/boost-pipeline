@@ -371,8 +371,17 @@ final class Run
         $this->measuredAt[$result->stepId] = $assertsTreeState ? $measuredAt : null;
         $this->lastSeen = $this->tree?->capture() ?? $measuredAt ?? $this->lastSeen;
 
-        $this->recordReceipt();
+        $this->settleState($result);
 
+        // Written last, once the state is final. Persisting it before the
+        // transition recorded a finished run as still running, and
+        // `all_verified` ends on `state === Complete` — so every green run was
+        // written to disk as unverified and `pipeline:verify` could never exit 0.
+        $this->recordReceipt();
+    }
+
+    private function settleState(Result $result): void
+    {
         if (! $result->verdict->advancesCursor()) {
             $this->state = $result->verdict->isTerminalForRun()
                 ? RunState::Halted
