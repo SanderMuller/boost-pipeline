@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 
@@ -30,6 +31,7 @@ final class RunManager
         private readonly Pipeline $pipeline,
         private readonly StepRunner $runner,
         private readonly ?TreeFingerprint $tree = null,
+        private readonly ?ReceiptStore $receipts = null,
     ) {}
 
     public function open(): Run
@@ -44,7 +46,12 @@ final class RunManager
             }
         }
 
-        return $this->run ??= Run::start($this->pipeline->walk(), $this->runner, tree: $this->tree);
+        return $this->run ??= Run::start(
+            $this->pipeline->walk(),
+            $this->runner,
+            tree: $this->tree,
+            receipts: $this->receipts,
+        );
     }
 
     public function current(): ?Run

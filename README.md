@@ -521,11 +521,38 @@ exposure as running the tool by hand in that shell, and step commands come from
 allowlist, but one that omits `PATH` or `HOME` turns a misconfiguration into "the tool did not
 run", so it is not a prototype default.
 
+## Letting something else read the run
+
+Run state is in-process, so for the first four releases every guarantee the server produced died
+with the session that produced it. A receipt is written to `storage/logs/pipeline/receipt.json`
+after each resolution, and one command turns it into an exit code:
+
+```bash
+php artisan pipeline:verify
+```
+
+Exit 0 only when a run verified **the code now on disk**. It fails when no run was recorded, when
+the receipt describes a different tree, when the run recorded itself stale, and when the walk
+finished without verifying every step. That first case is the point: a gate that treats a missing
+answer as "nothing to check" passes exactly the run that never happened.
+
+Wire it wherever your other gates live:
+
+```yaml
+- name: Pipeline verified this tree
+  run: php artisan pipeline:verify
+```
+
+**A receipt is not proof a run happened.** It is a file in the working copy, so anything that can
+run a shell step can write one — an agent able to forge it could already claim a pass in prose, so
+this closes no trust hole that was open. What it carries is the part prose could never get right:
+the tree the verdicts were measured against, so a reader can tell a current pass from a stale one
+without asking anybody. A consumer that must not trust the working copy runs the pipeline itself.
+
 ## What it deliberately does not do
 
 | Not yet | Why it matters |
 |---|---|
-| Survive a session restart | Run state is in-process, so no CI job or skill can ask whether the pipeline passed |
 | Tolerate failures that predate your change | Every step is strict, so use the tool's own baseline (e.g. `phpstan-baseline.neon`) |
 | Verify an agent step | Reported as `acknowledged`, never `passed` |
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |

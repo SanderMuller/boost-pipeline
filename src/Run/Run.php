@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
@@ -56,6 +57,7 @@ final class Run
         public readonly Walk $walk,
         private readonly StepRunner $runner,
         private readonly ?TreeFingerprint $tree = null,
+        private readonly ?ReceiptStore $receipts = null,
     ) {
         $this->lastSeen = $this->tree?->capture();
 
@@ -64,9 +66,14 @@ final class Run
         }
     }
 
-    public static function start(Walk $walk, StepRunner $runner, ?string $id = null, ?TreeFingerprint $tree = null): self
-    {
-        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree);
+    public static function start(
+        Walk $walk,
+        StepRunner $runner,
+        ?string $id = null,
+        ?TreeFingerprint $tree = null,
+        ?ReceiptStore $receipts = null,
+    ): self {
+        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts);
     }
 
     public function state(): RunState
@@ -283,6 +290,32 @@ final class Run
         return $now !== null && $now !== $this->lastSeen;
     }
 
+    /**
+     * Written after every resolution, not only at the end: a walk abandoned
+     * midway still leaves a readable answer, and that answer is "not verified".
+     */
+    private function recordReceipt(): void
+    {
+        if (! $this->receipts instanceof ReceiptStore) {
+            return;
+        }
+
+        $verification = $this->verification();
+
+        $this->receipts->write(new Receipt(
+            runId: $this->id,
+            state: $this->state->value,
+            allVerified: $verification['all_verified'],
+            tree: $this->lastSeen,
+            stale: $verification['stale'],
+            verdicts: array_map(
+                static fn (Result $result): string => $result->verdict->value,
+                $this->results,
+            ),
+            recordedAt: gmdate('c'),
+        ));
+    }
+
     public function acknowledgedCount(): int
     {
         return count(array_filter(
@@ -302,6 +335,8 @@ final class Run
 
         $this->measuredAt[$result->stepId] = $assertsTreeState ? $measuredAt : null;
         $this->lastSeen = $this->tree?->capture() ?? $measuredAt ?? $this->lastSeen;
+
+        $this->recordReceipt();
 
         if (! $result->verdict->advancesCursor()) {
             $this->state = $result->verdict->isTerminalForRun()

@@ -9,12 +9,15 @@ use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
+use SanderMuller\BoostPipeline\Console\VerifyCommand;
+use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
+use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
@@ -64,15 +67,28 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             fn (): TreeFingerprint => new GitTreeFingerprint($this->app->basePath()),
         );
 
+        $this->app->singleton(
+            ReceiptStore::class,
+            fn (): ReceiptStore => new JsonReceiptStore($this->app->storagePath('logs/pipeline/receipt.json')),
+        );
+
         $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(
             $this->app->make(Pipeline::class),
             $this->app->make(StepRunner::class),
             $this->app->make(TreeFingerprint::class),
+            $this->app->make(ReceiptStore::class),
         ));
     }
 
     public function boot(): void
     {
+        // Registered whether or not the project opted in: a gate calling it on a
+        // project with no pipeline should get a clear "nothing has been verified",
+        // not "command not found".
+        if ($this->app->runningInConsole()) {
+            $this->commands([VerifyCommand::class]);
+        }
+
         // Registered in the package's own provider rather than a published
         // routes/ai.php, so a consuming app needs no extra file.
         if (! $this->app->make(PipelineLoader::class)->exists()) {
