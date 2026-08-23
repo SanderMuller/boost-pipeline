@@ -117,11 +117,15 @@ it('says an acknowledged run is structural, not a shortfall to fix', function ()
 
     expect($exit)->toBe(1)
         ->and($output)->toContain('[review]')
-        ->and($output)->toContain('cannot verify')
+        ->and($output)->toContain('cannot exit 0')
         // Two consumers reported the parenthetical landing between "were" and
         // "only acknowledged". It is the message a gate reader hits most often.
+        // It must not tell them to move the steps out: for a sequencing pipeline
+        // those steps are the point.
         ->and($output)->toContain('steps ([review], [audit]) were')
-        ->and($output)->not->toContain('steps were ([');
+        ->and($output)->not->toContain('steps were ([')
+        ->and($output)->toContain('expected for a pipeline that sequences agent work')
+        ->and($output)->not->toContain('outside the pipeline');
 });
 
 it('still reports a plain failure as a failure, not as a design limit', function (): void {

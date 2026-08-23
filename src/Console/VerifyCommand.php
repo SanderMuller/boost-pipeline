@@ -112,13 +112,14 @@ final class VerifyCommand extends Command
         }
 
         return sprintf(
-            'Run [%s] passed every step the server ran, but %s only acknowledged, never verified. '
-            .'This pipeline cannot verify a tree: give %s a proof with Skill::proving(), or gate those steps outside the pipeline.',
+            'Run [%s] passed every step the server ran, but %s only acknowledged, never verified, so this command cannot exit 0. '
+            .'That is expected for a pipeline that sequences agent work: judgement leaves nothing to check, and the walk still '
+            .'guarantees the order and the one-at-a-time delivery. Read the run with `status`%s.',
             $receipt->runId,
             count($acknowledged) === 1
                 ? sprintf('step [%s] was', $acknowledged[0])
                 : sprintf('%d steps ([%s]) were', count($acknowledged), implode('], [', $acknowledged)),
-            count($acknowledged) === 1 ? 'it' : 'them',
+            ', and where a step leaves an artifact behind, Skill::proving() can turn that one into a verified pass',
         );
     }
 }

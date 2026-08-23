@@ -576,13 +576,17 @@ php artisan pipeline:verify || exit 1
 CI's job is different and unchanged: it runs the checks itself rather than asking whether someone
 else did.
 
-**It is only a gate for a pipeline the server can verify end to end.** A skill step with no proof is
-`acknowledged`, so `all_verified` stays false and the command exits 1 no matter how many times it
-runs. That is the contract working, not a bug — but a gate that can never pass is worse than no
-gate, because a reader learns to skip it. The command says which steps are acknowledged and that
-re-running will not help, so the choice is visible: give those steps a proof, or run them outside
-the pipeline and keep the pipeline's receipt meaningful. A pipeline of shell steps is the shape this
-command was built for.
+**It answers a narrower question than "did the pipeline run".** A skill step with no proof is
+`acknowledged`, so `all_verified` stays false and this command exits 1 however many times the run
+repeats. That is the contract working: the server did not verify that work, and will not claim it
+did.
+
+It also means **this command is not the measure of a sequencing pipeline.** A pipeline whose steps
+are review and evaluation work is meant to hold acknowledged steps, and it still delivers what it is
+for — one step at a time, in order, none of them skippable. `pipeline:verify` is the right gate for
+the mechanical part of a pipeline and says so; for the rest, read the run with `status`, which
+reports verified and acknowledged work as separate counts precisely so neither is mistaken for the
+other.
 
 **A receipt is not proof a run happened.** It is a file in the working copy, so anything that can
 run a shell step can write one — an agent able to forge it could already claim a pass in prose, so
