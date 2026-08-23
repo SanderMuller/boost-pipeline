@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+namespace SanderMuller\BoostPipeline\Runner;
+
+use Illuminate\Contracts\Foundation\Application;
+use SanderMuller\BoostPipeline\Contracts\ServerProcess;
+
+final readonly class ConsoleServerProcess implements ServerProcess
+{
+    public function __construct(private Application $app) {}
+
+    public function isStarting(): bool
+    {
+        $argv = $_SERVER['argv'];
+
+        return $this->app->runningInConsole()
+            && is_array($argv)
+            && ($argv[1] ?? null) === 'mcp:start';
+    }
+}

@@ -8,12 +8,14 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
+use SanderMuller\BoostPipeline\Contracts\ServerProcess;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
+use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
@@ -46,6 +48,11 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         ));
 
         $this->app->singleton(
+            ServerProcess::class,
+            fn (): ServerProcess => new ConsoleServerProcess($this->app),
+        );
+
+        $this->app->singleton(
             CommandPreflight::class,
             fn (): CommandPreflight => new CommandPreflight($this->app->basePath()),
         );
@@ -75,20 +82,11 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         // before provider boot has finished, and again in the child process
         // whenever an artisan command IS a pipeline step — `php artisan test` is
         // one. Only the server process has a protocol stream to protect.
-        if ($this->startingMcpServer() && ! $this->configLoads()) {
+        if ($this->app->make(ServerProcess::class)->isStarting() && ! $this->configLoads()) {
             return;
         }
 
         Mcp::local(self::HANDLE, PipelineServer::class);
-    }
-
-    private function startingMcpServer(): bool
-    {
-        $argv = $_SERVER['argv'];
-
-        return $this->app->runningInConsole()
-            && is_array($argv)
-            && ($argv[1] ?? null) === 'mcp:start';
     }
 
     /**

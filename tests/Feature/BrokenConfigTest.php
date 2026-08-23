@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 use Laravel\Mcp\Server\Registrar;
-use RuntimeException;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Contracts\ServerProcess;
 
 /**
  * For a stdio MCP server STDOUT is the protocol channel, so an unhandled config
@@ -24,18 +24,22 @@ function bootWithConfig(string $php): Registrar
 
     file_put_contents($path, $php);
 
-    // argv is what tells the provider this process is the server; nothing else
-    // pays for the eager check.
-    $original = $_SERVER['argv'];
-    $_SERVER['argv'] = ['artisan', 'mcp:start', 'pipeline'];
-
     $registrar = new Registrar;
     app()->instance(Registrar::class, $registrar);
+
+    // Stands in for `argv[1] === 'mcp:start'`, so the suite never touches that
+    // global — the output formatter reads and rewrites it.
+    app()->instance(ServerProcess::class, new class implements ServerProcess
+    {
+        public function isStarting(): bool
+        {
+            return true;
+        }
+    });
 
     try {
         new BoostPipelineServiceProvider(app())->boot();
     } finally {
-        $_SERVER['argv'] = $original;
         @unlink($path);
     }
 
