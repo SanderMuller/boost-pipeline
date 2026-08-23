@@ -11,6 +11,7 @@ use Rector\DeadCode\Rector\ClassMethod\RemoveUselessParamTagRector;
 use Rector\DeadCode\Rector\ClassMethod\RemoveUselessReturnTagRector;
 use Rector\Privatization\Rector\ClassMethod\PrivatizeFinalClassMethodRector;
 use Rector\TypeDeclaration\Rector\ArrowFunction\AddArrowFunctionReturnTypeRector;
+use RectorLaravel\Rector\ArrayDimFetch\ServerVariableToRequestFacadeRector;
 use RectorLaravel\Set\LaravelSetList;
 
 return RectorConfig::configure()
@@ -22,6 +23,7 @@ return RectorConfig::configure()
         __DIR__.'/src',
         __DIR__.'/tests',
         __DIR__.'/workbench',
+        __DIR__.'/.config',
     ])
     ->withPreparedSets(
         deadCode: true,
@@ -54,6 +56,11 @@ return RectorConfig::configure()
         ] : [],
     ))
     ->withSkip([
+        // `Request::server()` reads the captured request bag; `$_SERVER` is the
+        // live superglobal. For `argv` — which only exists in console, where there
+        // is no meaningful request — those are different values, and the rewrite
+        // silently made a console check always false.
+        ServerVariableToRequestFacadeRector::class,
         AddArrowFunctionReturnTypeRector::class,
         InlineArrayReturnAssignRector::class,
         PrivatizeFinalClassMethodRector::class,

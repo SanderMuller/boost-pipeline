@@ -2,64 +2,70 @@
 
 declare(strict_types=1);
 
+use Laravel\Mcp\Server\Registrar;
+use RuntimeException;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 
 /**
  * For a stdio MCP server STDOUT is the protocol channel, so an unhandled config
  * error means the framework's exception renderer prints a boxed trace onto it —
- * malformed frames the client has to guess at. Whether the operator sees the real
- * cause then depends on their client, which is the wrong place for that to be
+ * malformed frames the client has to guess at. Whether the operator then sees the
+ * real cause depends on their client, which is the wrong place for that to be
  * decided.
  */
-beforeEach(function (): void {
-    $this->configPath = app()->basePath('.config/pipeline.php');
+function bootWithConfig(string $php): Registrar
+{
+    $path = app()->basePath('.config/pipeline.php');
 
-    if (! is_dir(dirname($this->configPath))) {
-        mkdir(dirname($this->configPath), recursive: true);
+    if (! is_dir(dirname($path))) {
+        mkdir(dirname($path), recursive: true);
     }
-});
 
-afterEach(function (): void {
-    if (is_file($this->configPath)) {
-        unlink($this->configPath);
+    file_put_contents($path, $php);
+
+    // argv is what tells the provider this process is the server; nothing else
+    // pays for the eager check.
+    $original = $_SERVER['argv'];
+    $_SERVER['argv'] = ['artisan', 'mcp:start', 'pipeline'];
+
+    $registrar = new Registrar;
+    app()->instance(Registrar::class, $registrar);
+
+    try {
+        new BoostPipelineServiceProvider(app())->boot();
+    } finally {
+        $_SERVER['argv'] = $original;
+        @unlink($path);
     }
+
+    return $registrar;
+}
+
+it('registers the server when the config is valid', function (): void {
+    $registrar = bootWithConfig('<?php return '.Pipeline::class.'::configure();');
+
+    expect($registrar->servers())->toHaveKey('pipeline');
 });
 
-it('does not let a broken config reach the renderer', function (): void {
-    file_put_contents($this->configPath, '<?php return "not a pipeline";');
+it('registers nothing when the config does not return a pipeline', function (): void {
+    // Registering anyway would expose a tool surface with no pipeline behind it,
+    // and the failure would surface at call time instead of at startup.
+    $registrar = bootWithConfig('<?php return "not a pipeline";');
 
-    $boot = function (): void {
-        new BoostPipelineServiceProvider(app())->boot();
-    };
-
-    expect($boot)->not->toThrow(Throwable::class);
+    expect($registrar->servers())->not->toHaveKey('pipeline');
 });
 
-it('does not let a config that throws while loading reach the renderer', function (): void {
-    // A timeout of zero is rejected as the file executes, which is the shape of
-    // error a first-time adopter is most likely to write.
-    file_put_contents(
-        $this->configPath,
-        '<?php return '.Pipeline::class.'::configure()->withTimeout(0);',
-    );
+it('registers nothing when the config throws while it is being built', function (): void {
+    $registrar = bootWithConfig('<?php return '.Pipeline::class.'::configure()->withTimeout(0);');
 
-    $boot = function (): void {
-        new BoostPipelineServiceProvider(app())->boot();
-    };
-
-    expect($boot)->not->toThrow(Throwable::class);
+    expect($registrar->servers())->not->toHaveKey('pipeline');
 });
 
-it('still registers the server when the config is valid', function (): void {
-    file_put_contents(
-        $this->configPath,
-        '<?php return '.Pipeline::class.'::configure();',
-    );
-
-    $boot = function (): void {
-        new BoostPipelineServiceProvider(app())->boot();
-    };
-
-    expect($boot)->not->toThrow(Throwable::class);
+it('lets a defect that is not a config error fail loudly', function (): void {
+    // A syntax error, a TypeError, a missing class: those are bugs in the
+    // consumer's own code. Catching them here would hide a real defect behind a
+    // tidy message about configuration.
+    expect(fn (): Registrar => bootWithConfig('<?php throw new RuntimeException("something else entirely");'))
+        ->toThrow(RuntimeException::class, 'something else entirely');
 });

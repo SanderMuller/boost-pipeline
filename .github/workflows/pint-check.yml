@@ -43,4 +43,6 @@ jobs:
           restore-keys: pint-cache-
 
       - name: Run Pint (test)
-        run: vendor/bin/pint --test
+        # `.config` named explicitly: Pint skips dot-directories on its default
+        # scan, so a violation in the pipeline config passes a bare run.
+        run: vendor/bin/pint --test . .config

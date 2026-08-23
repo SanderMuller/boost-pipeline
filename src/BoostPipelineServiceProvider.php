@@ -70,15 +70,29 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             return;
         }
 
-        if ($this->app->runningInConsole() && ! $this->configLoads()) {
+        // Narrower than runningInConsole() on purpose: validating on every artisan
+        // command would execute the consumer's config during unrelated work,
+        // before provider boot has finished, and again in the child process
+        // whenever an artisan command IS a pipeline step — `php artisan test` is
+        // one. Only the server process has a protocol stream to protect.
+        if ($this->startingMcpServer() && ! $this->configLoads()) {
             return;
         }
 
         Mcp::local(self::HANDLE, PipelineServer::class);
     }
 
+    private function startingMcpServer(): bool
+    {
+        $argv = $_SERVER['argv'];
+
+        return $this->app->runningInConsole()
+            && is_array($argv)
+            && ($argv[1] ?? null) === 'mcp:start';
+    }
+
     /**
-     * Load the config now, on the console, and report a failure on stderr.
+     * Load the config now and report a failure on stderr rather than stdout.
      *
      * For a stdio MCP server STDOUT *is* the protocol channel. Letting the
      * framework's exception renderer print a boxed trace there hands the client a
@@ -87,10 +101,9 @@ final class BoostPipelineServiceProvider extends ServiceProvider
      * discards it — one reports the real error, another just says the server
      * failed to start.
      *
-     * Worth the eager load precisely because a bad config is the likeliest
-     * failure a new adopter hits: `.config/pipeline.php` is the first file they
-     * write. Resolving the singleton rather than calling the loader keeps it to
-     * one execution, and web requests stay lazy.
+     * Only this package's own validation errors are caught. A syntax error, a
+     * TypeError, a missing class: those are defects in the consumer's code, and
+     * swallowing them here would hide a real bug behind a tidy message.
      */
     private function configLoads(): bool
     {
@@ -99,14 +112,27 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 
             return true;
         } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
-            $stderr = fopen('php://stderr', 'w');
-
-            if ($stderr !== false) {
-                fwrite($stderr, '[boost-pipeline] '.$invalidPipelineConfigException->getMessage().PHP_EOL);
-                fclose($stderr);
-            }
+            $this->writeToStderr('[boost-pipeline] '.$invalidPipelineConfigException->getMessage());
 
             return false;
+        }
+    }
+
+    private function writeToStderr(string $message): void
+    {
+        // STDERR is absent outside the CLI SAPI, and `runningInConsole()` can be
+        // true without it (APP_RUNNING_IN_CONSOLE), so the fallback open is
+        // silenced rather than allowed to warn onto the stream it is protecting.
+        $stream = defined('STDERR') ? STDERR : @fopen('php://stderr', 'w');
+
+        if (! is_resource($stream)) {
+            return;
+        }
+
+        @fwrite($stream, $message.PHP_EOL);
+
+        if (! defined('STDERR')) {
+            fclose($stream);
         }
     }
 }
