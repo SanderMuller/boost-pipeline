@@ -407,6 +407,15 @@ Read [invariants.md][invariants] before changing `src/Run/`, `src/Runner/` or `s
 composer test
 ```
 
+## Changelog
+
+[CHANGELOG.md][changelog] records what changed in each release. Upgrading across a breaking
+release: see [UPGRADING.md](UPGRADING.md).
+
+## Security
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) — please do not open a public issue.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
@@ -414,3 +423,4 @@ MIT. See [LICENSE](LICENSE).
 [design-history]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/design-history.md
 [invariants]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/invariants.md
 [mcp-notes]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/laravel-mcp-notes.md
+[changelog]: https://github.com/SanderMuller/boost-pipeline/blob/main/CHANGELOG.md
