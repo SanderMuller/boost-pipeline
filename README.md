@@ -182,6 +182,24 @@ Steps run in phase order, then in `append`/`prepend` order within a phase. Decla
 `withPhases()` orders phases. Group your `in()` calls in phase order so the file reads the way it
 runs. This catches people out.
 
+### Analyse the config, it is real code
+
+`.config/pipeline.php` is PHP that runs in your application, but it sits outside the paths most
+projects hand to their static analyser — so a rule you enforce everywhere else is not enforced
+there. A real config reached production with a `shell_exec()` its own project bans, invisible to a
+full-project run and only found by analysing the file directly.
+
+Add it to your analysed paths:
+
+```neon
+parameters:
+    paths:
+        - app
+        - .config
+```
+
+The same goes for the formatter, and for whatever else gates the rest of your code.
+
 ## Verdicts
 
 | Verdict | Meaning | Cursor |
@@ -200,7 +218,7 @@ every red check look like a broken server and invite the client to retry it.
 does not pretend to. Consequently:
 
 - `state: complete` means **the walk finished**, never "everything passed".
-- Every terminal response carries `all_verified`, true only when every step was a server-verified
+- Every response carrying a result also carries `all_verified`, true only when every step was a server-verified
   pass *and* no declared step was dropped from the walk.
 - `status` reports `server_run` and `acknowledged` as **separate keys**, never one tally.
 

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `all_verified` (with `acknowledged`, and `stale` where it applies) is reported from the first
+  result onward, in every state, rather than only once the walk finished. `blocked` and `halted`
+  are both retryable, so a run sits in them while the agent decides what to do next — which is
+  exactly when a consumer asks whether the run can be trusted, and the key being absent left
+  "absent" and "false" to be told apart. A run with no results yet still omits it: there is
+  nothing to answer.
+
+### Documentation
+
+- The README says to add `.config/` to the paths your static analyser and formatter cover.
+  `.config/pipeline.php` is PHP that runs in your application, but it sits outside the paths most
+  projects analyse — a real config carried a `shell_exec()` its own project bans, invisible to a
+  full-project run.
+
+### Fixed
+
+- `open_run` keeps its run id when the tree changes before any step has run. A run with no
+  receipts has no verdict to lose, so it adopts the new tree instead of being replaced, which
+  stops run ids churning while the agent is still deciding what to run.
+
 ## v0.3.0 - 2026-08-23
 
 A run's verdicts now expire, and a session is no longer limited to a single run. Before this, a run

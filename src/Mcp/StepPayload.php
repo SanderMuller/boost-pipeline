@@ -6,7 +6,6 @@ namespace SanderMuller\BoostPipeline\Mcp;
 
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\Run;
-use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
@@ -99,10 +98,19 @@ final readonly class StepPayload
             'position' => $run->position(),
         ];
 
-        // `complete` means the walk finished, not that everything passed. Shipping
-        // all_verified alongside it is what stops a consumer reading the state
-        // alone as green.
-        if ($run->state() === RunState::Complete) {
+        // Answered from the first receipt onward, not only at the end. `halted` and
+        // `blocked` are both retryable now, so a run sits in them while the agent
+        // decides what to do — which is exactly when "can I trust this run?" gets
+        // asked. Omitting the key there left a consumer distinguishing absent from
+        // false, and a run whose tree had already moved looked indistinguishable
+        // from one that was simply mid-walk.
+        //
+        // Before any receipt exists there is genuinely nothing to answer, so the
+        // key stays absent rather than claiming a verified-nothing run is false.
+        if ($run->results() !== []) {
+            // Never true before the walk finishes: `complete` means it finished,
+            // not that everything passed, and this is what stops a consumer
+            // reading the state alone as green.
             $envelope['all_verified'] = $run->allVerified();
             $envelope['acknowledged'] = $run->acknowledgedCount();
 

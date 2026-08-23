@@ -35,7 +35,13 @@ final class RunManager
     public function open(): Run
     {
         if ($this->run instanceof Run && $this->run->treeHasMoved()) {
-            $this->run = null;
+            // A run that has recorded nothing has no verdict to lose, so it takes
+            // the new tree and keeps its id instead of being thrown away.
+            if ($this->run->results() === []) {
+                $this->run->rebaseline();
+            } else {
+                $this->run = null;
+            }
         }
 
         return $this->run ??= Run::start($this->pipeline->walk(), $this->runner, tree: $this->tree);

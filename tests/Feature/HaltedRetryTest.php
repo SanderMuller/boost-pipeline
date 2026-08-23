@@ -8,6 +8,7 @@ use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Mcp\Tools\NextStep;
 use SanderMuller\BoostPipeline\Mcp\Tools\OpenRun;
+use SanderMuller\BoostPipeline\Mcp\Tools\Status;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
@@ -73,4 +74,18 @@ it('retries the halted step instead of refusing for the rest of the session', fu
         ->assertSee('"all_verified":true');
 
     expect($this->runner->attempts)->toBe(2);
+});
+
+it('answers whether the run can be trusted while it is still halted', function (): void {
+    // `halted` and `blocked` are retryable, so a run sits there while the agent
+    // decides. That is exactly when a consumer asks whether the run is any good,
+    // and the key used to be absent until the walk finished — leaving "absent"
+    // and "false" to be told apart.
+    PipelineServer::tool(OpenRun::class);
+    PipelineServer::tool(NextStep::class)->assertHasErrors();
+
+    PipelineServer::tool(Status::class)
+        ->assertOk()
+        ->assertSee('"state":"halted"')
+        ->assertSee('"all_verified":false');
 });

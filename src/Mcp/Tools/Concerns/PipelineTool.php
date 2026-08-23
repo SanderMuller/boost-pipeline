@@ -27,9 +27,10 @@ trait PipelineTool
     /**
      * The envelope every response shares.
      *
-     * `all_verified` is optional here because it appears only on a terminal
-     * payload — but when `state` is `complete` it is always present, which is
-     * what stops a consumer reading the state alone as green.
+     * `all_verified` is optional here only because a run with no results yet has
+     * nothing to answer. From the first receipt it is always present, in every
+     * state — including the retryable `blocked` and `halted`, which is when a
+     * consumer actually asks.
      *
      * @return array<string, mixed>
      */
@@ -42,7 +43,7 @@ trait PipelineTool
             ),
             'position' => $schema->string()->description('Cursor position, as "n/total".'),
             'all_verified' => $schema->boolean()->description(
-                'Present whenever state is "complete". True only when every step was a pass the server itself verified.'
+                'Present once the run has any result, in any state. True only when the walk finished AND every step was a pass the server itself verified against the code now on disk.'
             ),
             'acknowledged' => $schema->integer()->description(
                 'How many steps were agent-acknowledged rather than server-verified.'

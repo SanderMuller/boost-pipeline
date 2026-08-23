@@ -135,6 +135,22 @@ final class Run
         return $result;
     }
 
+    /**
+     * Adopt the tree as it stands, valid only while nothing has been recorded.
+     *
+     * A run with no receipts has nothing to invalidate, so an edit before its
+     * first step is not a reason to replace it — doing that churned through run
+     * ids while the agent was still deciding what to run.
+     */
+    public function rebaseline(): void
+    {
+        if ($this->results !== []) {
+            return;
+        }
+
+        $this->lastSeen = $this->tree?->capture();
+    }
+
     /** @return array<string, Result> */
     public function results(): array
     {

@@ -329,3 +329,15 @@ it('does not treat an acknowledgement as a check a later rewrite invalidates', f
 
     expect($run->staleReason())->toBeNull();
 });
+
+it('keeps the run id when the tree moves before anything has been recorded', function (): void {
+    // Nothing recorded means nothing to invalidate, so an edit while the agent is
+    // still deciding what to run should not churn through run ids.
+    $tree = new SettableFingerprint;
+    $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, $tree);
+
+    $first = $manager->open();
+    $tree->value = 'edited-before-any-step';
+
+    expect($manager->open()->id)->toBe($first->id);
+});
