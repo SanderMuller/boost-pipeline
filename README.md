@@ -198,7 +198,17 @@ parameters:
         - .config
 ```
 
-The same goes for the formatter, and for whatever else gates the rest of your code.
+The formatter needs naming too, and more explicitly than you would expect: Pint skips
+dot-directories on its default scan, so `vendor/bin/pint --test` reports clean with
+`$x   =   1;` sitting in `.config/pipeline.php`. Pass the path:
+
+```bash
+vendor/bin/pint --test . .config
+```
+
+An `exclude` entry in `pint.json` is unrelated — there is no `include`, so the path has to be an
+argument. Whatever else gates the rest of your code deserves the same check: assume nothing covers
+this file until you have seen it fail.
 
 ## Verdicts
 

@@ -87,7 +87,7 @@
         "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G",
         "phpstan-simplified": "vendor/bin/phpstan analyse --memory-limit=2G --error-format symplify",
         "phpstan-clear-cache": "vendor/bin/phpstan clear-result-cache",
-        "format": "vendor/bin/pint",
+        "format": "vendor/bin/pint . .config",
         "rector": "vendor/bin/rector process",
         "test": "vendor/bin/pest",
         "test-coverage": "vendor/bin/pest --coverage",
@@ -99,7 +99,7 @@
         ],
         "qa-check": [
             "vendor/bin/rector process --dry-run",
-            "vendor/bin/pint --test",
+            "vendor/bin/pint --test . .config",
             "@phpstan-simplified",
             "@test"
         ]

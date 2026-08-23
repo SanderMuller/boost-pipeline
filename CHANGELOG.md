@@ -10,6 +10,28 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## Unreleased
+
+### Fixed
+
+- A broken `.config/pipeline.php` no longer writes a rendered exception onto stdout. For a stdio
+  MCP server stdout *is* the protocol channel, so the framework's boxed trace arrived as a run of
+  malformed frames after the handshake — and what the operator saw then depended on whether their
+  client displays unparseable stdout or discards it. The message goes to stderr and the server is
+  not registered. This is the likeliest failure a new adopter hits, since the config is the first
+  file they write.
+
+### Documentation
+
+- The `.config/` note now covers the formatter properly. Pint skips dot-directories on its default
+  scan, so `vendor/bin/pint --test` reports clean with a formatting violation sitting in
+  `.config/pipeline.php`; the path has to be an argument (`pint --test . .config`), and an
+  `exclude` entry is unrelated because there is no `include`. Naming the analyser alone was half
+  the advice.
+
+- This package now analyses and formats its own `.config/`, which it was not doing while
+  recommending it.
+
 ## v0.3.1 - 2026-08-23
 
 Consumer feedback on 0.3.0. Nothing here changes what a verdict means; it closes the gaps two
