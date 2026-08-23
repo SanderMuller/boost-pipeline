@@ -5,9 +5,10 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## v0.2.0 - 2026-08-23
 
-<!-- verified-sha: 9499030d4d2e02af852a69ee385bbd39e982ba7f -->
 A dogfooding release. Using the pipeline on a real change surfaced that a run's logs could not be
 found from the run the server reported, and fixing that properly meant changing one interface.
 
@@ -53,8 +54,6 @@ found from the run the server reported, and fixing that properly meant changing 
 - `UPGRADING.md`, and changelog and security pointers in the README.
 
 **Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.1.0...v0.2.0
-
-## [Unreleased]
 
 ## v0.1.0 - 2026-08-22
 
