@@ -5,9 +5,13 @@ All notable changes to `sandermuller/boost-pipeline` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+There is deliberately no `[Unreleased]` section. `update-changelog.yml` prepends each release body
+on publish, so an entry written here before a release is duplicated by the section the workflow
+adds — which happened at every release that had one. Unreleased work lives in the release notes
+draft until it ships.
+
 ## v0.3.1 - 2026-08-23
 
-<!-- verified-sha: e61b53701ff35780b4c4ec6dccb07de021eb486d -->
 Consumer feedback on 0.3.0. Nothing here changes what a verdict means; it closes the gaps two
 projects hit while wiring it up.
 
@@ -55,48 +59,6 @@ projects hit while wiring it up.
   
 
 **Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.3.0...v0.3.1
-
-## [Unreleased]
-
-### Added
-
-- `Pipeline::configure()->withTimeout(seconds)` sets the ceiling for every step that does not set
-  its own. Per-step `->timeout()` covered the one step needing headroom, but a project whose suite
-  is slow throughout had to repeat itself on every step, and the runner's own default was not
-  reachable from configuration at all.
-
-### Changed
-
-- `all_verified` (with `acknowledged`, and `stale` where it applies) is reported from the first
-  result onward, in every state, rather than only once the walk finished. `blocked` and `halted`
-  are both retryable, so a run sits in them while the agent decides what to do next — which is
-  exactly when a consumer asks whether the run can be trusted, and the key being absent left
-  "absent" and "false" to be told apart. A run with no results yet still omits it: there is
-  nothing to answer.
-  
-- `withTimeout()` and `Shell->timeout()` reject a value of zero or less. Symfony's process runner
-  treats zero as no limit, so accepting it removed the ceiling instead of tightening it — and a
-  step that never returns holds the tool call open until the client gives up.
-  
-
-### Documentation
-
-- The README says to add `.config/` to the paths your static analyser and formatter cover.
-  `.config/pipeline.php` is PHP that runs in your application, but it sits outside the paths most
-  projects analyse — a real config carried a `shell_exec()` its own project bans, invisible to a
-  full-project run.
-
-### Fixed
-
-- `all_verified` and `stale` are derived from a single reading of the tree. Each was asking
-  separately, so a change landing between the two could produce one response carrying
-  `all_verified: true` beside a `stale` message — the two fields contradicting each other in the
-  same payload.
-  
-- `open_run` keeps its run id when the tree changes before any step has run. A run with no
-  receipts has no verdict to lose, so it adopts the new tree instead of being replaced, which
-  stops run ids churning while the agent is still deciding what to run.
-  
 
 ## v0.3.0 - 2026-08-23
 
