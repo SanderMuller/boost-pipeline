@@ -3,9 +3,18 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
+use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
+use SanderMuller\BoostPipeline\Contracts\Step;
+use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
+use SanderMuller\BoostPipeline\Phases\Steps;
+use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
+use SanderMuller\BoostPipeline\Run\Run;
+use SanderMuller\BoostPipeline\Steps\Shell;
 
 /**
  * The command is the only thing that lets a consumer act on a run, so its exit
@@ -101,4 +110,43 @@ it('does not fail a run purely because the tree cannot be fingerprinted', functi
     treeReporting(null);
 
     expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('exits 0 for a receipt a real run actually wrote', function (): void {
+    // Every case above hands the command a receipt built by hand, so it asserts
+    // what a CORRECT receipt does — never what `Run` produces. That is the seam
+    // 0.4.0 shipped broken through: the command was right, `Run` wrote
+    // `all_verified: false` for a green run, and both halves tested clean. This
+    // is the only test that fails when the two disagree.
+    $path = sys_get_temp_dir().'/bp-e2e-'.bin2hex(random_bytes(4)).'/receipt.json';
+    $store = new JsonReceiptStore($path);
+
+    app()->instance(ReceiptStore::class, $store);
+    treeReporting('tree-a');
+
+    $run = Run::start(
+        Pipeline::configure()->withSteps(function (Steps $steps): void {
+            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
+        })->walk(),
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        'r-e2e',
+        tree: resolve(TreeFingerprint::class),
+        receipts: $store,
+    );
+
+    $run->resolveCurrentStep();
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(0)
+            ->and(Artisan::output())->toContain('verified this tree');
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
 });
