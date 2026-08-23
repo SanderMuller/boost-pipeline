@@ -12,7 +12,6 @@ draft until it ships.
 
 ## v0.3.2 - 2026-08-23
 
-<!-- verified-sha: d72ab491614b6c27373b09bb660972d9918dd73b -->
 Consumer feedback on 0.3.1. Two fixes for what a first-time adopter runs into, and the package now
 applies to itself a check it had only been recommending.
 
