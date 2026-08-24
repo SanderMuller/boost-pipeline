@@ -83,6 +83,8 @@ once rather than scattered across a limitations section.
 | 7 | Steps ran out of order, or a receipt was fabricated | No | The server owns execution; the cursor advances in one place |
 | 8 | Pre-existing failure blocks, so someone loosens the step to get green | **Live risk** | Use the tool's own baseline, or fix it. Do not weaken the step |
 | 9 | A consumer reads `complete` as green | **Yes**, if `all_verified` is ignored | `all_verified` on every terminal response |
+| 10 | A scoped run reads as a full one | No | The receipt records the scope, and a bare `pipeline:verify` fails on a scoped receipt rather than answering a question the run cannot |
+| 11 | A selection matches nothing, so only untagged steps run and pass | No | A blocking notice, so `all_verified` stays false. This is why the selection notice is not carved out of the wholesale `notices !== []` guard |
 
 **Row 5 is the one no mechanism addresses.** A run that never happened produces no false green —
 it produces *no signal*, which a reader may mistake for one. Anything consuming this (a PR

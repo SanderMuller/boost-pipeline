@@ -51,7 +51,7 @@ function treeReporting(?string $digest): void
     });
 }
 
-function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete'): Receipt
+function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null): Receipt
 {
     return new Receipt(
         runId: 'r-test',
@@ -61,6 +61,7 @@ function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $st
         stale: $stale,
         verdicts: ['pint' => 'passed', 'phpstan' => 'passed'],
         recordedAt: '2026-01-01T00:00:00+00:00',
+        scope: $scope,
     );
 }
 
@@ -205,4 +206,70 @@ it('exits 0 for a receipt a real run actually wrote', function (): void {
         @unlink($path);
         @rmdir(dirname($path));
     }
+});
+
+/**
+ * Coverage, not equality. A run that walked every step answers a question about
+ * any one scope; a scoped run answers only its own, and never "is this tree
+ * verified?", which is what a bare call asks.
+ */
+it('answers a scope question from a full run, because a full run covered it', function (): void {
+    // The case that reads backwards if you compare scopes for equality: a fully
+    // verified tree would start failing subset queries.
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+it('refuses to call the tree verified on the strength of a scoped run', function (): void {
+    receiptStoreHolding(receipt(scope: 'backend'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[backend]')
+        ->and($output)->toContain('not this whole tree')
+        ->and($output)->toContain('--only=backend');
+});
+
+it('answers a scoped question from the matching scoped run', function (): void {
+    receiptStoreHolding(receipt(scope: 'backend'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend']);
+
+    expect($exit)->toBe(0)
+        ->and(Artisan::output())->toContain('scope [backend]');
+});
+
+it('refuses a scoped question the run did not answer', function (): void {
+    receiptStoreHolding(receipt(scope: 'backend'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'frontend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[backend]')
+        ->and($output)->toContain('[frontend]');
+});
+
+it('treats a blank --only as no question about scope at all', function (): void {
+    receiptStoreHolding(receipt(scope: 'backend'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => '  ']))->toBe(1);
+});
+
+it('checks the scope before the verdict, so the message names the real problem', function (): void {
+    // A scoped run that also failed must not report "not verified" when the
+    // caller's question was unanswerable to begin with.
+    receiptStoreHolding(receipt(allVerified: false, scope: 'backend'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(1)
+        ->and(Artisan::output())->toContain('not this whole tree');
 });

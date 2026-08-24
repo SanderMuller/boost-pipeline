@@ -25,6 +25,9 @@ final class Shell implements Step
 
     private bool $mutates = false;
 
+    /** @var list<string> */
+    private array $tags = [];
+
     private ?float $timeoutSeconds = null;
 
     private function __construct(
@@ -75,6 +78,35 @@ final class Shell implements Step
     public function scopeCommand(): ?string
     {
         return $this->scopeCommand;
+    }
+
+    /**
+     * Declare which scopes this step belongs to.
+     *
+     *     Shell::run('yarn lint-all')->tagged('frontend')
+     *
+     * `open_run(only: "frontend")` then walks this step; `only: "backend"` does
+     * not. A step with no tag runs in every scope. Matching is case-sensitive, so
+     * a mistyped case matches nothing and the run says so rather than quietly
+     * narrowing.
+     */
+    public function tagged(string ...$tags): self
+    {
+        foreach ($tags as $tag) {
+            if (trim($tag) === '') {
+                throw InvalidPipelineConfigException::emptyTag($this->id);
+            }
+        }
+
+        $this->tags = array_values(array_unique([...$this->tags, ...$tags]));
+
+        return $this;
+    }
+
+    /** @return list<string> */
+    public function tags(): array
+    {
+        return $this->tags;
     }
 
     /**

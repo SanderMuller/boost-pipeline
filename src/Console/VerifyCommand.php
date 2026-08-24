@@ -24,7 +24,7 @@ use SanderMuller\BoostPipeline\Run\Receipt;
  */
 final class VerifyCommand extends Command
 {
-    protected $signature = 'pipeline:verify';
+    protected $signature = 'pipeline:verify {--only= : Ask whether this scope was verified, rather than the whole tree.}';
 
     protected $description = 'Exit 0 only when the pipeline has verified the code currently on disk.';
 
@@ -55,6 +55,14 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        $scopeFailure = $this->scopeMismatch($receipt);
+
+        if ($scopeFailure !== null) {
+            $this->components->error($scopeFailure);
+
+            return self::FAILURE;
+        }
+
         if (! $receipt->allVerified) {
             $this->components->error($this->explainUnverified($receipt));
 
@@ -62,12 +70,52 @@ final class VerifyCommand extends Command
         }
 
         $this->components->info(sprintf(
-            'Run [%s] verified this tree: %d step(s), every one a pass the server produced.',
+            'Run [%s] verified %s: %d step(s), every one a pass the server produced.',
             $receipt->runId,
+            $receipt->scope === null ? 'this tree' : "scope [{$receipt->scope}]",
             count($receipt->verdicts),
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Whether the run's coverage falls short of what was asked, and why.
+     *
+     * Coverage, not equality. An unscoped run walked every step, so it answers a
+     * question about any single scope as well. A scoped run answers only its own,
+     * and never the question "is this tree verified?", which is what a bare call
+     * asks.
+     */
+    private function scopeMismatch(Receipt $receipt): ?string
+    {
+        $asked = $this->option('only');
+        $asked = is_string($asked) && trim($asked) !== '' ? $asked : null;
+
+        if ($receipt->scope === null) {
+            return null;
+        }
+
+        if ($asked === null) {
+            return sprintf(
+                'Run [%s] verified scope [%s], not this whole tree, so it cannot answer whether the tree is verified. Ask about the scope with --only=%s, or open an unscoped run.',
+                $receipt->runId,
+                $receipt->scope,
+                $receipt->scope,
+            );
+        }
+
+        if ($asked !== $receipt->scope) {
+            return sprintf(
+                'Run [%s] verified scope [%s], and the question was about scope [%s]. Nothing here says anything about [%s].',
+                $receipt->runId,
+                $receipt->scope,
+                $asked,
+                $asked,
+            );
+        }
+
+        return null;
     }
 
     /**

@@ -158,43 +158,43 @@ messages: a reader must be able to tell "this run verified something else" from 
 
 **ID:** tags · **Depends:** none
 
-- [ ] Add `tags(): array` to the `Step` contract — returns `list<string>`, empty for an untagged step.
-- [ ] Add `tagged(string ...$tags)` to `Shell` and `Skill` — new instance, preserving `mutating()` and `proving()` state.
-- [ ] Reject an empty or whitespace-only tag with a named `InvalidPipelineConfigException` — at config load, not at run time.
-- [ ] Filter in `Walk::resolve()` behind an optional selection — untagged always in, tagged in only on a match.
-- [ ] Handle groups under filtering — survivors keep the position, an emptied group contributes none, and a lone survivor loses its `batchId` so nothing later calls it grouped.
-- [ ] Notice when a selection matches no tagged step — blocking, so `verifiedGiven()` keeps its wholesale notice guard.
-- [ ] Tests — the filter, group survival, the notice, tag validation, and that an excluded step is not a dropped step.
+- [x] Add `tags(): array` to the `Step` contract — returns `list<string>`, empty for an untagged step.
+- [x] Add `tagged(string ...$tags)` to `Shell` and `Skill` — new instance, preserving `mutating()` and `proving()` state.
+- [x] Reject an empty or whitespace-only tag with a named `InvalidPipelineConfigException` — at config load, not at run time.
+- [x] Filter in `Walk::resolve()` behind an optional selection — untagged always in, tagged in only on a match.
+- [x] Handle groups under filtering — survivors keep the position, an emptied group contributes none, and a lone survivor loses its `batchId` so nothing later calls it grouped.
+- [x] Notice when a selection matches no tagged step — blocking, so `verifiedGiven()` keeps its wholesale notice guard.
+- [x] Tests — the filter, group survival, the notice, tag validation, and that an excluded step is not a dropped step.
 
 ### Phase 2: Selecting a scope when the run opens (Priority: HIGH)
 
 **ID:** run-selection · **Depends:** tags
 
-- [ ] Thread the selection through `Pipeline::walk()`, `Run::start()` and `RunManager::open()`.
-- [ ] Start a new run when the selection differs from the open run's — a different selection is a different question.
-- [ ] Add the `only` input to `open_run`, described so an agent knows a scoped run verifies less.
-- [ ] Report `scope` in the payload envelope, absent when unscoped.
-- [ ] Report how many steps the scope excluded in `status` — a reader must be able to see the walk is smaller than the config without diffing it themselves.
-- [ ] Update the `run_pipeline` prompt — it drives `open_run` and would otherwise never mention `only` exists.
-- [ ] Declare `scope` in the output schema — the schema must not fall behind the payload again.
-- [ ] Tests — threading, the re-open rule, the payload key present and absent, and the schema declaring it.
+- [x] Thread the selection through `Pipeline::walk()`, `Run::start()` and `RunManager::open()`.
+- [x] Start a new run when the selection differs from the open run's — a different selection is a different question.
+- [x] Add the `only` input to `open_run`, described so an agent knows a scoped run verifies less.
+- [x] Report `scope` in the payload envelope, absent when unscoped.
+- [x] Report how many steps the scope excluded in `status` — a reader must be able to see the walk is smaller than the config without diffing it themselves.
+- [x] Update the `run_pipeline` prompt — it drives `open_run` and would otherwise never mention `only` exists.
+- [x] Declare `scope` in the output schema — the schema must not fall behind the payload again.
+- [x] Tests — threading, the re-open rule, the payload key present and absent, and the schema declaring it.
 
 ### Phase 3: Scope in the receipt and the verify command (Priority: HIGH)
 
 **ID:** receipt-scope · **Depends:** run-selection
 
-- [ ] Add `scope` to `Receipt` and round-trip it in `JsonReceiptStore`, omitted when null.
-- [ ] Add `--only=` to `pipeline:verify` and implement the table in section 4.
-- [ ] Word each mismatch so a wider or narrower answer is distinguishable from a failure.
-- [ ] Tests — every row of the table, including that a bare call against a scoped receipt exits non-zero.
+- [x] Add `scope` to `Receipt` and round-trip it in `JsonReceiptStore`, omitted when null.
+- [x] Add `--only=` to `pipeline:verify` and implement the table in section 4.
+- [x] Word each mismatch so a wider or narrower answer is distinguishable from a failure.
+- [x] Tests — every row of the table, including that a bare call against a scoped receipt exits non-zero.
 
 ### Phase 4: Documentation (Priority: HIGH)
 
 **ID:** docs · **Depends:** receipt-scope
 
-- [ ] README section on tags and scoped runs, stating plainly that a scoped run verifies less.
-- [ ] `UPGRADING.md` entry for `Step::tags()` on the contract.
-- [ ] Add the scoped-receipt row to the false-green table in `.ai/docs/invariants.md`, with what closes it.
+- [x] README section on tags and scoped runs, stating plainly that a scoped run verifies less.
+- [x] `UPGRADING.md` entry for `Step::tags()` on the contract.
+- [x] Add the scoped-receipt row to the false-green table in `.ai/docs/invariants.md`, with what closes it.
 
 ---
 
@@ -247,4 +247,15 @@ None.
 
 ## Findings
 
-<!-- Notes added during implementation. Do not remove this section. -->
+- **Tagging one side is not enough, and a test caught it.** A config that tags only its frontend
+  steps has no name for the rest, so `only: "backend"` matches nothing and hits the blocking notice.
+  The design is right, but it is a usability trap worth stating plainly, so the README says to tag
+  both sides rather than only the odd one out.
+- **The exclusion count belongs on the walk, not the run.** `excludedByScope()` was first written to
+  compare against an unscoped walk the run did not have. The walk counts what it skips as it
+  resolves, so no second resolution is needed.
+- **`scopeMismatch()` runs before the `allVerified` check.** A scoped run that also failed would
+  otherwise report "not verified" to a caller whose question was unanswerable to begin with. There
+  is a test pinning the order.
+- **A receipt written before this release reads as unscoped**, which is what it was. Covered by a
+  test that writes the old JSON shape by hand.

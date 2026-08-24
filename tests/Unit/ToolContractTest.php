@@ -64,10 +64,11 @@ it('declares every key a payload can actually contain', function (): void {
     // it does not declare is the same drift as documentation disagreeing with
     // behaviour, and two keys had already shipped undeclared: `instruction`, which
     // is the whole point of a skill step, and the parallel-group shape.
-    expect(schemaFor('next_step'))->toHaveKeys(['step', 'steps', 'parallel', 'result', 'results'])
+    expect(schemaFor('next_step'))->toHaveKeys(['step', 'steps', 'parallel', 'result', 'results', 'scope'])
         ->and(schemaTextFor('next_step', 'step'))->toContain('instruction')
         ->and(schemaTextFor('next_step', 'steps'))->toContain('instruction')
-        ->and(schemaTextFor('next_step', 'results'))->toContain('verdict');
+        ->and(schemaTextFor('next_step', 'results'))->toContain('verdict')
+        ->and(schemaFor('status'))->toHaveKey('excluded_by_scope');
 });
 
 /**
@@ -83,6 +84,10 @@ function schemaTextFor(string $name, string $key): string
 
     return $type instanceof Type ? $type->toString() : "no schema declared for [{$key}]";
 }
+
+it('declares the input open_run accepts, so a client can find the scope selector', function (): void {
+    expect(toolNamed('open_run')->schema(new JsonSchemaTypeFactory))->toHaveKey('only');
+});
 
 it('exposes total_steps on open_run but no later step identity', function (): void {
     expect(schemaFor('open_run'))->toHaveKey('total_steps');

@@ -32,6 +32,14 @@ final readonly class Receipt
         public ?string $stale,
         public array $verdicts,
         public string $recordedAt,
+        /**
+         * The tag this run was scoped to, null when it walked everything.
+         *
+         * Without this a scoped pass is indistinguishable from a full one, and a
+         * gate reading the exit code would treat "the backend is fine" as "the
+         * tree is verified".
+         */
+        public ?string $scope = null,
     ) {}
 
     /**
@@ -47,6 +55,7 @@ final readonly class Receipt
             'stale' => $this->stale,
             'verdicts' => $this->verdicts,
             'recorded_at' => $this->recordedAt,
+            'scope' => $this->scope,
         ], static fn (mixed $value): bool => $value !== null);
     }
 
@@ -78,6 +87,7 @@ final readonly class Receipt
         $tree = $data['tree'] ?? null;
         $stale = $data['stale'] ?? null;
         $recordedAt = $data['recorded_at'] ?? '';
+        $scope = $data['scope'] ?? null;
 
         return new self(
             runId: $runId,
@@ -87,6 +97,7 @@ final readonly class Receipt
             stale: is_string($stale) ? $stale : null,
             verdicts: $verdicts,
             recordedAt: is_string($recordedAt) ? $recordedAt : '',
+            scope: is_string($scope) ? $scope : null,
         );
     }
 }

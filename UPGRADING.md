@@ -1,5 +1,37 @@
 # Upgrading
 
+## From 0.6 to 0.7
+
+### Changed
+
+- `Step::tags(): array` joins the contract. Add it to any implementation, returning `list<string>`.
+  `Shell` and `Skill` already have it, so a pipeline that only configures steps needs no changes.
+
+  ```php
+  // after
+  /** @return list<string> */
+  public function tags(): array
+  {
+      return [];   // empty means the step runs in every scope
+  }
+  ```
+
+  Empty is the right default: an untagged step runs whatever scope is selected, so returning `[]`
+  keeps a custom step behaving exactly as it does today.
+
+### Added (no migration needed)
+
+- `Shell::tagged()` and `Skill::tagged()` declare which scopes a step belongs to, and `open_run`
+  takes an `only` argument to select one. See the README section on running only part of the
+  pipeline.
+
+- `pipeline:verify --only=` asks whether a scope was verified rather than the whole tree. A bare
+  call still asks about the tree, and now fails when the recorded run was scoped, because a partial
+  run cannot answer it.
+
+- Receipts record the scope. One written before this release has no `scope` key and reads as
+  unscoped, which is what it was.
+
 ## From 0.5 to 0.6
 
 ### Changed

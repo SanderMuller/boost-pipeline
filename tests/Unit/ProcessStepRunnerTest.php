@@ -203,6 +203,12 @@ it('refuses a step that claims to be a shell step but is not one', function (): 
         {
             return false;
         }
+
+        /** @return list<string> */
+        public function tags(): array
+        {
+            return [];
+        }
     };
 
     $result = runStep($this->runner, $step);

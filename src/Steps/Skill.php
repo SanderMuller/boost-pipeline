@@ -6,6 +6,7 @@ namespace SanderMuller\BoostPipeline\Steps;
 
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 
 /**
  * An instruction handed back to the invoking agent.
@@ -23,6 +24,8 @@ final readonly class Skill implements Step
         private ?string $instruction,
         private bool $mutates = false,
         private ?string $proof = null,
+        /** @var list<string> */
+        private array $tags = [],
     ) {}
 
     /**
@@ -50,7 +53,7 @@ final readonly class Skill implements Step
      */
     public function mutating(): self
     {
-        return new self($this->invocation, $this->id, $this->instruction, true, $this->proof);
+        return new self($this->invocation, $this->id, $this->instruction, true, $this->proof, $this->tags);
     }
 
     /**
@@ -70,7 +73,37 @@ final readonly class Skill implements Step
      */
     public function proving(string $command): self
     {
-        return new self($this->invocation, $this->id, $this->instruction, $this->mutates, $command);
+        return new self($this->invocation, $this->id, $this->instruction, $this->mutates, $command, $this->tags);
+    }
+
+    /**
+     * Declare which scopes this step belongs to.
+     *
+     * A step with no tag runs in every scope, so tagging one step never drops the
+     * ones that carry none. Matching is case-sensitive.
+     */
+    public function tagged(string ...$tags): self
+    {
+        foreach ($tags as $tag) {
+            if (trim($tag) === '') {
+                throw InvalidPipelineConfigException::emptyTag($this->id);
+            }
+        }
+
+        return new self(
+            $this->invocation,
+            $this->id,
+            $this->instruction,
+            $this->mutates,
+            $this->proof,
+            array_values(array_unique([...$this->tags, ...$tags])),
+        );
+    }
+
+    /** @return list<string> */
+    public function tags(): array
+    {
+        return $this->tags;
     }
 
     public function proof(): ?string

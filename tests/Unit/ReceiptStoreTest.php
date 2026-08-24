@@ -57,3 +57,37 @@ it('treats JSON missing the fields that identify a run as no receipt', function 
     // think to set, reads as a verified run.
     expect($this->store->read())->toBeNull();
 });
+
+it('round-trips the scope, because a scoped pass must not read as a full one', function (): void {
+    $this->store->write(new Receipt(
+        runId: 'r-scoped',
+        state: 'complete',
+        allVerified: true,
+        tree: 'tree-a',
+        stale: null,
+        verdicts: ['phpstan' => 'passed'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+        scope: 'backend',
+    ));
+
+    expect($this->store->read()?->scope)->toBe('backend');
+});
+
+it('reads a receipt written before scopes existed as unscoped', function (): void {
+    // Absent means the run walked everything, which is what every receipt written
+    // before this feature meant.
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-old',
+        'state' => 'complete',
+        'all_verified' => true,
+        'tree' => 'tree-a',
+        'verdicts' => ['pint' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00',
+    ]));
+
+    $receipt = $this->store->read();
+
+    expect($receipt?->scope)->toBeNull()
+        ->and($receipt?->allVerified)->toBeTrue();
+});

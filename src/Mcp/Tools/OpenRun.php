@@ -28,6 +28,16 @@ final class OpenRun extends Tool
     ) {}
 
     /** @return array<string, mixed> */
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'only' => $schema->string()->description(
+                'Run only the steps carrying this tag, plus every untagged step. Omit it to run the whole pipeline. A scoped run verifies less than a full one, and its receipt records the scope, so `pipeline:verify` will not report the tree verified on the strength of it.'
+            ),
+        ];
+    }
+
+    /** @return array<string, mixed> */
     public function annotations(): array
     {
         return ['readOnlyHint' => true];
@@ -51,7 +61,8 @@ final class OpenRun extends Tool
     {
         // Idempotent: opening an already-open run returns it where it stands.
         // Restarting would discard verdicts silently.
-        $run = $this->runs->open();
+        $selection = $request->get('only');
+        $run = $this->runs->open(is_string($selection) && trim($selection) !== '' ? $selection : null);
 
         $payload = StepPayload::opened($run);
 

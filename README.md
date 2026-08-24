@@ -262,6 +262,48 @@ Two things a group refuses, when the config loads rather than when the run reach
 A custom `StepRunner` that does not implement `BatchStepRunner` still works. Its groups resolve one
 step after another, which is correct and slower.
 
+### Running only part of the pipeline
+
+Tag a step to say which scope it belongs to, then select one when the run opens:
+
+```php
+$steps->in(Formatting::class)
+    ->append(Shell::run('vendor/bin/pint --test')->tagged('backend'))
+    ->append(Shell::run('yarn lint-all')->tagged('frontend'));
+```
+
+```
+open_run(only: "backend")
+```
+
+A step with no tag runs in every scope, so tagging one step never drops the ones that carry none.
+A step can carry several tags and matches on any of them. Matching is case-sensitive.
+
+**Tag both sides, not just the odd one out.** To select a scope, some step has to carry it. Tagging
+only your frontend steps gives you `only: "frontend"` but no name for the rest, and asking for
+`backend` then matches nothing. The run says so rather than quietly narrowing:
+
+```
+notices: ["No step carries the tag [backend], so this run holds only the steps that carry
+          no tag at all. Check the spelling: matching is case-sensitive."]
+```
+
+That notice blocks like any other, because a scope nothing carries is almost always a typo, and the
+untagged steps would otherwise pass and let the run call itself verified.
+
+**A scoped run verifies less, and everything downstream says so.** The run reports its `scope`,
+`status` reports `excluded_by_scope`, and the receipt records it, so `pipeline:verify` will not
+report the tree verified on the strength of a partial run:
+
+```bash
+php artisan pipeline:verify                  # exit 1 after a backend-only run
+php artisan pipeline:verify --only=backend   # exit 0
+```
+
+The rule is coverage, not equality: a full run answers a question about any one scope, a scoped run
+answers only its own. There is one receipt, so scopes do not accumulate: a second scoped run
+replaces the first, and a change spanning both wants an unscoped run.
+
 ### Why that order
 
 Not "cheapest first", which applies *within* a phase. Across phases the order follows the fix

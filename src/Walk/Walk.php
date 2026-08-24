@@ -20,38 +20,96 @@ final readonly class Walk
     /**
      * @param  list<WalkStep>  $steps
      * @param  list<string>  $notices
+     * @param  int  $excluded  How many declared steps the selection left out.
      */
     private function __construct(
         public array $steps,
         public array $notices,
+        public int $excluded = 0,
     ) {}
 
-    public static function resolve(Phases $phases, Steps $steps): self
+    /**
+     * @param  string|null  $selection  Walk only steps carrying this tag, plus every untagged
+     *                                  step. Null walks everything.
+     */
+    public static function resolve(Phases $phases, Steps $steps, ?string $selection = null): self
     {
         $registered = $phases->all();
 
-        $walk = self::buildWalk($registered, $steps);
+        [$walk, $matchedSelection, $excluded] = self::buildWalk($registered, $steps, $selection);
 
         self::assertUniqueStepIds($walk);
 
-        return new self($walk, self::noticesForUnregisteredPhases($steps, $registered));
+        $notices = self::noticesForUnregisteredPhases($steps, $registered);
+
+        // A selection nothing carries is almost always a mistyped tag. Left
+        // unreported, the untagged steps would pass and the run would call itself
+        // verified while the scope the caller asked about was never checked.
+        if ($selection !== null && ! $matchedSelection) {
+            $notices[] = sprintf(
+                'No step carries the tag [%s], so this run holds only the steps that carry no tag at all. Check the spelling: matching is case-sensitive.',
+                $selection,
+            );
+        }
+
+        return new self($walk, $notices, $excluded);
+    }
+
+    /** @param list<string> $tags */
+    private static function selected(array $tags, ?string $selection): bool
+    {
+        return $selection === null || $tags === [] || in_array($selection, $tags, true);
     }
 
     /**
      * @param  list<class-string<Phase>>  $registered
-     * @return list<WalkStep>
+     * @return array{0: list<WalkStep>, 1: bool, 2: int} the walk, whether any step carried the
+     *                                                   selection, and how many it left out
      */
-    private static function buildWalk(array $registered, Steps $steps): array
+    private static function buildWalk(array $registered, Steps $steps, ?string $selection): array
     {
         $walk = [];
         $batchId = 0;
+        $matched = false;
+        $excluded = 0;
 
         foreach ($registered as $phaseClass) {
             $phase = self::instantiate($phaseClass);
 
             foreach ($steps->entriesForPhase($phaseClass) as $entry) {
                 if (! $entry instanceof StepBatch) {
-                    $walk[] = new WalkStep($entry, $phase->id(), $phase->name());
+                    $matched = $matched || self::carries($entry, $selection);
+
+                    if (self::selected($entry->tags(), $selection)) {
+                        $walk[] = new WalkStep($entry, $phase->id(), $phase->name());
+                    } else {
+                        $excluded++;
+                    }
+
+                    continue;
+                }
+
+                $survivors = [];
+
+                foreach ($entry->steps as $step) {
+                    $matched = $matched || self::carries($step, $selection);
+
+                    if (self::selected($step->tags(), $selection)) {
+                        $survivors[] = $step;
+                    } else {
+                        $excluded++;
+                    }
+                }
+
+                if ($survivors === []) {
+                    continue;
+                }
+
+                // One survivor is not a group. Leaving the id set would have
+                // `isGrouped()` report a step that ran alone as sharing a
+                // measurement with siblings that were never in the walk.
+                if (count($survivors) === 1) {
+                    $walk[] = new WalkStep($survivors[0], $phase->id(), $phase->name());
 
                     continue;
                 }
@@ -60,13 +118,18 @@ final readonly class Walk
                 // adjacent batches never merge into one position.
                 $batchId++;
 
-                foreach ($entry->steps as $step) {
+                foreach ($survivors as $step) {
                     $walk[] = new WalkStep($step, $phase->id(), $phase->name(), $batchId);
                 }
             }
         }
 
-        return $walk;
+        return [$walk, $matched, $excluded];
+    }
+
+    private static function carries(Step $step, ?string $selection): bool
+    {
+        return $selection !== null && in_array($selection, $step->tags(), true);
     }
 
     /**

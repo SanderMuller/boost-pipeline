@@ -43,6 +43,7 @@ trait PipelineTool
                 'One of: open, running, awaiting, blocked, halted, complete. "complete" means the walk finished, NOT that everything passed.'
             ),
             'position' => $schema->string()->description('Cursor position in steps, as "n/total", or "n-m/total" for a parallel group. Counts steps, not remaining calls.'),
+            'scope' => $schema->string()->description('Present only when the run was opened with a tag selection. The walk holds the steps carrying it plus every untagged step, so the run verifies less than the whole pipeline.'),
             'all_verified' => $schema->boolean()->description(
                 'Present once the run has any result, in any state. True only when the walk finished AND every step was a pass the server itself verified against the code now on disk.'
             ),

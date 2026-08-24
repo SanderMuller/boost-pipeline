@@ -24,4 +24,15 @@ interface Step
      * job, so the config says which it is.
      */
     public function mutates(): bool;
+
+    /**
+     * The scopes this step belongs to, empty when it belongs to all of them.
+     *
+     * A run may select one scope and walk only the steps that carry it, plus
+     * every untagged step. Untagged means "always", never "never", so adding the
+     * first tag to one step cannot silently drop the steps that carry none.
+     *
+     * @return list<string>
+     */
+    public function tags(): array;
 }

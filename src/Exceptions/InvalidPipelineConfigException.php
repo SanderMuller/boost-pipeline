@@ -28,6 +28,11 @@ final class InvalidPipelineConfigException extends RuntimeException
         return new self("Cannot position phase [{$phase}] after itself.");
     }
 
+    public static function emptyTag(string $id): self
+    {
+        return new self("Step [{$id}] declares an empty tag. A tag names a scope a run can select, so it has to be something a caller could ask for.");
+    }
+
     public static function batchStepMustBeShell(string $id): self
     {
         return new self("Step [{$id}] cannot run in a parallel group: only shell steps can. A skill step handed over alongside others is the wall of context one-step-at-a-time exists to break up, so declare it on its own. A skill that fans out internally is still one step, so parallel work inside a skill costs nothing here.");

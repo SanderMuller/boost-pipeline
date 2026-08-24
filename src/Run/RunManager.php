@@ -34,8 +34,17 @@ final class RunManager
         private readonly ?ReceiptStore $receipts = null,
     ) {}
 
-    public function open(): Run
+    /**
+     * @param  string|null  $selection  Walk only steps carrying this tag, plus every untagged step.
+     */
+    public function open(?string $selection = null): Run
     {
+        // A different selection asks a different question, so the run already
+        // open answers the wrong one. Same reasoning as a tree that moved.
+        if ($this->run instanceof Run && $this->run->scope !== $selection) {
+            $this->run = null;
+        }
+
         if ($this->run instanceof Run && $this->run->treeHasMoved()) {
             // A run that has recorded nothing has no verdict to lose, so it takes
             // the new tree and keeps its id instead of being thrown away.
@@ -47,10 +56,11 @@ final class RunManager
         }
 
         return $this->run ??= Run::start(
-            $this->pipeline->walk(),
+            $this->pipeline->walk($selection),
             $this->runner,
             tree: $this->tree,
             receipts: $this->receipts,
+            scope: $selection,
         );
     }
 

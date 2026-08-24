@@ -94,6 +94,9 @@ final readonly class StepPayload
             // to total verified and acknowledged work by accident.
             'server_run' => $run->serverRunTally(),
             'acknowledged' => $run->acknowledgedCount(),
+            // Without this a reader cannot see the walk is smaller than the
+            // config without diffing the two themselves.
+            ...($run->scope === null ? [] : ['excluded_by_scope' => $run->excludedByScope()]),
             'steps' => $steps,
             ...self::currentStep($run),
         ];
@@ -107,6 +110,12 @@ final readonly class StepPayload
             'state' => $run->state()->value,
             'position' => $run->position(),
         ];
+
+        // Absent for an unscoped run, so nothing changes for a consumer that
+        // never asks for a scope.
+        if ($run->scope !== null) {
+            $envelope['scope'] = $run->scope;
+        }
 
         // Answered from the first receipt onward, not only at the end. `halted` and
         // `blocked` are both retryable now, so a run sits in them while the agent

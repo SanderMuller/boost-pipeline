@@ -40,6 +40,7 @@ final class Status extends Tool
                 'failed' => $schema->integer(),
                 'error' => $schema->integer(),
             ])->description('Verdicts the server produced by executing something.'),
+            'excluded_by_scope' => $schema->integer()->description("How many declared steps this run's scope left out. Present only for a scoped run."),
             'steps' => $schema->array()->description('Per-step verdicts so far, in resolution order.'),
             ...$this->stepSchema($schema),
         ];

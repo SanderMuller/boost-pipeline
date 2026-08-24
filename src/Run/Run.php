@@ -61,6 +61,7 @@ final class Run
         private readonly StepRunner $runner,
         private readonly ?TreeFingerprint $tree = null,
         private readonly ?ReceiptStore $receipts = null,
+        public readonly ?string $scope = null,
     ) {
         $this->lastSeen = $this->tree?->capture();
 
@@ -75,8 +76,9 @@ final class Run
         ?string $id = null,
         ?TreeFingerprint $tree = null,
         ?ReceiptStore $receipts = null,
+        ?string $scope = null,
     ): self {
-        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts);
+        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts, $scope);
     }
 
     public function state(): RunState
@@ -261,6 +263,21 @@ final class Run
         );
     }
 
+    /**
+     * How many steps this run's scope left out of the walk.
+     *
+     * Counted while the walk resolves, so it needs no second resolution to
+     * compare against. A reader can tell a small pipeline from a narrowed one.
+     */
+    public function excludedByScope(): int
+    {
+        if ($this->scope === null) {
+            return 0;
+        }
+
+        return $this->walk->excluded;
+    }
+
     /** @return array<string, Result> */
     public function results(): array
     {
@@ -422,6 +439,7 @@ final class Run
                 $this->results,
             ),
             recordedAt: gmdate('c'),
+            scope: $this->scope,
         ));
     }
 

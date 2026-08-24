@@ -91,9 +91,13 @@ final class Pipeline
         return $this->steps;
     }
 
-    /** Flatten to the ordered list the cursor walks. */
-    public function walk(): Walk
+    /**
+     * Flatten to the ordered list the cursor walks.
+     *
+     * @param  string|null  $selection  Walk only steps carrying this tag, plus every untagged step.
+     */
+    public function walk(?string $selection = null): Walk
     {
-        return Walk::resolve($this->phases, $this->steps);
+        return Walk::resolve($this->phases, $this->steps, $selection);
     }
 }
