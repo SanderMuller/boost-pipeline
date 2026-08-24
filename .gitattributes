@@ -34,3 +34,6 @@ testbench.yaml export-ignore
 tests/ export-ignore
 workbench/ export-ignore
 # <<< package-boost (managed) <<<
+
+# Design specs are working documents for this repo, not part of the package.
+specs/ export-ignore
