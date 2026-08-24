@@ -479,11 +479,16 @@ it('refuses a complete receipt holding no verdicts at all', function (): void {
     // A live run cannot write this: an empty walk reaches complete in the
     // constructor and records no receipt. Built by hand, because the predicate
     // must not read an empty verdict map as "everything passed".
+    //
+    // Both calls refuse it, and the shared guard answers first, so the message is
+    // about the empty receipt rather than about this flag. The flag's own empty
+    // guard still has work to do: a walk of nothing but acknowledgements holds
+    // verdicts, and reaches it.
     receiptStoreHolding(receipt(allVerified: false, verdicts: []));
     treeReporting('tree-a');
 
     expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
-        ->and(Artisan::output())->toContain('nothing here it verified');
+        ->and(Artisan::output())->toContain('recorded no step verdicts at all');
 });
 
 it('refuses to answer when the working tree cannot be fingerprinted', function (): void {
@@ -614,3 +619,32 @@ it('will not count an acknowledged step even when the receipt lists it as assert
     expect($exit)->toBe(1)
         ->and(Artisan::output())->toContain('produced a verdict for none of them');
 });
+
+it('refuses a receipt holding no verdicts, however it came to hold none', function (array $data): void {
+    // `all_verified` is a claim the receipt makes about itself. Over an empty
+    // verdict map it is vacuous, and the bare call used to answer "verified this
+    // tree: 0 step(s)". Guarding the predicate rather than the JSON shape closes
+    // an absent key, an explicit null and an empty map in one place.
+    $path = sys_get_temp_dir().'/bp-empty-'.bin2hex(random_bytes(4)).'/receipt.json';
+    mkdir(dirname($path), recursive: true);
+    file_put_contents($path, json_encode([
+        'run' => 'r-empty', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'recorded_at' => '2026-01-01T00:00:00+00:00',
+        'coverage' => 'complete', 'asserted' => [],
+    ] + $data));
+
+    app()->instance(ReceiptStore::class, new JsonReceiptStore($path));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(1)
+            ->and(Artisan::output())->toContain('recorded no step verdicts at all');
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
+})->with([
+    'the key is absent' => [[]],
+    'the key is explicitly null' => [['verdicts' => null]],
+    'the map is empty' => [['verdicts' => []]],
+]);

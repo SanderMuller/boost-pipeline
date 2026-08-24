@@ -23,6 +23,10 @@ receipt or gates on `--server-verified`.
   pipeline actually holds before deciding what to skip. Exit 0 still reports only on the steps that
   ran: a pipeline declaring no static analysis exits 0 without any.
 
+- `pipeline:verify` — the bare call as well as `--server-verified` — refuses a receipt that holds
+  no step verdicts at all. It used to answer "verified this tree: 0 step(s)". No run can write
+  such a receipt: one is only written from a resolution, and a resolution always records a result.
+
 - `Receipt::fromArray()` rejects a receipt whose `tree`, `stale`, `scope`, `coverage`,
   `recorded_at`, `all_verified` or `asserted` is present but holds the wrong type. These used to
   coerce to null, which was the permissive reading every time: a malformed `stale` read as not

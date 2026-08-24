@@ -92,6 +92,7 @@ once rather than scattered across a limitations section.
 | 16 | `--server-verified` answers with no tree to answer about | No | Both fingerprints are required. The bare call deliberately tolerates a missing one and answers from the receipt; this flag cannot, because it exists so a caller can skip work on the strength of the tree still matching |
 | 17 | A malformed receipt field reads as the permissive value | No | `Receipt::fromArray()` rejects a present-but-wrong-typed `tree`, `stale`, `scope`, `coverage`, `recorded_at`, `all_verified` or `asserted`. Coercing to null read as not stale, unscoped, and unfingerprinted — every one of them the permissive direction |
 | 18 | Exit 0 is read as "the checks I care about ran" | **Live risk** | Partly closed: the success message names the step ids it counted, so a caller can see what the pipeline actually holds. Nothing stops a pipeline that declares no static analysis from exiting 0 — it verified what it ran |
+| 19 | A receipt holding no verdicts reads as verified | No | Both calls refuse an empty verdict map. `all_verified` is a claim the receipt makes about itself and is vacuous over nothing, and guarding the predicate closes an absent key, an explicit null and an empty map at once — one JSON shape at a time does not |
 
 **Row 5 is the one no mechanism addresses.** A run that never happened produces no false green —
 it produces *no signal*, which a reader may mistake for one. Anything consuming this (a PR

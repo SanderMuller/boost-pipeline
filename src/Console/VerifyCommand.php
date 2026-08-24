@@ -66,6 +66,22 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        // Nothing was recorded, so nothing was verified. `--server-verified`
+        // rejects the empty set as a guard of its own; the bare call had no
+        // equivalent, and answered "verified this tree: 0 step(s)" for a receipt
+        // holding none. A real run cannot produce this — a receipt is only
+        // written from a resolution, which always records at least one result —
+        // so refusing it costs nothing and closes every way the file could
+        // arrive empty at once, rather than one JSON shape at a time.
+        if ($receipt->verdicts === []) {
+            $this->components->error(sprintf(
+                'Run [%s] recorded no step verdicts at all. Whatever it says about itself, there is nothing here that was verified. Open a new run.',
+                $receipt->runId,
+            ));
+
+            return self::FAILURE;
+        }
+
         if ($this->option('server-verified') === true) {
             return $this->answerServerVerified($receipt, $now);
         }
