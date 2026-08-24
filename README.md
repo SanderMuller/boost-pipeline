@@ -7,20 +7,42 @@
 
 **An MCP server that hands an agent one step at a time: phases, steps, and a cursor it cannot move.**
 
-Closing out a change means several separate jobs. Review the diff for the things that bite, run the
-formatter and the analyser and the tests, then fix what came back. The usual way to ask for all that
-is prose: a skill or instruction file listing it. An agent reads the list at once, picks its own
-order, and afterwards reports whether it complied, judged from its own transcript.
+You already have the checks. A formatter, a static analyser, a test suite, review skills that know
+what to look for. What you do not have is a way to make an agent run all of them, in order, and tell
+you what happened rather than what it remembers doing.
 
-The list competes for attention with the task it arrives next to, so whatever sits near the bottom
-gets what is left over. You get most of the work, most of the time. A review told to cover six
-concerns in one pass covers each of them thinly, which is the same problem one level down.
+Ask in prose and you get most of the work, most of the time. The list arrives beside the task, so
+whatever sits at the bottom gets what is left over, and one review asked to cover six concerns
+covers each of them thinly. Then the report says *"I ran the tests"*, which is a different claim from
+*"the tests ran"*.
 
-And *"I ran the tests"* and *"the tests ran"* are different claims. Prose cannot tell them apart.
+What you get instead:
 
-So this package hands over one step at a time. A shell step the server runs itself, so its verdict
-is an exit code rather than a claim. A skill step carries its own instruction, so the agent gets one
-thing to look at instead of a list.
+- A shell step runs on the server. `passed` means a process exited 0, not that an agent said so.
+- A skill step carries its own instruction. A review step gets one lens, not a list of six.
+- Independent steps run at once. One call shows you every failure rather than the first one.
+- Edit the code after a run went green and its verdicts expire. A pass describes the tree it measured.
+- A step you declared but never ran forces `all_verified: false` rather than vanishing quietly.
+
+Configuration is a fluent builder in `.config/pipeline.php`:
+
+```php
+return Pipeline::configure()
+    ->withSteps(function (Steps $steps): void {
+        $steps->in(Refactoring::class)
+            ->append(Shell::run('vendor/bin/rector process --dry-run'));
+
+        $steps->in(StaticAnalysis::class)
+            ->parallel(function (StepCollection $steps): void {
+                $steps->append(Shell::run('composer phpstan'));
+                $steps->append(Shell::run('yarn typecheck'));
+            });
+
+        $steps->in(Agent::class)
+            ->append(Skill::run('/code-review', id: 'errors',
+                instruction: 'Review the error handling in files changed since main.'));
+    });
+```
 
 > **Status: prototype.** It works and it is tested, but several designed behaviours are
 > deliberately deferred. Read
@@ -167,13 +189,18 @@ return Pipeline::configure()
         $steps->in(Refactoring::class)
             ->append(Shell::run('vendor/bin/rector process --dry-run'));
 
+        // Neither of these feeds the other, so they share a position and run at once.
         $steps->in(Formatting::class)
-            ->append(Shell::run('vendor/bin/pint --test'))
-            ->append(Shell::run('yarn lint-all'));
+            ->parallel(function (StepCollection $steps): void {
+                $steps->append(Shell::run('vendor/bin/pint --test'));
+                $steps->append(Shell::run('yarn lint-all'));
+            });
 
         $steps->in(StaticAnalysis::class)
-            ->append(Shell::run('yarn typecheck'))
-            ->append(Shell::run('composer phpstan'));
+            ->parallel(function (StepCollection $steps): void {
+                $steps->append(Shell::run('composer phpstan'));
+                $steps->append(Shell::run('yarn typecheck'));
+            });
 
         $steps->in(Tests::class)
             ->append(Shell::run('yarn test:js'));
