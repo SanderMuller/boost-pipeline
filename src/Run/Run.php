@@ -52,6 +52,17 @@ final class Run
      */
     private array $measuredAt = [];
 
+    /**
+     * Step id => whether its pass asserted the state of the tree.
+     *
+     * Separate from `measuredAt`, which is null both for a step that asserted
+     * nothing and for a run with no fingerprint to measure with. The receipt
+     * needs the first without the second.
+     *
+     * @var array<string, bool>
+     */
+    private array $asserted = [];
+
     /** The tree after the last resolution, which is what a fresh run compares to. */
     private ?string $lastSeen;
 
@@ -444,6 +455,10 @@ final class Run
             // needing that reads `status` on the live run; copying the text here
             // would make the receipt a log and invite a consumer to parse it.
             coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
+            // A verdict says a step succeeded. Only these say something was
+            // checked about the code on disk, and a mutating step is exactly the
+            // one that succeeds without checking anything.
+            asserted: array_keys(array_filter($this->asserted)),
         ));
     }
 
@@ -473,6 +488,7 @@ final class Run
             $assertsTreeState = $result->verdict->isVerified() && ! $step->mutates();
 
             $this->measuredAt[$step->id()] = $assertsTreeState ? $measuredAt : null;
+            $this->asserted[$step->id()] = $assertsTreeState;
         }
 
         $this->lastSeen = $this->tree?->capture() ?? $measuredAt ?? $this->lastSeen;

@@ -51,19 +51,28 @@ function treeReporting(?string $digest): void
     });
 }
 
-/** @param array<string, string>|null $verdicts */
-function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null, ?array $verdicts = null, ?string $coverage = 'complete'): Receipt
+/**
+ * @param  array<string, string>|null  $verdicts
+ * @param  list<string>|null  $asserted  defaults to every passing step, as a walk of plain checks records
+ */
+function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null, ?array $verdicts = null, ?string $coverage = 'complete', ?array $asserted = null, bool $omitAsserted = false): Receipt
 {
+    $verdicts ??= ['pint' => 'passed', 'phpstan' => 'passed'];
+
     return new Receipt(
         runId: 'r-test',
         state: $state,
         allVerified: $allVerified,
         tree: $tree,
         stale: $stale,
-        verdicts: $verdicts ?? ['pint' => 'passed', 'phpstan' => 'passed'],
+        verdicts: $verdicts,
         recordedAt: '2026-01-01T00:00:00+00:00',
         scope: $scope,
         coverage: $coverage,
+        asserted: $omitAsserted ? null : ($asserted ?? array_keys(array_filter(
+            $verdicts,
+            static fn (string $verdict): bool => $verdict === 'passed',
+        ))),
     );
 }
 
@@ -475,4 +484,116 @@ it('refuses a complete receipt holding no verdicts at all', function (): void {
 
     expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
         ->and(Artisan::output())->toContain('nothing here it verified');
+});
+
+it('refuses to answer when the working tree cannot be fingerprinted', function (): void {
+    // The bare call tolerates this and answers from the receipt alone, which is a
+    // deliberate decision recorded above. This flag cannot: it exists so a caller
+    // can skip work because the tree still matches, and with nothing to compare
+    // there is no "still".
+    receiptStoreHolding(receipt(allVerified: false));
+    treeReporting(null);
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('cannot be fingerprinted here');
+});
+
+it('refuses to answer when the run recorded no tree fingerprint', function (): void {
+    receiptStoreHolding(receipt(allVerified: false, tree: null));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('recorded no tree fingerprint');
+});
+
+it('refuses a run whose only passing step rewrites the tree', function (): void {
+    // A formatter reports that it ran, never that the result is correct. Counting
+    // it as verification exits 0 for a walk that checked nothing at all.
+    receiptStoreHolding(receipt(
+        allVerified: true,
+        verdicts: ['pint' => 'passed'],
+        asserted: [],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('rewrites the tree rather than checking it');
+});
+
+it('refuses a receipt written before a rewrite could be told from a check', function (): void {
+    receiptStoreHolding(receipt(allVerified: false, omitAsserted: true));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('rewrote it');
+});
+
+it('names the steps it counted, so a caller knows which checks it may skip', function (): void {
+    // Exit 0 alone never said WHICH checks ran, so a caller skipping work on the
+    // strength of it could be skipping a check this pipeline does not hold.
+    receiptStoreHolding(receipt(
+        allVerified: false,
+        verdicts: ['pint' => 'passed', 'phpstan' => 'passed', 'evaluate' => 'acknowledged'],
+        asserted: ['phpstan'],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(0)
+        ->and($output)->toContain('passed all 1 step(s)')
+        ->and($output)->toContain('[phpstan]')
+        // Counted separately and never folded into the total.
+        ->and($output)->toContain('1 step(s) rewrote the tree')
+        ->and($output)->toContain('1 step(s) were only acknowledged');
+});
+
+it('refuses a real mutating-only run end to end, receipt and command agreeing', function (): void {
+    // The same seam the 0.4.0 test above guards, for the rewrite rule. Both halves
+    // can be individually right and still disagree: a hand-built receipt proves
+    // what the command does with `asserted`, never that `Run` fills it in.
+    $path = sys_get_temp_dir().'/bp-e2e-'.bin2hex(random_bytes(4)).'/receipt.json';
+    $store = new JsonReceiptStore($path);
+
+    app()->instance(ReceiptStore::class, $store);
+    treeReporting('tree-a');
+
+    $run = Run::start(
+        Pipeline::configure()->withSteps(function (Steps $steps): void {
+            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->mutating());
+        })->walk(),
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        'r-e2e-mutating',
+        tree: resolve(TreeFingerprint::class),
+        receipts: $store,
+    );
+
+    $run->resolveCurrent();
+
+    try {
+        // The bare call still exits 0: `all_verified` asks whether every step
+        // passed, and every step did. That contract is unchanged.
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+
+        expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+            ->and(Artisan::output())->toContain('rewrites the tree rather than checking it');
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
 });

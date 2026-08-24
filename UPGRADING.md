@@ -1,5 +1,34 @@
 # Upgrading
 
+## From 0.8 to 0.9
+
+Additive for anyone who only configures steps. Two behaviour changes reach a consumer that reads a
+receipt or gates on `--server-verified`.
+
+- `Receipt` gains an `asserted` constructor parameter, appended last with a default, so a positional
+  caller keeps working. It lists the step ids whose pass asserted the state of the tree — every
+  passing step that is not declared `->mutating()`. A verdict says a step succeeded; this says the
+  step checked something rather than producing it.
+
+- `pipeline:verify --server-verified` now refuses three cases it used to pass. A run whose passing
+  steps all rewrite the tree, because a formatter reports that it ran and never that the result is
+  correct. A run with no tree fingerprint on either side, because the flag exists so a caller can
+  skip work on the strength of the tree still matching. And a receipt written before `asserted`
+  existed, because unknown is not clean.
+
+  The bare `pipeline:verify` is unchanged in all three cases. `all_verified` asks whether every step
+  passed, and in each of them every step did.
+
+- `--server-verified` now names the step ids it counted, so a caller can see which checks the
+  pipeline actually holds before deciding what to skip. Exit 0 still reports only on the steps that
+  ran: a pipeline declaring no static analysis exits 0 without any.
+
+- `Receipt::fromArray()` rejects a receipt whose `tree`, `stale`, `scope`, `coverage`,
+  `recorded_at`, `all_verified` or `asserted` is present but holds the wrong type. These used to
+  coerce to null, which was the permissive reading every time: a malformed `stale` read as not
+  stale, a malformed `scope` let a partial run answer a whole-tree question, and a malformed `tree`
+  removed the fingerprint comparison. An absent or explicitly null field still means "not set".
+
 ## From 0.7 to 0.8
 
 Additive. No migration needed.

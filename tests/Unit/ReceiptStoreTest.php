@@ -140,3 +140,86 @@ it('keeps a numeric step id through the round trip', function (): void {
 
     expect($this->store->read()?->verdicts)->toBe(['123' => 'passed']);
 });
+
+it('round-trips the steps that asserted the tree, so a rewrite is not read as a check', function (): void {
+    $this->store->write(new Receipt(
+        runId: 'r-mixed',
+        state: 'complete',
+        allVerified: true,
+        tree: 'tree-a',
+        stale: null,
+        verdicts: ['pint' => 'passed', 'phpstan' => 'passed'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+        coverage: 'complete',
+        asserted: ['phpstan'],
+    ));
+
+    expect($this->store->read()?->asserted)->toBe(['phpstan']);
+});
+
+it('reads a receipt written before assertions were recorded as unknown, not clean', function (): void {
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-old', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'verdicts' => ['pint' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00', 'coverage' => 'complete',
+    ]));
+
+    expect($this->store->read()?->asserted)->toBeNull();
+});
+
+it('keeps an empty assertion list apart from an absent one', function (): void {
+    // A walk of nothing but a formatter asserted nothing, and that is an answer.
+    // Collapsing it to absent would report it as a receipt too old to say.
+    $this->store->write(new Receipt(
+        runId: 'r-mutating',
+        state: 'complete',
+        allVerified: true,
+        tree: 'tree-a',
+        stale: null,
+        verdicts: ['pint' => 'passed'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+        coverage: 'complete',
+        asserted: [],
+    ));
+
+    expect($this->store->read()?->asserted)->toBe([]);
+});
+
+it('rejects a receipt whose safety fields hold the wrong type', function (string $key, mixed $value): void {
+    // Coercing these to null was the permissive direction every time: a bad
+    // `stale` read as not stale, a bad `scope` let a partial run answer a
+    // whole-tree question, and a bad `tree` removed the fingerprint comparison.
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-bad', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'verdicts' => ['pint' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00', 'coverage' => 'complete',
+        $key => $value,
+    ]));
+
+    expect($this->store->read())->toBeNull();
+})->with([
+    'a stale value that is not a message' => ['stale', ['not', 'a', 'string']],
+    'a scope that is not a tag' => ['scope', 123],
+    'a tree that is not a fingerprint' => ['tree', ['tree-a']],
+    'a coverage that is not a word' => ['coverage', true],
+    'a recorded_at that is not a timestamp' => ['recorded_at', 1234567890],
+    'an all_verified that is not a boolean' => ['all_verified', 'yes'],
+    'an asserted list that is not a list' => ['asserted', 'phpstan'],
+    'an asserted entry that is not a step id' => ['asserted', [['phpstan']]],
+]);
+
+it('still reads a receipt whose optional fields are explicitly null', function (): void {
+    // Absent and null both mean "not set". Only a present value of the wrong type
+    // rejects, so a writer that emits nulls rather than omitting keys still reads.
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-nulls', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'stale' => null, 'scope' => null, 'asserted' => null,
+        'verdicts' => ['pint' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00', 'coverage' => 'complete',
+    ]));
+
+    expect($this->store->read()?->runId)->toBe('r-nulls');
+});

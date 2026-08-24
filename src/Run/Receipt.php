@@ -59,6 +59,25 @@ final readonly class Receipt
          * disk.
          */
         public ?string $coverage = null,
+        /**
+         * The step ids whose pass asserted the state of the tree.
+         *
+         * A verdict answers whether a step succeeded. It does not answer whether
+         * anything checked the code that is on disk now, and for a step declared
+         * `->mutating()` those come apart: the step produced the tree rather than
+         * reading it, so its pass says nothing about the result. `Run` already
+         * knows the difference — it excludes such a step from staleness for the
+         * same reason — and until this key the receipt threw that away.
+         *
+         * Without it a walk holding nothing but a passing formatter reported one
+         * verified step, and the only thing that ran had checked nothing.
+         *
+         * An empty list is a real answer: the run asserted nothing. Absent is
+         * unknown, and unknown is never clean.
+         *
+         * @var list<string>|null
+         */
+        public ?array $asserted = null,
     ) {}
 
     /**
@@ -76,6 +95,7 @@ final readonly class Receipt
             'recorded_at' => $this->recordedAt,
             'scope' => $this->scope,
             'coverage' => $this->coverage,
+            'asserted' => $this->asserted,
         ], static fn (mixed $value): bool => $value !== null);
     }
 
@@ -93,25 +113,14 @@ final readonly class Receipt
             return null;
         }
 
-        $verdicts = [];
-        $raw = $data['verdicts'] ?? null;
+        if (! self::fieldsAreWellFormed($data)) {
+            return null;
+        }
 
-        if (is_array($raw)) {
-            foreach ($raw as $stepId => $verdict) {
-                // Dropping a malformed entry instead would hand back a receipt
-                // holding only what happened to survive, and a predicate reading
-                // it would pass a run whose broken half went missing on the way
-                // in. An unreadable receipt is the honest answer, and the command
-                // already reports that as no run recorded.
-                if (! is_string($verdict)) {
-                    return null;
-                }
+        $verdicts = self::readVerdicts($data['verdicts'] ?? null);
 
-                // A step id of "123" arrives as an int, because PHP coerces
-                // numeric-string array keys. Nothing forbids that id, so cast it
-                // back rather than rejecting a legal config.
-                $verdicts[(string) $stepId] = $verdict;
-            }
+        if ($verdicts === null) {
+            return null;
         }
 
         $tree = $data['tree'] ?? null;
@@ -130,6 +139,105 @@ final readonly class Receipt
             recordedAt: is_string($recordedAt) ? $recordedAt : '',
             scope: is_string($scope) ? $scope : null,
             coverage: is_string($coverage) ? $coverage : null,
+            asserted: self::readAsserted($data['asserted'] ?? null),
         );
+    }
+
+    /**
+     * Whether every optional field is absent or holds the type it declares.
+     *
+     * Coercing a present-but-malformed value to null was the permissive direction
+     * on all of these: a bad `stale` read as not stale, a bad `scope` let a
+     * partial run answer a whole-tree question, and a bad `tree` removed the
+     * fingerprint comparison entirely. That is the laundering rejecting a
+     * malformed verdict map exists to stop, and these fields decide whether the
+     * verdicts apply at all.
+     *
+     * Absent still means absent. Only a present key of the wrong type rejects.
+     *
+     * @param  array<mixed, mixed>  $data
+     */
+    private static function fieldsAreWellFormed(array $data): bool
+    {
+        foreach (['tree', 'stale', 'recorded_at', 'scope', 'coverage'] as $key) {
+            $value = $data[$key] ?? null;
+
+            if ($value !== null && ! is_string($value)) {
+                return false;
+            }
+        }
+
+        $allVerified = $data['all_verified'] ?? null;
+
+        if ($allVerified !== null && ! is_bool($allVerified)) {
+            return false;
+        }
+
+        $asserted = $data['asserted'] ?? null;
+
+        if ($asserted === null) {
+            return true;
+        }
+
+        if (! is_array($asserted)) {
+            return false;
+        }
+
+        return array_all($asserted, static fn (mixed $stepId): bool => is_string($stepId) || is_int($stepId));
+    }
+
+    /**
+     * @return array<string, string>|null null rejects the whole receipt
+     */
+    private static function readVerdicts(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $verdicts = [];
+
+        foreach ($raw as $stepId => $verdict) {
+            // Dropping a malformed entry instead would hand back a receipt
+            // holding only what happened to survive, and a predicate reading it
+            // would pass a run whose broken half went missing on the way in. An
+            // unreadable receipt is the honest answer, and the command already
+            // reports that as no run recorded.
+            if (! is_string($verdict)) {
+                return null;
+            }
+
+            // A step id of "123" arrives as an int, because PHP coerces
+            // numeric-string array keys. Nothing forbids that id, so cast it back
+            // rather than rejecting a legal config.
+            $verdicts[(string) $stepId] = $verdict;
+        }
+
+        return $verdicts;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private static function readAsserted(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $asserted = [];
+
+        foreach ($raw as $stepId) {
+            // Well-formedness is settled before this runs, so nothing is dropped
+            // here: a bad entry rejected the receipt rather than shrinking the
+            // list, which would have been a quieter answer to the same question.
+            if (is_string($stepId)) {
+                $asserted[] = $stepId;
+            } elseif (is_int($stepId)) {
+                $asserted[] = (string) $stepId;
+            }
+        }
+
+        return $asserted;
     }
 }

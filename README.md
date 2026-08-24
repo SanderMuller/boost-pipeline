@@ -316,16 +316,23 @@ php artisan pipeline:verify --server-verified
 ```
 
 ```
-Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
-acknowledged and are not counted, so this is not a claim that the tree is verified.
+Run [r-4f2a] passed all 5 step(s) the server verified against this tree: [phpstan], [pint-test],
+[typecheck], [test-js], [lint-all]. 1 step(s) rewrote the tree rather than checking it and are not
+counted. 2 step(s) were only acknowledged and are not counted, so this is not a claim that the tree
+is verified.
 ```
 
-That second sentence is the whole safety margin. A caller reading only the exit code would take it
-for the whole run, so the answer says what it set aside.
+The message names the steps. Exit 0 on its own never said *which* checks ran, so a caller skipping
+work on the strength of it could be skipping a check this pipeline does not hold. It also says what
+it set aside, because a caller reading only the exit code would take it for the whole run.
 
-**Narrower is not looser.** `all_verified` was carrying three questions at once, and this flag drops
-exactly one of them. Three guards stand before the verdicts:
+**Narrower is not looser.** `all_verified` was carrying several questions at once, and this flag
+drops exactly one of them. Five guards stand before the verdicts:
 
+- **The tree is identifiable.** Both fingerprints must be present. A bare call tolerates a missing
+  one and answers from the receipt alone, which is fine for a gate. It is not fine here: the flag
+  exists so a caller can skip work because the tree still matches, and with nothing to compare there
+  is no "still".
 - **The walk covered the config that declared it.** `all_verified` goes false both for an
   acknowledgement and for a declared step dropped before the walk began, and the verdict map cannot
   show the second, because a dropped step leaves no verdict. The receipt records `coverage` for
@@ -334,10 +341,18 @@ exactly one of them. Three guards stand before the verdicts:
   abandoned at step one leaves a readable receipt holding one pass. Anything but `complete` fails.
 - **Something was verified.** "Every server verdict passed" is vacuously true over an empty set, so
   a walk of nothing but acknowledgements would pass here having verified nothing.
+- **Something was checked, not just rewritten.** A pass says a step succeeded. A step declared
+  `->mutating()` produced the tree rather than reading it, so its pass describes the code it was
+  handed, never the code left behind. A walk holding nothing but a passing formatter exits 1. The
+  receipt records which steps asserted the tree, and an absent record fails closed.
 
 The flag narrows which verdicts count, never which tree the run covered. A stale receipt still fails
 on staleness, and a scoped receipt still cannot answer for the whole tree. Combine it with `--only`
 to ask both at once.
+
+**What it still cannot tell you is which checks the pipeline holds.** Exit 0 reports on the steps
+that ran, so a pipeline declaring no static analysis exits 0 without any. Naming the steps is what
+makes that visible rather than silent: read the ids before deciding what to skip.
 
 ### Why that order
 
@@ -829,6 +844,8 @@ without asking anybody. A consumer that must not trust the working copy runs the
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
 | Accumulate scopes across runs | One receipt, so a second scoped run replaces the first. Verifying two scopes separately never adds up to a verified tree; run unscoped for that |
+| Know which checks your pipeline ought to hold | Exit 0 reports on the steps that ran. A pipeline declaring no static analysis exits 0 without any, so `--server-verified` names the ids it counted and leaves the judgement to you |
+| Read a mutating step's pass as a claim about the result | `all_verified` counts it, because every step passed. `--server-verified` does not, because a formatter produced the tree rather than checking it |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 

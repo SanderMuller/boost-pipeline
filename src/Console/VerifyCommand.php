@@ -67,7 +67,7 @@ final class VerifyCommand extends Command
         }
 
         if ($this->option('server-verified') === true) {
-            return $this->answerServerVerified($receipt);
+            return $this->answerServerVerified($receipt, $now);
         }
 
         if (! $receipt->allVerified) {
@@ -94,17 +94,32 @@ final class VerifyCommand extends Command
      * false forever, so the aggregate answer never changes however green the
      * shell steps are.
      *
-     * Narrower is not looser. Three guards stand before the verdicts, because
-     * `all_verified` was carrying all three at once and this predicate drops only
-     * the one about acknowledgements.
+     * Narrower is not looser. Five guards stand before the verdicts, because
+     * `all_verified` was carrying several questions at once and this predicate
+     * drops only the one about acknowledgements.
      */
-    private function answerServerVerified(Receipt $receipt): int
+    private function answerServerVerified(Receipt $receipt, ?string $now): int
     {
-        // 1. The walk covered the config that declared it. `all_verified` is
+        // 1. The tree is identifiable. The bare call tolerates a missing
+        //    fingerprint and answers from the receipt alone, which is defensible
+        //    for a gate. It is not defensible here: this flag exists so a caller
+        //    can SKIP work because the tree already matched, and with nothing to
+        //    compare there is no "already".
+        if ($now === null || $receipt->tree === null) {
+            $this->components->error(sprintf(
+                'Run [%s] cannot be tied to the code on disk: %s. This flag answers whether the tree still matches what ran, so without a fingerprint there is nothing to answer from.',
+                $receipt->runId,
+                $now === null
+                    ? 'the working tree cannot be fingerprinted here'
+                    : 'the run recorded no tree fingerprint',
+            ));
+
+            return self::FAILURE;
+        }
+
+        // 2. The walk covered the config that declared it. `all_verified` is
         //    false both for an acknowledgement and for a declared step dropped
         //    before the walk began, and nothing else on disk tells those apart.
-        //    Accepting the first while still refusing the second is the whole
-        //    reason the receipt records coverage.
         if ($receipt->coverage !== 'complete') {
             $this->components->error($receipt->coverage === null
                 ? sprintf(
@@ -119,7 +134,7 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
-        // 2. The cursor finished. `recordReceipt()` writes after every
+        // 3. The cursor finished. `recordReceipt()` writes after every
         //    resolution, deliberately, so a walk abandoned at step one leaves a
         //    readable receipt holding one pass and nothing else.
         if ($receipt->state !== RunState::Complete->value) {
@@ -137,7 +152,7 @@ final class VerifyCommand extends Command
             static fn (string $verdict): bool => $verdict !== Verdict::Acknowledged->value,
         );
 
-        // 3. Something was actually verified. "Every server verdict passed" is
+        // 4. Something was actually verified. "Every server verdict passed" is
         //    vacuously true over an empty set, so a walk of nothing but
         //    acknowledgements would pass here having verified nothing at all.
         if ($serverProduced === []) {
@@ -172,13 +187,60 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        return $this->reportAssertions($receipt, array_keys($serverProduced));
+    }
+
+    /**
+     * The last guard, and the success message that has to survive it.
+     *
+     * A pass says a step succeeded. It does not say the step checked anything: a
+     * step declared `->mutating()` produced the tree rather than reading it, so
+     * its pass describes the code it was handed, not the code left behind. A walk
+     * holding nothing but a passing formatter used to exit 0 reporting one
+     * verified step, and the only thing that ran had verified nothing.
+     *
+     * @param  list<string>  $serverProduced  step ids the server produced a passing verdict for
+     */
+    private function reportAssertions(Receipt $receipt, array $serverProduced): int
+    {
+        // 5. The receipt can tell a check from a rewrite. Absent means it was
+        //    written before this was recorded, and unknown is never clean.
+        if ($receipt->asserted === null) {
+            $this->components->error(sprintf(
+                'Run [%s] was recorded before this command could tell a step that checked the tree from one that rewrote it, so it cannot answer this. Open a new run.',
+                $receipt->runId,
+            ));
+
+            return self::FAILURE;
+        }
+
+        $asserting = array_values(array_intersect($serverProduced, $receipt->asserted));
+
+        if ($asserting === []) {
+            $this->components->error(sprintf(
+                'Run [%s] passed %d step(s), and every one of them rewrites the tree rather than checking it. A formatter reports that it ran, never that the result is correct, so there is nothing here to verify against this code.',
+                $receipt->runId,
+                count($serverProduced),
+            ));
+
+            return self::FAILURE;
+        }
+
+        $rewrote = count($serverProduced) - count($asserting);
         $acknowledged = count($receipt->verdicts) - count($serverProduced);
 
         $this->components->info(sprintf(
-            'Run [%s] passed all %d step(s) the server verified against this tree%s.%s',
+            'Run [%s] passed all %d step(s) the server verified against this tree%s: %s.%s%s',
             $receipt->runId,
-            count($serverProduced),
+            count($asserting),
             $receipt->scope === null ? '' : " in scope [{$receipt->scope}]",
+            // Named, because exit 0 alone never said WHICH checks ran. A caller
+            // skipping work on the strength of it would otherwise be skipping
+            // checks this pipeline may not hold at all.
+            '['.implode('], [', $asserting).']',
+            $rewrote === 0
+                ? ''
+                : sprintf(' %d step(s) rewrote the tree rather than checking it and are not counted.', $rewrote),
             $acknowledged === 0
                 ? ''
                 : sprintf(' %d step(s) were only acknowledged and are not counted, so this is not a claim that the tree is verified.', $acknowledged),

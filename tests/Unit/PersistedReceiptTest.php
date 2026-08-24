@@ -209,3 +209,51 @@ it('writes complete coverage for a scoped run, which is not a claim about what i
     expect($this->store->read()?->coverage)->toBe('complete')
         ->and($this->store->read()?->scope)->toBe('backend');
 });
+
+it('records only the steps that checked the tree, never the one that rewrote it', function (): void {
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->mutating());
+        $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'analyse'));
+    });
+
+    drain($run);
+
+    $receipt = $this->store->read();
+
+    // Both passed. Only one of them says anything about the code left on disk.
+    expect($receipt?->verdicts)->toBe(['fmt' => 'passed', 'analyse' => 'passed'])
+        ->and($receipt?->asserted)->toBe(['analyse']);
+});
+
+it('records an empty assertion list for a walk that only rewrites', function (): void {
+    // The receipt that used to report one verified step for a run that checked
+    // nothing. It is written as an answer, not as an absence.
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->mutating());
+    });
+
+    drain($run);
+
+    expect($this->store->read()?->asserted)->toBe([]);
+});
+
+it('never records an acknowledged step as having asserted anything', function (): void {
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'analyse'));
+        $steps->in(Agent::class)->append(Skill::run('/evaluate'));
+    });
+
+    drain($run);
+
+    expect($this->store->read()?->asserted)->toBe(['analyse']);
+});
+
+it('never records a failing step as having asserted anything', function (): void {
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(StaticAnalysis::class)->append(Shell::run('false', id: 'analyse'));
+    });
+
+    drain($run);
+
+    expect($this->store->read()?->asserted)->toBe([]);
+});
