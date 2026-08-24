@@ -10,6 +10,116 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.0 - 2026-08-24
+
+A project asks its code more than one question. Is this ready for a PR, is it ready to release,
+what does an evaluation loop find — different steps, in a different order. Until now one pipeline
+had to answer all of them.
+
+### Added
+
+- **`.config/pipeline.php` may return a map of named pipelines.**
+  
+  ```php
+  return [
+      'pr' => Pipeline::configure()
+          ->withSteps(function (Steps $steps): void {
+              $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test', id: 'pint'));
+              $steps->in(StaticAnalysis::class)->append(Shell::run('vendor/bin/phpstan', id: 'phpstan'));
+          }),
+  
+      'release' => Pipeline::configure()
+          ->withSteps(function (Steps $steps): void {
+              $steps->in(StaticAnalysis::class)
+                  ->append(Shell::run('vendor/bin/phpstan', id: 'phpstan'))
+                  ->append(Shell::run('composer audit', id: 'audit'));
+              $steps->in(Agent::class)->append(Skill::run('/release-notes'));
+          }),
+  ];
+  
+  ```
+  A file that returns a single `Pipeline` keeps working and is named `default`.
+  
+  Each pipeline is independent: its own phases, its own steps, its own cursor, its own receipt.
+  Declaring `phpstan` in two of them is expected rather than a clash — they are separate walks, and
+  step ids only have to be unique within one.
+  
+  ```
+  open_run(pipeline: "release")
+  php artisan pipeline:verify --pipeline=release
+  
+  ```
+- **Each pipeline keeps its own cursor**, so an agent can leave the release pipeline part-walked,
+  work in the PR pipeline, and come back to where it was. Coming back is not a promise that
+  survives an edit: a run measured before a change cannot describe the tree after one, so it is
+  discarded and restarted — the rule a single run has always followed, now applied per pipeline.
+  
+- **Two answers can be true at once.** One receipt per pipeline is what separates a name from a
+  tag. A scoped run replaces the previous receipt, so scopes never accumulate; `pr` and `release`
+  hold their verdicts side by side.
+  
+
+### What keeps it honest
+
+- **The name is required and never guessed**, from the moment the config names its pipelines — a
+  map holding a single pipeline included. Returning the most recently opened run instead would
+  advance the wrong cursor, run the wrong steps and write a verdict into the wrong receipt, and
+  none of it would be visible. Keying the requirement off the pipeline count rather than the
+  declaration would have been its own trap: every call site that omitted the name would break the
+  day a second pipeline arrives, and the ones still working would be the ones that had been
+  guessing.
+  
+- **A bare `pipeline:verify` refuses once several are declared**, and names them. The rule a scoped
+  receipt already follows, one level up. There is deliberately no aggregate "every pipeline is
+  green" answer: a project that routinely runs only its PR pipeline could never reach exit 0
+  through it, and a gate that cannot pass is one people learn to skip.
+  
+- **A pipeline name is validated, not sanitised.** It becomes a receipt filename, so a name outside
+  `^[a-z0-9][a-z0-9-]*$` is a config error. Rewriting `../escape` into something safe would hide
+  the mistake and still not be the pipeline the caller asked for.
+  
+- **Config validation now builds every pipeline's walk.** A duplicate step id used to surface when
+  a run opened; it fails at server start now, for every declared pipeline rather than whichever one
+  a session happens to reach — and for single-pipeline projects too.
+  
+
+### Breaking
+
+Pre-1.0, so this lands in a minor. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+migration.
+
+- **`PipelineLoader::load()` returns `?Pipelines`**, not `?Pipeline`. Adapt a caller with
+  `->sole()`, which returns the only pipeline and throws when several are declared.
+  
+- **Receipts moved to `storage/logs/pipeline/receipts/<name>.json`.** The old `receipt.json` is not
+  read, so the first `pipeline:verify` after upgrading reports no run recorded until the pipeline
+  runs once. Unknown is not clean. The old file is left alone and is safe to delete.
+  
+- **`Pipeline::class` and `ReceiptStore::class` throw when several pipelines are configured.** They
+  still resolve for a project declaring one. Resolve `Pipelines`, `StepRunnerFactory` or
+  `ReceiptStoreFactory` and ask for one by name.
+  
+- **Adopting a map turns a bare `pipeline:verify` into an error.** Update anything that gates on
+  the bare call — a CI job, a PR gate, a skill — before converting the config.
+  
+
+### Unchanged, deliberately
+
+- **A custom `StepRunner` still reaches every step**, in every pipeline. Binding your own over the
+  container's is a documented seam and stays one.
+- **A custom `ReceiptStore` is honoured while the project declares one pipeline.** Once it declares
+  several it is not consulted: one store cannot serve them all without collapsing every receipt
+  into one, which is the problem named pipelines exist to solve. Such a project binds
+  `ReceiptStoreFactory`.
+
+### Verified
+
+342 tests, 811 assertions. PHPStan level max, Rector and Pint clean. CI green across all four
+matrix legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.9.0...v0.10.0
+
 ## v0.9.0 - 2026-08-24
 
 A verdict says a step succeeded. It does not say anything was checked about the code on disk, and
@@ -57,6 +167,7 @@ found by an independent review and each confirmed against a real receipt before 
   counted. 2 step(s) were only acknowledged and are not counted, so this is not a claim that the
   tree is verified.
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -95,10 +206,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   php artisan pipeline:verify --server-verified
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   ```
@@ -188,9 +301,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -326,6 +441,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -414,6 +530,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -673,6 +790,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -730,6 +848,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
