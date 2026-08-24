@@ -10,6 +10,46 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.6.1 - 2026-08-24
+
+Two things consumers found by running v0.6.0's parallel groups. One is a number that stopped meaning
+what it looked like; the other is a message claiming more than the mechanism knows.
+
+### Fixed
+
+- **A parallel group reports the range of steps it covers.** `position` counts steps, so a group
+  handed over several while showing a single number: a seven-step walk holding two groups reported
+  `2/7` and took five calls. The number reads as a count of handovers remaining and is not one. It is
+  now `2-3/7` for a group, which says what the handover contains rather than leaving it to be
+  inferred, and the output schema says the same.
+  
+- **A stale verdict inside a group no longer reads as naming the writer.** Every step in a group
+  measures the same tree from before the group ran, so when the tree moves the report names whichever
+  of them passed first. That is not the step identified as writing, and with a group there is no
+  ordering that could identify one. The message says so:
+  
+  > That step ran in a parallel group, so it is the first of the group that passed rather than the
+  one identified as writing: the group shares a single measurement and cannot tell its members
+  apart.
+  
+  Nothing changes about the outcome. The run is not verified and `pipeline:verify` exits 1. This is
+  the undeclared case only, since a step declaring `->mutating()` cannot join a group at all.
+  
+
+### Documentation
+
+- The README states the attribution limit next to the staleness rules, so the named step is not read
+  as proof. The note about `position` counting steps moved out of the tool table, where it had been a
+  row without a tool in it.
+
+### Verified
+
+193 tests, 486 assertions. PHPStan level max, Rector and Pint clean, `composer validate --strict`
+valid. CI green across all four matrix legs on the last commit carrying code; the commit this is
+pinned to changes only `README.md`, which the workflow path filters correctly skip.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.6.0...v0.6.1
+
 ## v0.6.0 - 2026-08-23
 
 Independent steps can share a position and run at the same time. Concurrency costs the agent
@@ -36,6 +76,7 @@ migration.
       $steps->append(Shell::run('composer phpstan'));
       $steps->append(Shell::run('node_modules/.bin/tsc --noEmit'));
   });
+  
   
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
@@ -125,6 +166,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   ```
@@ -376,6 +418,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -433,6 +476,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
