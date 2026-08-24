@@ -25,8 +25,11 @@ recorded and a consumer can tell a scoped pass from a full one.
   without the tool input, the recorded scope and every `--only` comparison becoming set operations.
 - **An empty or whitespace-only tag is a config error**, thrown when the config loads, consistent
   with how a parallel group rejects a bad member.
-- **A selection matching no tagged step raises a notice** rather than producing a quietly small
-  walk. A typo in a tag would otherwise read as a clean scoped run.
+- **A selection matching no tagged step raises a notice, and that notice blocks like any other.**
+  Asking for a scope that nothing carries is almost always a typo, and the untagged steps would
+  otherwise pass and report the run verified. Making it blocking also keeps `verifiedGiven()`
+  untouched: it currently fails on `notices !== []` wholesale, and carving out a non-blocking notice
+  kind would mean restructuring the guard that closes the dropped-gate false green.
 - **Opening a run with a different selection replaces the open run.** Confirmed. A different
   selection asks a different question, so returning the run already open would answer the wrong
   one. This mirrors the existing rule for a working tree that moved.
@@ -34,6 +37,13 @@ recorded and a consumer can tell a scoped pass from a full one.
   run; asking about a subset is explicit. See Resolved Questions.
 - **`--only` on `pipeline:verify` must match the receipt's selection exactly.** A receipt from a
   `backend` run does not satisfy `--only=frontend`.
+- **Scopes do not accumulate across runs.** There is one receipt file and each run overwrites it,
+  so verifying `backend` and then `frontend` leaves only the second. A change spanning both wants an
+  unscoped run, not two scoped ones.
+- **Tag matching is case-sensitive.** `Backend` and `backend` are different tags. A mistyped case
+  therefore matches nothing and hits the blocking notice above rather than silently narrowing.
+- **An unscoped selection is a selection.** Opening unscoped while a `backend` run is open starts a
+  new run, on the same rule as any other change of selection.
 - **Tags are free strings, not an enum.** `frontend` and `backend` are the motivating pair, but a
   project may want `api`, `infra`, or `migrations`, and the package cannot know the vocabulary.
 
@@ -66,9 +76,16 @@ Two consequences to handle explicitly:
 - **Filtering happens inside a parallel group too.** A group whose members are partly filtered out
   keeps the survivors as a group; a group left with one member is an ordinary position; a group
   left with none contributes no position at all.
-- **A selection that matches no tagged step raises a notice.** This is separate from the
-  dropped-step notice, and must not be confused with it: an excluded step is deliberate, a dropped
-  step is a fault. Only the second forces `all_verified: false`.
+
+  A single survivor must also **lose its `batchId`**, not merely be treated as a lone position.
+  `Walk::isGrouped()` reads that field, and a stale verdict for a step that ran by itself would
+  otherwise say it "ran in a parallel group ... cannot tell its members apart", which is exactly the
+  overclaim v0.6.1 removed.
+- **A selection that matches no tagged step raises a notice**, which blocks like every other
+  notice. An excluded step is deliberate and produces nothing; a selection that excluded
+  *everything* is a fault, almost always a mistyped tag. Keeping it blocking means `verifiedGiven()`
+  keeps its wholesale `notices !== []` guard rather than growing a notice taxonomy around the line
+  that closes the dropped-gate false green.
 
 `Pipeline::walk(?string $selection = null)` passes it through.
 
@@ -103,10 +120,13 @@ omitted when null, matching how the class already drops null fields.
 
 `VerifyCommand` gains `--only=`:
 
+The rule is coverage, not equality: **exit 0 when what the receipt verified covers what was
+asked.** An unscoped run verified every step, so it satisfies any scope query.
+
 | Receipt | Command | Exit |
 |---|---|---|
 | unscoped, verified | `pipeline:verify` | 0 |
-| unscoped, verified | `pipeline:verify --only=backend` | non-zero, the run answered a wider question than asked |
+| unscoped, verified | `pipeline:verify --only=backend` | 0, the backend was verified along with everything else |
 | `backend`, verified | `pipeline:verify` | non-zero, the run verified a scope rather than the tree |
 | `backend`, verified | `pipeline:verify --only=backend` | 0 |
 | `backend`, verified | `pipeline:verify --only=frontend` | non-zero, different scope |
@@ -118,9 +138,11 @@ messages: a reader must be able to tell "this run verified something else" from 
 
 | Scenario | Handling |
 |----------|----------|
-| Selection names a tag no step carries | Notice on `open_run`; the walk holds only untagged steps. Covered by Phase `tags` tests |
+| Selection names a tag no step carries | Blocking notice on `open_run`; the untagged steps still run but the run cannot report verified. Phase `tags` tests |
 | Every step is filtered out | Empty walk, run completes, `all_verified` false because `results === []`. Existing behaviour, asserted in Phase `tags` tests |
-| Parallel group partly filtered | Survivors stay one position; a single survivor becomes an ordinary position; none contributes nothing. Phase `tags` tests |
+| Parallel group partly filtered | Survivors stay one position; a lone survivor becomes an ordinary position and drops its `batchId`; none contributes nothing. Phase `tags` tests |
+| Stale verdict for a lone survivor of a filtered group | Must not claim the step ran in a group. Phase `tags` tests |
+| Scoped run, then a differently scoped run | The second receipt replaces the first. Only the latest scope is verifiable; a change spanning both wants an unscoped run. Phase `receipt-scope` tests |
 | A tagged step is also `->mutating()` | Unaffected. Tags and mutation are independent; the group rules still forbid mutating members |
 | `open_run` twice with the same selection | Idempotent, as today |
 | `open_run` with a different selection | New run. Phase `run-selection` tests |
@@ -140,8 +162,8 @@ messages: a reader must be able to tell "this run verified something else" from 
 - [ ] Add `tagged(string ...$tags)` to `Shell` and `Skill` — new instance, preserving `mutating()` and `proving()` state.
 - [ ] Reject an empty or whitespace-only tag with a named `InvalidPipelineConfigException` — at config load, not at run time.
 - [ ] Filter in `Walk::resolve()` behind an optional selection — untagged always in, tagged in only on a match.
-- [ ] Handle groups under filtering — survivors keep the position, an emptied group contributes none.
-- [ ] Notice when a selection matches no tagged step — distinct from the dropped-step notice, and it must not force `all_verified: false`.
+- [ ] Handle groups under filtering — survivors keep the position, an emptied group contributes none, and a lone survivor loses its `batchId` so nothing later calls it grouped.
+- [ ] Notice when a selection matches no tagged step — blocking, so `verifiedGiven()` keeps its wholesale notice guard.
 - [ ] Tests — the filter, group survival, the notice, tag validation, and that an excluded step is not a dropped step.
 
 ### Phase 2: Selecting a scope when the run opens (Priority: HIGH)
@@ -152,6 +174,8 @@ messages: a reader must be able to tell "this run verified something else" from 
 - [ ] Start a new run when the selection differs from the open run's — a different selection is a different question.
 - [ ] Add the `only` input to `open_run`, described so an agent knows a scoped run verifies less.
 - [ ] Report `scope` in the payload envelope, absent when unscoped.
+- [ ] Report how many steps the scope excluded in `status` — a reader must be able to see the walk is smaller than the config without diffing it themselves.
+- [ ] Update the `run_pipeline` prompt — it drives `open_run` and would otherwise never mention `only` exists.
 - [ ] Declare `scope` in the output schema — the schema must not fall behind the payload again.
 - [ ] Tests — threading, the re-open rule, the payload key present and absent, and the schema declaring it.
 
@@ -178,14 +202,19 @@ messages: a reader must be able to tell "this run verified something else" from 
 
 Stop and report — do not improvise — if any of these proves false during implementation:
 
-1. **An excluded step can be told apart from a dropped step everywhere it matters.** If filtering
-   ends up reusing the dropped-step notice, or if `all_verified` starts keying on exclusions, stop:
-   that collapses a deliberate scope into a fault and breaks the guarantee the notice exists for.
-2. **A scoped receipt is distinguishable from an unscoped one by any consumer reading it.** If the
-   scope cannot be recorded and read back, the feature is a false-green generator and must not
-   ship.
-3. **Untagged steps run in every selection.** If this inverts during implementation, adding a
-   single tag becomes a breaking change to every existing config.
+1. **A step excluded by the selection produces no notice at all.** It is simply not in the walk.
+   If filtering ends up reporting each excluded step the way a dropped step is reported, stop: that
+   collapses a deliberate scope into a fault, and every scoped run would report itself unverified.
+2. **`verifiedGiven()` keeps its wholesale `notices !== []` guard.** That line is what closes the
+   dropped-gate false green. If filtering turns out to need a notice kind that does not block, stop:
+   carving an exception into that guard is a design decision, not an implementation detail.
+3. **A scoped receipt is distinguishable from an unscoped one by any consumer reading it.** If the
+   scope cannot be recorded and read back, the feature is a false-green generator and must not ship.
+4. **A full run satisfies a scope query.** If `--only` ends up comparing scopes for equality rather
+   than coverage, a fully verified tree starts failing subset queries, which inverts what the
+   command is for.
+5. **Untagged steps run in every selection.** If this inverts, adding a single tag becomes a
+   breaking change to every config that already exists.
 
 ---
 
