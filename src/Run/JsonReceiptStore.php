@@ -17,6 +17,16 @@ use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
  */
 final readonly class JsonReceiptStore implements ReceiptStore
 {
+    /**
+     * Where a receipt lived before pipelines had names, relative to storage.
+     *
+     * Never read. It is recorded only so a project that upgrades can be told its
+     * receipt moved, rather than being told nothing has ever been verified — the
+     * same answer for two very different situations, and the one that reads as a
+     * broken gate.
+     */
+    public const string LEGACY_PATH = 'logs/pipeline/receipt.json';
+
     public function __construct(private string $path) {}
 
     public function write(Receipt $receipt): void

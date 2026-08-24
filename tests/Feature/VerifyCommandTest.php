@@ -874,3 +874,51 @@ it('reports no run for a pipeline that has never been walked', function (): void
     expect(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))->toBe(1)
         ->and(Artisan::output())->toContain('No pipeline run has been recorded');
 });
+
+it('tells a moved receipt apart from a run that never happened', function (): void {
+    // "Nothing has been verified" is true for both and useless for one: after
+    // upgrading it reads as a broken gate, and the reader diagnoses a move this
+    // command already knows about.
+    projectDeclaring(['pr']);
+    receiptStoreHolding(null);
+    treeReporting('tree-a');
+
+    $legacy = storage_path(JsonReceiptStore::LEGACY_PATH);
+
+    if (! is_dir(dirname($legacy))) {
+        mkdir(dirname($legacy), recursive: true);
+    }
+
+    file_put_contents($legacy, '{"run":"r-old","state":"complete"}');
+
+    try {
+        $exit = Artisan::call('pipeline:verify');
+        $output = Artisan::output();
+
+        expect($exit)->toBe(1)
+            ->and($output)->toContain('written before 0.10.0')
+            ->and($output)->toContain('safe to delete')
+            // The path, as the console shows it: Laravel's output components
+            // rewrite an absolute path under the base path to a relative one, so
+            // asserting the absolute form would test the framework's formatter
+            // rather than this message.
+            ->and($output)->toContain(JsonReceiptStore::LEGACY_PATH);
+    } finally {
+        @unlink($legacy);
+    }
+});
+
+it('says nothing about a legacy receipt when there is none', function (): void {
+    projectDeclaring(['pr']);
+    receiptStoreHolding(null);
+    treeReporting('tree-a');
+
+    @unlink(storage_path(JsonReceiptStore::LEGACY_PATH));
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('Nothing has been verified')
+        ->and($output)->not->toContain('0.10.0');
+});

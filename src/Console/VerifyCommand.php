@@ -9,6 +9,7 @@ use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\Verdict;
+use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunState;
@@ -45,7 +46,7 @@ final class VerifyCommand extends Command
         $receipt = $store->read();
 
         if (! $receipt instanceof Receipt) {
-            $this->components->error('No pipeline run has been recorded. Nothing has been verified.');
+            $this->components->error($this->nothingRecorded());
 
             return self::FAILURE;
         }
@@ -113,6 +114,28 @@ final class VerifyCommand extends Command
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Why there is no answer — and, after an upgrade, why that is not a fault.
+     *
+     * Receipts moved to `receipts/<name>.json` in 0.10.0 and the old file is not
+     * read. Reporting that as "nothing has ever been verified" is true and
+     * useless: it reads as a broken gate, and the reader diagnoses a move that
+     * this command already knows about.
+     */
+    private function nothingRecorded(): string
+    {
+        $legacy = $this->laravel->storagePath(JsonReceiptStore::LEGACY_PATH);
+
+        if (! is_file($legacy)) {
+            return 'No pipeline run has been recorded. Nothing has been verified.';
+        }
+
+        return sprintf(
+            'No pipeline run has been recorded here. A receipt written before 0.10.0 is still at [%s], and is deliberately not read: it predates the keys this command needs, and unknown is not clean. Open a new run — then that file is safe to delete.',
+            $legacy,
+        );
     }
 
     /**

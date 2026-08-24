@@ -295,8 +295,15 @@ only have to be unique within one.
 
 ```
 open_run(pipeline: "release")
+next_step(pipeline: "release")
+report_step(pipeline: "release", summary: "...")
+status(pipeline: "release")
+
 php artisan pipeline:verify --pipeline=release
 ```
+
+The name goes on **every** call, not just the first. Each pipeline has its own cursor, so a
+`next_step` with no name has no run to advance.
 
 Where a project declares a map, the name is **required** on every tool and never guessed — a map
 holding a single pipeline included, so adding a second one later breaks no call site that was
@@ -405,6 +412,23 @@ drops exactly one of them. Five guards stand before the verdicts:
 The flag narrows which verdicts count, never which tree the run covered. A stale receipt still fails
 on staleness, and a scoped receipt still cannot answer for the whole tree. Combine it with `--only`
 to ask both at once.
+
+### Which pipelines this flag is worth having
+
+**It pays off when the mechanical steps sit ahead of the acknowledged one and can pass on their
+own.** A walk of fast checks followed by a judgement step reaches `complete` routinely, so the flag
+routinely has something to report, and a downstream caller skips work it would otherwise repeat.
+
+**It gives you nothing on a walk whose mechanical steps are the ones likely to fail.** A failing step
+leaves the run `blocked`, an erroring one `halted` — never `complete` — so the second guard refuses
+before any verdict is read. Put a slow suite ahead of a judgement step and the flag is silent
+exactly when you wanted an answer: if the suite failed you never reached the agent step, and if it
+passed you had already paid for it.
+
+So the flag pairs with a pipeline built for it, and that is the practical reason to name pipelines.
+A `spec` pipeline of quick checks plus one review step is a good fit; a `closeout` pipeline that ends
+in a full suite is not, and it does not have to be — they are separate walks with separate receipts,
+and each answers the question it is shaped for.
 
 **What it still cannot tell you is which checks the pipeline holds.** Exit 0 reports on the steps
 that ran, so a pipeline declaring no static analysis exits 0 without any. Naming the steps is what
