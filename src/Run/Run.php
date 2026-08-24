@@ -455,9 +455,6 @@ final class Run
             // needing that reads `status` on the live run; copying the text here
             // would make the receipt a log and invite a consumer to parse it.
             coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
-            // A verdict says a step succeeded. Only these say something was
-            // checked about the code on disk, and a mutating step is exactly the
-            // one that succeeds without checking anything.
             asserted: array_keys(array_filter($this->asserted)),
         ));
     }

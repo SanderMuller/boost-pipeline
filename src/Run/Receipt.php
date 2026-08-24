@@ -191,8 +191,15 @@ final readonly class Receipt
      */
     private static function readVerdicts(mixed $raw): ?array
     {
-        if (! is_array($raw)) {
+        // Absent is a run that recorded no verdicts. Present and not a map is
+        // a broken file, and reading that as "no verdicts" let a receipt
+        // claiming `all_verified` answer for zero steps.
+        if ($raw === null) {
             return [];
+        }
+
+        if (! is_array($raw)) {
+            return null;
         }
 
         $verdicts = [];

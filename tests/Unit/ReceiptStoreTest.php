@@ -208,6 +208,7 @@ it('rejects a receipt whose safety fields hold the wrong type', function (string
     'an all_verified that is not a boolean' => ['all_verified', 'yes'],
     'an asserted list that is not a list' => ['asserted', 'phpstan'],
     'an asserted entry that is not a step id' => ['asserted', [['phpstan']]],
+    'a verdict map that is not a map' => ['verdicts', 'passed'],
 ]);
 
 it('still reads a receipt whose optional fields are explicitly null', function (): void {

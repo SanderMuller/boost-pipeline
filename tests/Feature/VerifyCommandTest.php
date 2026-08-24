@@ -597,3 +597,20 @@ it('refuses a real mutating-only run end to end, receipt and command agreeing', 
         @rmdir(dirname($path));
     }
 });
+
+it('will not count an acknowledged step even when the receipt lists it as asserting', function (): void {
+    // The intersection is with the steps the SERVER produced a verdict for, not
+    // with the verdict map. A receipt naming an acknowledged step as having
+    // asserted the tree is the shape that would launder judgement into a check.
+    receiptStoreHolding(receipt(
+        allVerified: false,
+        verdicts: ['evaluate' => 'acknowledged'],
+        asserted: ['evaluate'],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('produced a verdict for none of them');
+});
