@@ -73,6 +73,17 @@ final class Run
         private readonly ?TreeFingerprint $tree = null,
         private readonly ?ReceiptStore $receipts = null,
         public readonly ?string $scope = null,
+        /**
+         * Which pipeline this run walks, when the project declares more than one.
+         *
+         * A label, read only by the payload envelope. It never reaches the cursor
+         * or a verdict: the walk this run holds already IS the pipeline, and a
+         * second place to look one up is a second place for the two to disagree.
+         *
+         * Null for a project declaring one pipeline, so nothing changes in a
+         * payload that never had a name to report.
+         */
+        public readonly ?string $pipeline = null,
     ) {
         $this->lastSeen = $this->tree?->capture();
 
@@ -88,8 +99,9 @@ final class Run
         ?TreeFingerprint $tree = null,
         ?ReceiptStore $receipts = null,
         ?string $scope = null,
+        ?string $pipeline = null,
     ): self {
-        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts, $scope);
+        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts, $scope, $pipeline);
     }
 
     public function state(): RunState

@@ -78,7 +78,7 @@ beforeEach(function (): void {
         $steps->in(Agent::class)->append(Skill::run('/evaluate'));
     });
 
-    app()->instance(RunManager::class, new RunManager($pipeline, $runner));
+    app()->instance(RunManager::class, runManagerFor($pipeline, $runner));
 });
 
 afterEach(function (): void {

@@ -94,3 +94,54 @@ it('hands the agent the reason through the protocol, not just the log', function
         ->assertHasErrors()
         ->assertSee('must be greater than zero');
 });
+
+it('fails at server start when any pipeline in a map is broken', function (): void {
+    // A session that only ever opens `pr` would otherwise never learn that
+    // `release` cannot walk at all. Validation covers every pipeline the file
+    // declares, not the one a session happens to reach for.
+    $registrar = bootWithConfig(<<<'PHP'
+        <?php
+
+        use SanderMuller\BoostPipeline\Config\Pipeline;
+        use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
+        use SanderMuller\BoostPipeline\Phases\Steps;
+        use SanderMuller\BoostPipeline\Steps\Shell;
+
+        return [
+            'pr' => Pipeline::configure(),
+            'release' => Pipeline::configure()->withSteps(function (Steps $steps): void {
+                $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'audit'));
+                $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'audit'));
+            }),
+        ];
+        PHP);
+
+    expect(app()->bound(ConfigError::class))->toBeTrue()
+        ->and(app()->make(ConfigError::class)->message)->toContain('Duplicate step id [audit]');
+});
+
+it('fails at server start on a duplicate step id in a single pipeline too', function (): void {
+    // This used to surface at open_run, because nothing built a walk at boot.
+    // Building them closes it for every project, not only multi-pipeline ones.
+    bootWithConfig(<<<'PHP'
+        <?php
+
+        use SanderMuller\BoostPipeline\Config\Pipeline;
+        use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
+        use SanderMuller\BoostPipeline\Phases\Steps;
+        use SanderMuller\BoostPipeline\Steps\Shell;
+
+        return Pipeline::configure()->withSteps(function (Steps $steps): void {
+            $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'phpstan'));
+            $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'phpstan'));
+        });
+        PHP);
+
+    expect(app()->make(ConfigError::class)->message)->toContain('Duplicate step id [phpstan]');
+});
+
+it('names the pipeline key when a map value is not a Pipeline', function (): void {
+    bootWithConfig('<?php return ["pr" => '.Pipeline::class.'::configure(), "release" => "nope"];');
+
+    expect(app()->make(ConfigError::class)->message)->toContain('declares pipeline [release] as string');
+});

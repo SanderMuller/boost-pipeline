@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Mcp\Tools;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Tool;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\StepPayload;
 use SanderMuller\BoostPipeline\Mcp\Tools\Concerns\PipelineTool;
 use SanderMuller\BoostPipeline\Run\Run;
@@ -30,6 +32,21 @@ final class Status extends Tool
         return ['readOnlyHint' => true];
     }
 
+    /**
+     * Which run to act on.
+     *
+     * Empty for a project declaring one pipeline. Declared and required for a
+     * project that names them — without it a conforming client has no way to
+     * send the name this tool's handler requires, and a walk would stop dead
+     * after open_run.
+     *
+     * @return array<string, Type>
+     */
+    public function schema(JsonSchema $schema): array
+    {
+        return $this->pipelineSchema($schema);
+    }
+
     /** @return array<string, mixed> */
     public function outputSchema(JsonSchema $schema): array
     {
@@ -48,10 +65,19 @@ final class Status extends Tool
 
     public function handle(Request $request): Response|ResponseFactory
     {
-        $run = $this->runs->current();
+        $pipeline = $this->pipelineArgument($request);
+
+        try {
+            $run = $this->runs->for($pipeline);
+        } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
+            return Response::error($invalidPipelineConfigException->getMessage());
+        }
 
         if (! $run instanceof Run) {
-            return Response::error('No run is open. Call open_run first.');
+            return Response::error(sprintf(
+                'No run is open%s. Call open_run first.',
+                $pipeline === null ? '' : " for pipeline [{$pipeline}]",
+            ));
         }
 
         return Response::structured(StepPayload::status($run));

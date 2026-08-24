@@ -262,6 +262,62 @@ Two things a group refuses, when the config loads rather than when the run reach
 A custom `StepRunner` that does not implement `BatchStepRunner` still works. Its groups resolve one
 step after another, which is correct and slower.
 
+### More than one pipeline
+
+A project asks its code more than one question. Is this ready for a PR, is it ready to release,
+what does an evaluation loop find — different steps, in a different order. Return a map instead of
+one pipeline:
+
+```php
+// .config/pipeline.php
+return [
+    'pr' => Pipeline::configure()
+        ->withSteps(function (Steps $steps): void {
+            $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test', id: 'pint'));
+            $steps->in(StaticAnalysis::class)->append(Shell::run('vendor/bin/phpstan', id: 'phpstan'));
+        }),
+
+    'release' => Pipeline::configure()
+        ->withSteps(function (Steps $steps): void {
+            $steps->in(StaticAnalysis::class)
+                ->append(Shell::run('vendor/bin/phpstan', id: 'phpstan'))
+                ->append(Shell::run('composer audit', id: 'audit'));
+            $steps->in(Agent::class)->append(Skill::run('/release-notes'));
+        }),
+];
+```
+
+A file that returns a single `Pipeline` keeps working and is named `default`.
+
+Each pipeline is independent: its own phases, its own steps, its own cursor and its own receipt.
+Declaring `phpstan` in two of them is expected, not a clash — they are separate walks, and step ids
+only have to be unique within one.
+
+```
+open_run(pipeline: "release")
+php artisan pipeline:verify --pipeline=release
+```
+
+Where a project declares a map, the name is **required** on every tool and never guessed — a map
+holding a single pipeline included, so adding a second one later breaks no call site that was
+already correct. Omitting it is an error listing the names. That is deliberate: an agent that got the most recently opened run
+instead would advance the wrong cursor, run the wrong steps and write a verdict into the wrong
+receipt, and none of that would be visible.
+
+**Each keeps its own cursor**, so an agent can leave the release pipeline part-walked, work in the
+PR pipeline, and come back to where it was. Coming back is not a promise that survives an edit: a
+run measured before a change cannot describe the tree after one, so it is discarded and restarted —
+the same rule a single run has always followed.
+
+**Two answers can be true at once.** One receipt per pipeline is the difference between this and the
+tags below: a scoped run replaces the previous receipt, so scopes never accumulate, while `pr` and
+`release` hold their verdicts side by side.
+
+A bare `pipeline:verify` refuses once a project declares several, because "is this tree verified"
+has no single answer. It names them and asks for `--pipeline=`. There is no aggregate "every
+pipeline is green" answer on purpose: a project that routinely runs only its PR pipeline could never
+reach exit 0 through it, and a gate that cannot pass is one people learn to skip.
+
 ### Running only part of the pipeline
 
 Tag a step to say which scope it belongs to, then select one when the run opens:
@@ -843,7 +899,9 @@ without asking anybody. A consumer that must not trust the working copy runs the
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
-| Accumulate scopes across runs | One receipt, so a second scoped run replaces the first. Verifying two scopes separately never adds up to a verified tree; run unscoped for that |
+| Accumulate scopes across runs | One receipt per pipeline, so a second scoped run replaces the first. Verifying two scopes separately never adds up to a verified tree; run unscoped for that. Separate pipelines do accumulate — that is what distinguishes a name from a scope |
+| Notice two pipelines sharing a name | PHP collapses duplicate array keys before the package sees them, so the later one silently wins. Nothing can detect it |
+| Clean up a receipt it no longer recognises | Upgrading leaves `storage/logs/pipeline/receipt.json` behind, and renaming a pipeline leaves its old `receipts/<name>.json`. Both are unread and safe to delete; deleting files it no longer recognises is not a thing this package should do |
 | Know which checks your pipeline ought to hold | Exit 0 reports on the steps that ran. A pipeline declaring no static analysis exits 0 without any, so `--server-verified` names the ids it counted and leaves the judgement to you |
 | Read a mutating step's pass as a claim about the result | `all_verified` counts it, because every step passed. `--server-verified` does not, because a formatter produced the tree rather than checking it |
 

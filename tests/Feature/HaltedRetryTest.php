@@ -50,7 +50,7 @@ beforeEach(function (): void {
         $steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint --test'));
     });
 
-    app()->instance(RunManager::class, new RunManager($pipeline, $this->runner));
+    app()->instance(RunManager::class, runManagerFor($pipeline, $this->runner));
 });
 
 afterEach(function (): void {

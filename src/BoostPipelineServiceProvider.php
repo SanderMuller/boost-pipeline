@@ -9,6 +9,7 @@ use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
+use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Console\VerifyCommand;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
@@ -18,6 +19,7 @@ use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
+use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
@@ -26,6 +28,7 @@ use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
 use SanderMuller\BoostPipeline\Runner\OutputSummariser;
 use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
+use SanderMuller\BoostPipeline\Runner\StepRunnerFactory;
 
 final class BoostPipelineServiceProvider extends ServiceProvider
 {
@@ -35,21 +38,31 @@ final class BoostPipelineServiceProvider extends ServiceProvider
     {
         $this->app->singleton(PipelineLoader::class, fn (): PipelineLoader => new PipelineLoader($this->app->basePath()));
 
-        $this->app->singleton(Pipeline::class, function (): Pipeline {
-            $pipeline = $this->app->make(PipelineLoader::class)->load();
+        $this->app->singleton(Pipelines::class, function (): Pipelines {
+            $pipelines = $this->app->make(PipelineLoader::class)->load();
 
             // Registration is gated on the same check, so an opted-out project
             // never reaches this fallback.
-            return $pipeline ?? Pipeline::configure();
+            return $pipelines ?? Pipelines::single(Pipeline::configure());
         });
 
-        $this->app->singleton(StepRunner::class, fn (): StepRunner => new ProcessStepRunner(
-            workingDirectory: $this->app->basePath(),
-            logs: new LogWriter($this->app->storagePath('logs/pipeline')),
-            summariser: new OutputSummariser,
-            environment: new EnvironmentScrubber($this->app->basePath()),
-            timeoutSeconds: $this->app->make(Pipeline::class)->timeoutSeconds()
-                ?? ProcessStepRunner::DEFAULT_TIMEOUT_SECONDS,
+        // The documented seam: bind your own over this one and every step goes
+        // through it. Not routed through the factory, which would be a cycle.
+        $this->app->singleton(
+            StepRunner::class,
+            fn (): StepRunner => $this->processRunner($this->app->make(Pipelines::class)->soleName()),
+        );
+
+        $this->app->singleton(StepRunnerFactory::class, fn (): StepRunnerFactory => new StepRunnerFactory(
+            function (string $pipeline): StepRunner {
+                $bound = $this->app->make(StepRunner::class);
+
+                // A consumer that bound its own runner gets it for every
+                // pipeline. Only the shipped runner varies per pipeline, and only
+                // because the timeout does — reading that once at boot could be
+                // right for one pipeline at most.
+                return $bound instanceof ProcessStepRunner ? $this->processRunner($pipeline) : $bound;
+            },
         ));
 
         $this->app->singleton(
@@ -69,15 +82,102 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 
         $this->app->singleton(
             ReceiptStore::class,
-            fn (): ReceiptStore => new JsonReceiptStore($this->app->storagePath('logs/pipeline/receipt.json')),
+            fn (): ReceiptStore => $this->jsonReceiptStore($this->soleName()),
         );
 
-        $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(
-            $this->app->make(Pipeline::class),
-            $this->app->make(StepRunner::class),
-            $this->app->make(TreeFingerprint::class),
-            $this->app->make(ReceiptStore::class),
+        $this->app->singleton(ReceiptStoreFactory::class, fn (): ReceiptStoreFactory => new ReceiptStoreFactory(
+            function (string $pipeline): ReceiptStore {
+                $pipelines = $this->app->make(Pipelines::class);
+
+                // The name becomes a path component. The loader validates every
+                // name it accepts, but this factory is public API and could be
+                // called with anything — `../../secrets` would resolve outside
+                // the receipts directory, and `JsonReceiptStore` creates parent
+                // directories on write. Only a declared name is a real pipeline,
+                // so that is the check.
+                if (! $pipelines->has($pipeline)) {
+                    throw InvalidPipelineConfigException::unknownPipeline($pipeline, $pipelines->names());
+                }
+
+                // With one pipeline there is nothing ambiguous about a consumer's
+                // own store, so it keeps working. With several, one store cannot
+                // serve them all without collapsing every receipt into one, which
+                // is the problem named pipelines exist to solve — such a project
+                // binds `ReceiptStoreFactory` instead. UPGRADING says so.
+                if ($pipelines->soleName() !== null) {
+                    $bound = $this->app->make(ReceiptStore::class);
+
+                    if ($bound::class !== JsonReceiptStore::class) {
+                        return $bound;
+                    }
+                }
+
+                return $this->jsonReceiptStore($pipeline);
+            },
         ));
+
+        $this->registerSolePipelineAliases();
+
+        $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(
+            $this->app->make(Pipelines::class),
+            $this->app->make(StepRunnerFactory::class),
+            $this->app->make(TreeFingerprint::class),
+            $this->app->make(ReceiptStoreFactory::class),
+        ));
+    }
+
+    /**
+     * The binding that predates pipeline names.
+     *
+     * Resolves for the sole pipeline and refuses to pick one otherwise: "the
+     * pipeline" has no answer in a project declaring three, and a silently chosen
+     * one is a walk nobody asked about.
+     *
+     * `StepRunner` and `ReceiptStore` are bound separately, because a consumer
+     * binds over both and the factories have to honour that.
+     */
+    private function registerSolePipelineAliases(): void
+    {
+        $this->app->singleton(
+            Pipeline::class,
+            fn (): Pipeline => $this->app->make(Pipelines::class)->sole(),
+        );
+
+    }
+
+    /**
+     * The shipped runner, carrying one pipeline's timeout.
+     *
+     * A null name means there is no single pipeline to read a ceiling from, so it
+     * falls back to the package default rather than picking one.
+     */
+    private function processRunner(?string $pipeline): ProcessStepRunner
+    {
+        $declared = $pipeline === null
+            ? null
+            : $this->app->make(Pipelines::class)->get($pipeline)?->timeoutSeconds();
+
+        return new ProcessStepRunner(
+            workingDirectory: $this->app->basePath(),
+            logs: new LogWriter($this->app->storagePath('logs/pipeline')),
+            summariser: new OutputSummariser,
+            environment: new EnvironmentScrubber($this->app->basePath()),
+            timeoutSeconds: $declared ?? ProcessStepRunner::DEFAULT_TIMEOUT_SECONDS,
+        );
+    }
+
+    private function jsonReceiptStore(string $pipeline): JsonReceiptStore
+    {
+        return new JsonReceiptStore($this->app->storagePath("logs/pipeline/receipts/{$pipeline}.json"));
+    }
+
+    /** @throws InvalidPipelineConfigException */
+    private function soleName(): string
+    {
+        $pipelines = $this->app->make(Pipelines::class);
+
+        return $pipelines->soleName()
+            ?? throw InvalidPipelineConfigException::noSolePipeline($pipelines->names());
     }
 
     public function boot(): void
@@ -134,7 +234,21 @@ final class BoostPipelineServiceProvider extends ServiceProvider
     private function configError(): ?string
     {
         try {
-            $this->app->make(Pipeline::class);
+            // `Pipelines`, never `Pipeline`: the latter now throws whenever the
+            // project declares several, which would turn every multi-pipeline
+            // project into a config error reported by the one path whose job is
+            // to report config errors.
+            $pipelines = $this->app->make(Pipelines::class);
+
+            // Loading runs every pipeline's config closure, so a bad phase
+            // anchor, an empty tag or a parallel-group violation already threw
+            // above. A duplicate step id does not: it throws from `Walk::resolve`,
+            // which nothing else calls at start, so today it surfaces at open_run
+            // instead. Building the walks here closes that — and closes it for
+            // every pipeline, not just whichever one a session happens to open.
+            foreach ($pipelines->names() as $name) {
+                $pipelines->get($name)?->walk();
+            }
 
             return null;
         } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {

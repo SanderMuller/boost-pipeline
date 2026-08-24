@@ -11,7 +11,6 @@ use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\Run;
-use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 
@@ -165,7 +164,7 @@ it('does not expire anything when the tree cannot be fingerprinted', function ()
 });
 
 it('hands back the same run while the tree sits still', function (): void {
-    $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, new SettableFingerprint);
+    $manager = runManagerFor(twoStepPipeline(), new AlwaysPasses, new SettableFingerprint);
 
     $first = $manager->open();
     $first->resolveCurrent();
@@ -178,7 +177,7 @@ it('starts a fresh run once the tree has moved, which is what the fix loop needs
     // here hands back verdicts about code that no longer exists; refusing to open
     // a second one makes the loop impossible without restarting the server.
     $tree = new SettableFingerprint;
-    $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, $tree);
+    $manager = runManagerFor(twoStepPipeline(), new AlwaysPasses, $tree);
 
     $first = $manager->open();
     $first->resolveCurrent();
@@ -334,7 +333,7 @@ it('keeps the run id when the tree moves before anything has been recorded', fun
     // Nothing recorded means nothing to invalidate, so an edit while the agent is
     // still deciding what to run should not churn through run ids.
     $tree = new SettableFingerprint;
-    $manager = new RunManager(twoStepPipeline(), new AlwaysPasses, $tree);
+    $manager = runManagerFor(twoStepPipeline(), new AlwaysPasses, $tree);
 
     $first = $manager->open();
     $tree->value = 'edited-before-any-step';

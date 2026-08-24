@@ -6,6 +6,7 @@ use Illuminate\JsonSchema\JsonSchemaTypeFactory;
 use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Server\Tool;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Mcp\Tools\NextStep;
@@ -13,7 +14,6 @@ use SanderMuller\BoostPipeline\Mcp\Tools\OpenRun;
 use SanderMuller\BoostPipeline\Mcp\Tools\ReportStep;
 use SanderMuller\BoostPipeline\Mcp\Tools\Status;
 use SanderMuller\BoostPipeline\Results\Result;
-use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 
 /**
@@ -22,7 +22,11 @@ use SanderMuller\BoostPipeline\Runner\CommandPreflight;
  */
 function toolNamed(string $name): Tool
 {
-    $runs = new RunManager(
+    // The tools read the pipeline map to decide whether to declare a `pipeline`
+    // argument, and a unit test has no service provider to bind it.
+    app()->instance(Pipelines::class, Pipelines::single(Pipeline::configure()));
+
+    $runs = runManagerFor(
         Pipeline::configure(),
         new class implements StepRunner
         {

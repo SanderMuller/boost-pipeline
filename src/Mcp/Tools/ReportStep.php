@@ -10,6 +10,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Tool;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\StepPayload;
 use SanderMuller\BoostPipeline\Mcp\Tools\Concerns\PipelineTool;
 use SanderMuller\BoostPipeline\Run\AcknowledgementNotAllowed;
@@ -32,6 +33,7 @@ final class ReportStep extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
+            ...$this->pipelineSchema($schema),
             'summary' => $schema->string()
                 ->description('What you did for this step.')
                 ->required(),
@@ -50,10 +52,19 @@ final class ReportStep extends Tool
 
     public function handle(Request $request): Response|ResponseFactory
     {
-        $run = $this->runs->current();
+        $pipeline = $this->pipelineArgument($request);
+
+        try {
+            $run = $this->runs->for($pipeline);
+        } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
+            return Response::error($invalidPipelineConfigException->getMessage());
+        }
 
         if (! $run instanceof Run) {
-            return Response::error('No run is open. Call open_run first.');
+            return Response::error(sprintf(
+                'No run is open%s. Call open_run first.',
+                $pipeline === null ? '' : " for pipeline [{$pipeline}]",
+            ));
         }
 
         $summary = $request->get('summary');

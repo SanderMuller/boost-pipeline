@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
@@ -13,6 +14,7 @@ use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
+use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Steps\Shell;
 
@@ -22,7 +24,7 @@ use SanderMuller\BoostPipeline\Steps\Shell;
  */
 function receiptStoreHolding(?Receipt $receipt): void
 {
-    app()->instance(ReceiptStore::class, new class($receipt) implements ReceiptStore
+    $store = new class($receipt) implements ReceiptStore
     {
         public function __construct(private ?Receipt $receipt) {}
 
@@ -35,7 +37,56 @@ function receiptStoreHolding(?Receipt $receipt): void
         {
             return $this->receipt;
         }
-    });
+    };
+
+    app()->instance(ReceiptStore::class, $store);
+
+    // The command reaches a receipt through the factory now, because which
+    // receipt it should read depends on which pipeline was asked about.
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $store,
+    ));
+}
+
+/**
+ * Bind one store for every pipeline name.
+ *
+ * Every test here is about one pipeline; the ones that are about several build
+ * their own map with `projectDeclaring()`.
+ */
+function useReceiptStore(ReceiptStore $store): void
+{
+    app()->instance(ReceiptStore::class, $store);
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $store,
+    ));
+}
+
+function receiptStoreOf(?Receipt $receipt): ReceiptStore
+{
+    return new class($receipt) implements ReceiptStore
+    {
+        public function __construct(private ?Receipt $receipt) {}
+
+        public function write(Receipt $receipt): void
+        {
+            $this->receipt = $receipt;
+        }
+
+        public function read(): ?Receipt
+        {
+            return $this->receipt;
+        }
+    };
+}
+
+/** @param list<string> $names */
+function projectDeclaring(array $names): void
+{
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        array_combine($names, array_map(Pipeline::configure(...), $names)),
+        '.config/pipeline.php',
+    ));
 }
 
 function treeReporting(?string $digest): void
@@ -189,7 +240,7 @@ it('exits 0 for a receipt a real run actually wrote', function (): void {
     $path = sys_get_temp_dir().'/bp-e2e-'.bin2hex(random_bytes(4)).'/receipt.json';
     $store = new JsonReceiptStore($path);
 
-    app()->instance(ReceiptStore::class, $store);
+    useReceiptStore($store);
     treeReporting('tree-a');
 
     $run = Run::start(
@@ -569,7 +620,7 @@ it('refuses a real mutating-only run end to end, receipt and command agreeing', 
     $path = sys_get_temp_dir().'/bp-e2e-'.bin2hex(random_bytes(4)).'/receipt.json';
     $store = new JsonReceiptStore($path);
 
-    app()->instance(ReceiptStore::class, $store);
+    useReceiptStore($store);
     treeReporting('tree-a');
 
     $run = Run::start(
@@ -633,7 +684,7 @@ it('refuses a receipt holding no verdicts, however it came to hold none', functi
         'coverage' => 'complete', 'asserted' => [],
     ] + $data));
 
-    app()->instance(ReceiptStore::class, new JsonReceiptStore($path));
+    useReceiptStore(new JsonReceiptStore($path));
     treeReporting('tree-a');
 
     try {
@@ -657,4 +708,169 @@ it('names the empty receipt rather than the tree it does not describe', function
 
     expect(Artisan::call('pipeline:verify'))->toBe(1)
         ->and(Artisan::output())->toContain('recorded no step verdicts at all');
+});
+
+/**
+ * Which pipeline the question is about.
+ *
+ * A project asking its code more than one question has no single answer to "is
+ * this tree verified". The refusal is the same rule a scoped receipt already
+ * follows, one level up — and naming the pipelines is the useful half of it.
+ */
+it('answers without a name when the project declares one pipeline', function (): void {
+    projectDeclaring(['pr']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('answers when the name given is the only pipeline there is', function (): void {
+    projectDeclaring(['pr']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'pr']))->toBe(0);
+});
+
+it('refuses a bare question when the project declares several, and names them', function (): void {
+    // There is deliberately no aggregate "every pipeline is green" answer: a
+    // project that routinely runs only its PR pipeline could never reach exit 0
+    // through it, and a gate that cannot pass is one people learn to skip.
+    projectDeclaring(['pr', 'release', 'evaluate']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('has no single answer')
+        ->and($output)->toContain('[pr]')
+        ->and($output)->toContain('[release]')
+        ->and($output)->toContain('[evaluate]')
+        // And it says what to do about it.
+        ->and($output)->toContain('--pipeline=');
+});
+
+it('refuses a name the project does not declare, and names what it does', function (): void {
+    projectDeclaring(['pr', 'release']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--pipeline' => 'staging']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('No pipeline named [staging] is configured')
+        ->and($output)->toContain('[pr]');
+});
+
+it('refuses a name a project on the legacy single-pipeline file does not have', function (): void {
+    // That file is loaded as one pipeline called `default`, so `release` is not a
+    // name it declares.
+    projectDeclaring(['default']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))->toBe(1)
+        ->and(Artisan::output())->toContain('[default]');
+});
+
+it('treats a blank --pipeline as no name at all', function (): void {
+    projectDeclaring(['pr']);
+    receiptStoreHolding(receipt());
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => '  ']))->toBe(0);
+});
+
+it('reads the receipt belonging to the pipeline it was asked about', function (): void {
+    // Two receipts, two answers, both true at once — the thing one receipt file
+    // could never do.
+    projectDeclaring(['pr', 'release']);
+    treeReporting('tree-a');
+
+    $stores = [
+        'pr' => receiptStoreOf(receipt(verdicts: ['phpstan' => 'passed'], asserted: ['phpstan'])),
+        'release' => receiptStoreOf(receipt(allVerified: false, verdicts: ['audit' => 'failed'], asserted: [])),
+    ];
+
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $stores[$pipeline],
+    ));
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'pr']))->toBe(0)
+        ->and(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))
+        ->toBe(1);
+});
+
+it('lets one pipeline go stale without touching the other', function (): void {
+    // Each receipt records its own tree, so a release run from before an edit
+    // fails on staleness while a PR run made after it passes.
+    projectDeclaring(['pr', 'release']);
+    treeReporting('tree-b');
+
+    $stores = [
+        'pr' => receiptStoreOf(receipt(tree: 'tree-b')),
+        'release' => receiptStoreOf(receipt(tree: 'tree-a')),
+    ];
+
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $stores[$pipeline],
+    ));
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'pr']))->toBe(0)
+        ->and(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))
+        ->toBe(1)
+        ->and(Artisan::output())
+        ->toContain('verified a different working tree');
+});
+
+it('composes a pipeline, a scope and the server-verified question at once', function (): void {
+    projectDeclaring(['pr', 'release']);
+    treeReporting('tree-a');
+
+    $stores = [
+        'pr' => receiptStoreOf(receipt(
+            allVerified: false,
+            scope: 'backend',
+            verdicts: ['phpstan' => 'passed', 'evaluate' => 'acknowledged'],
+            asserted: ['phpstan'],
+        )),
+        'release' => receiptStoreOf(null),
+    ];
+
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $stores[$pipeline],
+    ));
+
+    $exit = Artisan::call('pipeline:verify', [
+        '--pipeline' => 'pr',
+        '--only' => 'backend',
+        '--server-verified' => true,
+    ]);
+
+    expect($exit)->toBe(0)
+        ->and(Artisan::output())->toContain('scope [backend]');
+
+    // The name narrows which receipt is read; it never widens what exit 0 claims.
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'pr', '--server-verified' => true]))->toBe(1);
+});
+
+it('reports no run for a pipeline that has never been walked', function (): void {
+    projectDeclaring(['pr', 'release']);
+    treeReporting('tree-a');
+
+    $stores = [
+        'pr' => receiptStoreOf(receipt()),
+        'release' => receiptStoreOf(null),
+    ];
+
+    app()->instance(ReceiptStoreFactory::class, new ReceiptStoreFactory(
+        static fn (string $pipeline): ReceiptStore => $stores[$pipeline],
+    ));
+
+    expect(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))->toBe(1)
+        ->and(Artisan::output())->toContain('No pipeline run has been recorded');
 });

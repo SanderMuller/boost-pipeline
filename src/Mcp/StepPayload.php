@@ -117,6 +117,12 @@ final readonly class StepPayload
             $envelope['scope'] = $run->scope;
         }
 
+        // Same rule, one level up: absent for a project declaring one pipeline,
+        // which never had a name to report.
+        if ($run->pipeline !== null) {
+            $envelope['pipeline'] = $run->pipeline;
+        }
+
         // Answered from the first receipt onward, not only at the end. `halted` and
         // `blocked` are both retryable now, so a run sits in them while the agent
         // decides what to do — which is exactly when "can I trust this run?" gets

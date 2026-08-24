@@ -9,6 +9,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Tool;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\StepPayload;
 use SanderMuller\BoostPipeline\Mcp\Tools\Concerns\PipelineTool;
 use SanderMuller\BoostPipeline\Run\RunManager;
@@ -31,6 +32,7 @@ final class OpenRun extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
+            ...$this->pipelineSchema($schema),
             'only' => $schema->string()->description(
                 'Run only the steps carrying this tag, plus every untagged step. Omit it to run the whole pipeline. A scoped run verifies less than a full one, and its receipt records the scope, so `pipeline:verify` will not report the tree verified on the strength of it.'
             ),
@@ -57,12 +59,20 @@ final class OpenRun extends Tool
         ];
     }
 
-    public function handle(Request $request): ResponseFactory
+    public function handle(Request $request): Response|ResponseFactory
     {
         // Idempotent: opening an already-open run returns it where it stands.
         // Restarting would discard verdicts silently.
         $selection = $request->get('only');
-        $run = $this->runs->open(is_string($selection) && trim($selection) !== '' ? $selection : null);
+
+        try {
+            $run = $this->runs->open(
+                $this->pipelineArgument($request),
+                is_string($selection) && trim($selection) !== '' ? $selection : null,
+            );
+        } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
+            return Response::error($invalidPipelineConfigException->getMessage());
+        }
 
         $payload = StepPayload::opened($run);
 

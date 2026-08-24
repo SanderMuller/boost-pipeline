@@ -5,7 +5,6 @@ declare(strict_types=1);
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Steps;
-use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
 use SanderMuller\BoostPipeline\Runner\OutputSummariser;
@@ -37,7 +36,7 @@ beforeEach(function (): void {
         timeoutSeconds: 20.0,
     );
 
-    $this->manager = new RunManager(pipelineEchoing('formatted'), $this->runner);
+    $this->manager = runManagerFor(pipelineEchoing('formatted'), $this->runner);
 });
 
 function pipelineEchoing(string $word): Pipeline
@@ -76,7 +75,7 @@ it('scopes logs per run, so a second run cannot overwrite the first one', functi
     // A second run through the SAME runner, with the same step id. That is the
     // arrangement that used to collide: one id held by the runner, reused for
     // every run in the process.
-    $second = new RunManager(pipelineEchoing('again'), $this->runner)->open();
+    $second = runManagerFor(pipelineEchoing('again'), $this->runner)->open();
 
     $secondLog = $second->resolveCurrent()[0]->logPath;
 

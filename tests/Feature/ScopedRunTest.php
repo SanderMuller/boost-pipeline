@@ -39,7 +39,7 @@ beforeEach(function (): void {
             ->append(Shell::run('true', id: 'tsc')->tagged('frontend'));
     });
 
-    $this->manager = new RunManager($pipeline, new class implements StepRunner
+    $this->manager = runManagerFor($pipeline, new class implements StepRunner
     {
         public function run(Step $step, string $runId): Result
         {
@@ -92,8 +92,8 @@ it('reports how many steps the scope left out', function (): void {
 it('starts a new run when the selection changes', function (): void {
     // A different selection asks a different question, so handing back the open
     // run would answer the wrong one.
-    $backend = $this->manager->open('backend');
-    $frontend = $this->manager->open('frontend');
+    $backend = $this->manager->open(selection: 'backend');
+    $frontend = $this->manager->open(selection: 'frontend');
 
     expect($frontend->id)->not->toBe($backend->id)
         ->and($frontend->scope)->toBe('frontend')
@@ -101,7 +101,7 @@ it('starts a new run when the selection changes', function (): void {
 });
 
 it('starts a new run when a scoped run is reopened unscoped', function (): void {
-    $scoped = $this->manager->open('backend');
+    $scoped = $this->manager->open(selection: 'backend');
     $full = $this->manager->open();
 
     expect($full->id)->not->toBe($scoped->id)
@@ -110,7 +110,7 @@ it('starts a new run when a scoped run is reopened unscoped', function (): void 
 });
 
 it('keeps returning the same run for the same selection', function (): void {
-    expect($this->manager->open('backend')->id)->toBe($this->manager->open('backend')->id);
+    expect($this->manager->open(selection: 'backend')->id)->toBe($this->manager->open(selection: 'backend')->id);
 });
 
 it('surfaces the bad-scope notice through the tool and refuses to call the run verified', function (): void {
@@ -122,7 +122,7 @@ it('surfaces the bad-scope notice through the tool and refuses to call the run v
         ->assertSee('notices')
         ->assertSee('[bakend]');
 
-    $run = $this->manager->current();
+    $run = $this->manager->for();
     $run?->resolveCurrent();
 
     expect($run?->allVerified())->toBeFalse();

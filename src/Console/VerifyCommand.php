@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Console;
 
 use Illuminate\Console\Command;
+use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Run\Receipt;
+use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunState;
 
 /**
@@ -26,14 +28,21 @@ use SanderMuller\BoostPipeline\Run\RunState;
 final class VerifyCommand extends Command
 {
     protected $signature = 'pipeline:verify
+        {--pipeline= : Which pipeline to ask about. Required when the project declares more than one.}
         {--only= : Ask whether this scope was verified, rather than the whole tree.}
         {--server-verified : Ask whether every verdict the server produced is a pass, setting aside steps it could only acknowledge.}';
 
     protected $description = 'Exit 0 only when the pipeline has verified the code currently on disk.';
 
-    public function handle(ReceiptStore $receipts, TreeFingerprint $tree): int
+    public function handle(Pipelines $pipelines, ReceiptStoreFactory $receipts, TreeFingerprint $tree): int
     {
-        $receipt = $receipts->read();
+        $store = $this->storeFor($pipelines, $receipts);
+
+        if (! $store instanceof ReceiptStore) {
+            return self::FAILURE;
+        }
+
+        $receipt = $store->read();
 
         if (! $receipt instanceof Receipt) {
             $this->components->error('No pipeline run has been recorded. Nothing has been verified.');
@@ -104,6 +113,56 @@ final class VerifyCommand extends Command
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The receipt store for the pipeline the caller meant, or null with the
+     * reason printed.
+     *
+     * A project declaring several pipelines has no single answer to "is this tree
+     * verified?" — the same rule a scoped receipt already follows, one level up.
+     * Naming them is the useful half of refusing: a caller who did not know the
+     * project had three now does, and knows what to ask for.
+     *
+     * There is deliberately no aggregate "every pipeline is green" answer. A
+     * project that routinely runs only its PR pipeline could never reach exit 0
+     * through it, and a gate that cannot pass is one people learn to skip.
+     */
+    private function storeFor(Pipelines $pipelines, ReceiptStoreFactory $receipts): ?ReceiptStore
+    {
+        $asked = $this->option('pipeline');
+        $asked = is_string($asked) && trim($asked) !== '' ? $asked : null;
+
+        if ($asked === null) {
+            // Counts, not declaration shape: a map holding one pipeline still has
+            // exactly one answer to "is this tree verified".
+            $implied = $pipelines->soleName();
+
+            if ($implied === null) {
+                $this->components->error(sprintf(
+                    'This project declares %d pipelines [%s], so "is this tree verified" has no single answer. Ask about one with --pipeline=%s.',
+                    count($pipelines->names()),
+                    implode('], [', $pipelines->names()),
+                    $pipelines->names()[0] ?? '',
+                ));
+
+                return null;
+            }
+
+            return $receipts->for($implied);
+        }
+
+        if (! $pipelines->has($asked)) {
+            $this->components->error(sprintf(
+                'No pipeline named [%s] is configured. This project declares [%s].',
+                $asked,
+                implode('], [', $pipelines->names()),
+            ));
+
+            return null;
+        }
+
+        return $receipts->for($asked);
     }
 
     /**

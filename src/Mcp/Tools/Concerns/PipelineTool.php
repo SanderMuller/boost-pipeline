@@ -6,7 +6,10 @@ namespace SanderMuller\BoostPipeline\Mcp\Tools\Concerns;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\ObjectType;
+use Illuminate\JsonSchema\Types\Type;
+use Laravel\Mcp\Request;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
+use SanderMuller\BoostPipeline\Config\Pipelines;
 
 trait PipelineTool
 {
@@ -23,6 +26,49 @@ trait PipelineTool
     public function shouldRegister(): bool
     {
         return resolve(PipelineLoader::class)->exists();
+    }
+
+    /**
+     * The `pipeline` argument, present only when the project declares a map.
+     *
+     * Required there, and never defaulted to the most recently opened run: an
+     * agent that omitted it would advance the wrong pipeline's cursor, run the
+     * wrong steps and write a verdict into the wrong receipt, silently. An error
+     * message is a far cheaper failure.
+     *
+     * Absent for a project declaring one pipeline, so nothing changes for a
+     * client that never had a choice to make.
+     *
+     * @return array<string, Type>
+     */
+    protected function pipelineSchema(JsonSchema $schema): array
+    {
+        $pipelines = resolve(Pipelines::class);
+
+        if (! $pipelines->requiresName()) {
+            return [];
+        }
+
+        return [
+            'pipeline' => $schema->string()->required()->description(
+                'Which pipeline to act on. This project declares: '.implode(', ', $pipelines->names())
+                .'. Keep it the same across a walk — each pipeline has its own cursor and its own receipt.'
+            ),
+        ];
+    }
+
+    /**
+     * The schema declares this required; the schema is not the guard.
+     *
+     * A declared-required argument is what a well-behaved client sends, not what
+     * an ill-behaved one is stopped from omitting. `RunManager` refuses a null
+     * name whenever the project declares several, and that refusal is the guard.
+     */
+    protected function pipelineArgument(Request $request): ?string
+    {
+        $name = $request->get('pipeline');
+
+        return is_string($name) && trim($name) !== '' ? $name : null;
     }
 
     /**
@@ -44,6 +90,7 @@ trait PipelineTool
             ),
             'position' => $schema->string()->description('Cursor position in steps, as "n/total", or "n-m/total" for a parallel group. Counts steps, not remaining calls.'),
             'scope' => $schema->string()->description('Present only when the run was opened with a tag selection. The walk holds the steps carrying it plus every untagged step, so the run verifies less than the whole pipeline.'),
+            'pipeline' => $schema->string()->description('Which pipeline this run walks. Present only when the project declares more than one. A name selects which walk exists; a scope narrows that walk.'),
             'all_verified' => $schema->boolean()->description(
                 'Present once the run has any result, in any state. True only when the walk finished AND every step was a pass the server itself verified against the code now on disk.'
             ),

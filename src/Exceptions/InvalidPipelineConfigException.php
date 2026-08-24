@@ -13,6 +13,44 @@ final class InvalidPipelineConfigException extends RuntimeException
         return new self("[{$path}] must return a Pipeline instance, got {$given}.");
     }
 
+    public static function declaredNoPipelines(string $path): self
+    {
+        return new self("[{$path}] returned an empty array, so it declares no pipelines at all. Return a Pipeline, or a map of names to Pipelines.");
+    }
+
+    public static function pipelineNameNotAString(string $path, mixed $name): self
+    {
+        return new self("[{$path}] must return a map of names to Pipelines, but a key is ".get_debug_type($name).' ['.(is_scalar($name) ? (string) $name : '?').']. A plain list of pipelines gets integer keys — give each one a name.');
+    }
+
+    public static function mapValueNotAPipeline(string $path, string $name, string $given): self
+    {
+        return new self("[{$path}] declares pipeline [{$name}] as {$given}, not a Pipeline instance.");
+    }
+
+    public static function invalidPipelineName(string $name): self
+    {
+        return new self("Pipeline name [{$name}] is not usable. A name addresses a receipt file, so it must match /^[a-z0-9][a-z0-9-]*$/: lowercase letters, digits and dashes, starting with a letter or digit.");
+    }
+
+    /** @param list<string> $names */
+    public static function noSolePipeline(array $names): self
+    {
+        return new self('This project declares '.count($names).' pipelines ['.implode('], [', $names).'], so there is no single one to resolve. Ask for one by name.');
+    }
+
+    /** @param list<string> $names */
+    public static function unknownPipeline(string $asked, array $names): self
+    {
+        return new self("No pipeline named [{$asked}] is configured. This project declares [".implode('], [', $names).'].');
+    }
+
+    /** @param list<string> $names */
+    public static function pipelineNotSelected(array $names): self
+    {
+        return new self('This project names its pipelines, so one has to be named here too. It declares ['.implode('], [', $names).']. Pass the pipeline you mean.');
+    }
+
     public static function duplicateStepId(string $id): self
     {
         return new self("Duplicate step id [{$id}]. Step ids address log files and receipts, so they must be unique across the whole pipeline.");

@@ -12,6 +12,10 @@ use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
  * Absent and invalid are deliberately different outcomes. An absent file means
  * the project has not opted in, so the tools decline to register and nothing
  * throws. An invalid file is a real mistake, so it fails loud.
+ *
+ * The file may return one Pipeline or a map of names to Pipelines. Both arrive
+ * here as `Pipelines`, so nothing downstream has to care which shape was
+ * written — a project with one pipeline is a map holding one.
  */
 final readonly class PipelineLoader
 {
@@ -30,21 +34,25 @@ final readonly class PipelineLoader
     }
 
     /** Null when the project has not opted in. */
-    public function load(): ?Pipeline
+    public function load(): ?Pipelines
     {
         if (! $this->exists()) {
             return null;
         }
 
-        $pipeline = require $this->path();
+        $declared = require $this->path();
 
-        if (! $pipeline instanceof Pipeline) {
-            throw InvalidPipelineConfigException::didNotReturnPipeline(
-                $this->path(),
-                get_debug_type($pipeline),
-            );
+        if ($declared instanceof Pipeline) {
+            return Pipelines::single($declared);
         }
 
-        return $pipeline;
+        if (is_array($declared)) {
+            return Pipelines::fromArray($declared, $this->path());
+        }
+
+        throw InvalidPipelineConfigException::didNotReturnPipeline(
+            $this->path(),
+            get_debug_type($declared),
+        );
     }
 }

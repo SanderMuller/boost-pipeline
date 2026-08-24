@@ -30,6 +30,12 @@ final class PipelineServer extends Server
     or "halted". The server executes every shell step itself and owns the verdict
     — do not run a step's command yourself.
 
+    A project may declare several pipelines. Where it does, every tool takes a
+    required `pipeline` name, and each pipeline keeps its own cursor and its own
+    receipt — so you can leave one part-walked, work in another, and come back.
+    Pass the same name for a whole walk. There is no default: naming nothing is an
+    error rather than a guess, because guessing would advance the wrong cursor.
+
     A step reporting "failed" returns the same step again: fix the cause and call
     next_step. A "skill" step is handed to you to invoke, then acknowledged with
     report_step; it is recorded as acknowledged, never as verified.

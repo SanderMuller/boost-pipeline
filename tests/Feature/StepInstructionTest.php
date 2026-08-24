@@ -36,7 +36,7 @@ function serveSkillSteps(Skill ...$skills): void
         }
     });
 
-    app()->instance(RunManager::class, new RunManager($pipeline, resolve(StepRunner::class)));
+    app()->instance(RunManager::class, runManagerFor($pipeline, resolve(StepRunner::class)));
 }
 
 afterEach(function (): void {

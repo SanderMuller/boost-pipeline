@@ -31,11 +31,15 @@ final class RunPipeline extends Prompt
         return Response::text(<<<'TXT'
         Walk the verification pipeline to its end.
 
-        1. Call `open_run` to start and get the first step. Where the pipeline
-           tags its steps, pass `only` to run one scope: `open_run(only: "backend")`
-           walks the steps carrying that tag plus every untagged one. Use it when
-           your change cannot affect the rest. A scoped run verifies less, says so
-           in `scope`, and its receipt records it.
+        1. Call `open_run` to start and get the first step. Where the project
+           declares more than one pipeline, `pipeline` is required and every later
+           call needs the same name: `open_run(pipeline: "release")`. Each pipeline
+           has its own cursor and its own receipt, so naming the wrong one runs the
+           wrong steps. Where the pipeline tags its steps, pass `only` to run one
+           scope: `open_run(only: "backend")` walks the steps carrying that tag plus
+           every untagged one. Use it when your change cannot affect the rest. A
+           scoped run verifies less, says so in `scope`, and its receipt records it.
+           A name picks which pipeline; a scope narrows the one you picked.
         2. Call `next_step` repeatedly until `state` is `complete` or `halted`.
         3. When a step's `kind` is `skill`, invoke the skill it names, then call
            `report_step` with what you did. Until you do, the run stays `awaiting`

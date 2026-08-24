@@ -1,5 +1,60 @@
 # Upgrading
 
+## From 0.9 to 0.10
+
+A project that declares one pipeline needs no config change. Two behaviour changes reach it anyway,
+and one API change reaches anything that resolves the loader.
+
+- **`.config/pipeline.php` may now return `array<string, Pipeline>`.** Returning a single
+  `Pipeline` still works and that pipeline is named `default`.
+
+  ```php
+  // before, and still valid
+  return Pipeline::configure()->withSteps(...);
+
+  // after
+  return [
+      'pr' => Pipeline::configure()->withSteps(...),
+      'release' => Pipeline::configure()->withSteps(...),
+  ];
+  ```
+
+- **`PipelineLoader::load()` returns `?Pipelines`, not `?Pipeline`.** Adapt a caller with
+  `->sole()`, which returns the only pipeline and throws when the project declares several.
+
+  ```php
+  // before
+  $pipeline = $loader->load();
+
+  // after
+  $pipeline = $loader->load()?->sole();
+  ```
+
+- **`Pipeline::class`, `StepRunner::class` and `ReceiptStore::class` still resolve** for a project
+  declaring one pipeline. They throw when it declares several, because "the pipeline" has no answer
+  there. Resolve `Pipelines`, `StepRunnerFactory` or `ReceiptStoreFactory` and ask for one by name.
+
+- **Receipts moved to `storage/logs/pipeline/receipts/<name>.json`.** The old
+  `storage/logs/pipeline/receipt.json` is not read. The first `pipeline:verify` after upgrading
+  reports no run recorded until the pipeline runs once — unknown is not clean. The old file is
+  unread and safe to delete.
+
+- **A custom `ReceiptStore` binding is honoured only while the project declares one pipeline.**
+  Nothing is ambiguous there, so an override that worked before names existed keeps working. Once
+  the config declares several, one store cannot serve them all without collapsing every receipt
+  into one — which is the problem named pipelines exist to solve — so the binding is not consulted.
+  Bind `ReceiptStoreFactory` instead. A custom `StepRunner` is unaffected either way: it is a
+  documented seam and reaches every pipeline.
+
+- **Adopting a map turns a bare `pipeline:verify` into an error.** With several pipelines
+  configured, "is this tree verified" has no single answer, so the command names them and asks for
+  `--pipeline=`. **Update anything that gates on the bare call before converting the config** — a CI
+  job, a PR gate, or a skill that runs `php artisan pipeline:verify`.
+
+- **A duplicate step id now fails at server start rather than at `open_run`.** Config validation
+  builds every pipeline's walk, so a project with a duplicate id sees the error sooner, and sees it
+  for every pipeline rather than only the one a session happens to open.
+
 ## From 0.8 to 0.9
 
 Additive for anyone who only configures steps. Two behaviour changes reach a consumer that reads a
