@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
-use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 
 beforeEach(function (): void {
@@ -44,15 +43,16 @@ it('loads a config that returns a Pipeline, naming it default', function (): voi
 
     $pipelines = new PipelineLoader($this->base)->load();
 
-    expect($pipelines)->toBeInstanceOf(Pipelines::class)
-        ->and($pipelines->names())
-        ->toBe(['default'])
-        ->and($pipelines->isSingle())
-        ->toBeTrue()
+    // Nullsafe throughout, and no `toBeInstanceOf` to narrow it first: the Pest
+    // static-analysis plugin disagrees with itself across versions about whether
+    // that narrowing happens, so one version calls `?->` redundant and another
+    // calls `->` a call on null. A null loader result still fails the first
+    // assertion, so nothing is lost.
+    expect($pipelines?->names())->toBe(['default'])
+        ->and($pipelines?->isSingle())->toBeTrue()
         // The name is not just a label: `sole()` and the map agree on which
         // pipeline it points at.
-        ->and($pipelines->sole())
-        ->toBe($pipelines->get('default'));
+        ->and($pipelines?->sole())->toBe($pipelines?->get('default'));
 });
 
 it('loads a config that returns a map of named pipelines', function (): void {
