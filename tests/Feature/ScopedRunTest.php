@@ -70,7 +70,9 @@ it('says nothing about scope when the whole pipeline runs', function (): void {
     PipelineServer::tool(OpenRun::class)
         ->assertOk()
         ->assertSee('"total_steps":4')
-        ->assertDontSee('scope');
+        // The JSON key, not the bare word: a step id or description containing
+        // "scope" would otherwise fail this for the wrong reason.
+        ->assertDontSee('"scope"');
 });
 
 it('treats an empty string as no selection at all', function (): void {
@@ -109,4 +111,19 @@ it('starts a new run when a scoped run is reopened unscoped', function (): void 
 
 it('keeps returning the same run for the same selection', function (): void {
     expect($this->manager->open('backend')->id)->toBe($this->manager->open('backend')->id);
+});
+
+it('surfaces the bad-scope notice through the tool and refuses to call the run verified', function (): void {
+    // The safety property the whole feature turns on. A scope nothing carries
+    // leaves the untagged steps to pass, and without the notice the run would
+    // report itself verified while the scope asked about was never checked.
+    PipelineServer::tool(OpenRun::class, ['only' => 'bakend'])
+        ->assertOk()
+        ->assertSee('notices')
+        ->assertSee('[bakend]');
+
+    $run = $this->manager->current();
+    $run?->resolveCurrent();
+
+    expect($run?->allVerified())->toBeFalse();
 });

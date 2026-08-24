@@ -141,3 +141,27 @@ it('persists an acknowledged run as complete but not verified', function (): voi
         ->and($receipt?->allVerified)->toBeFalse()
         ->and($receipt?->verdicts)->toBe(['fmt' => 'passed', 'review' => 'acknowledged']);
 });
+
+it('writes the scope into the receipt a scoped run actually leaves behind', function (): void {
+    // The join again: a scoped pass that persisted as unscoped would let
+    // `pipeline:verify` report the whole tree verified on the strength of a
+    // partial run, which is the false green this feature had to avoid.
+    $run = Run::start(
+        Pipeline::configure()->withSteps(function (Steps $steps): void {
+            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->tagged('backend'));
+            $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'js')->tagged('frontend'));
+        })->walk('backend'),
+        new CommandRunner,
+        'r-scoped',
+        receipts: $this->store,
+        scope: 'backend',
+    );
+
+    drain($run);
+
+    $receipt = $this->store->read();
+
+    expect($receipt?->scope)->toBe('backend')
+        ->and($receipt?->allVerified)->toBeTrue()
+        ->and($receipt?->verdicts)->toBe(['fmt' => 'passed']);
+});
