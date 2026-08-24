@@ -579,11 +579,12 @@ $steps->in(Tests::class)->append(
 );
 ```
 
-Nothing prunes that directory. One file per step per run accumulates, each holding the step's whole
-output rather than the summary, and Laravel's own log rotation does not reach it. Retention is the
-project's business. It is safe to delete: no run reads another run's logs unless a step you wrote
-globs for them. Left alone it also makes the hazard above worse, since the more history sits there,
-the likelier a `*` match picks up a run you did not mean.
+Nothing prunes that directory. It gains a file for every step the server runs: each shell step, and
+each skill step whose proof runs. Every one holds that step's whole output rather than the summary.
+Laravel rotates the logs its own channels write and does not reach these, so retention is the
+project's business. Deleting them is safe, because no run reads another run's logs unless a step you
+wrote globs for them. Left alone the directory also makes the hazard above worse, since the more
+history sits there, the likelier a `*` match picks up a run you did not mean.
 
 ### What not to do
 
