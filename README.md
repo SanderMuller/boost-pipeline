@@ -304,6 +304,41 @@ The rule is coverage, not equality: a full run answers a question about any one 
 answers only its own. There is one receipt, so scopes do not accumulate: a second scoped run
 replaces the first, and a change spanning both wants an unscoped run.
 
+### Asking what the server verified
+
+A pipeline that sequences agent work holds acknowledged steps, so `all_verified` stays false and
+both calls above exit 1 whatever the shell steps found. That answer is correct and never changes,
+which makes it useless for the question a downstream check actually has: were the mechanical steps
+already run against this exact tree, so it can skip them?
+
+```bash
+php artisan pipeline:verify --server-verified
+```
+
+```
+Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
+acknowledged and are not counted, so this is not a claim that the tree is verified.
+```
+
+That second sentence is the whole safety margin. A caller reading only the exit code would take it
+for the whole run, so the answer says what it set aside.
+
+**Narrower is not looser.** `all_verified` was carrying three questions at once, and this flag drops
+exactly one of them. Three guards stand before the verdicts:
+
+- **The walk covered the config that declared it.** `all_verified` goes false both for an
+  acknowledgement and for a declared step dropped before the walk began, and the verdict map cannot
+  show the second, because a dropped step leaves no verdict. The receipt records `coverage` for
+  this. Absent means unknown, never clean, so a receipt written before this release fails closed.
+- **The cursor finished.** A receipt is written after every resolution, deliberately, so a walk
+  abandoned at step one leaves a readable receipt holding one pass. Anything but `complete` fails.
+- **Something was verified.** "Every server verdict passed" is vacuously true over an empty set, so
+  a walk of nothing but acknowledgements would pass here having verified nothing.
+
+The flag narrows which verdicts count, never which tree the run covered. A stale receipt still fails
+on staleness, and a scoped receipt still cannot answer for the whole tree. Combine it with `--only`
+to ask both at once.
+
 ### Why that order
 
 Not "cheapest first", which applies *within* a phase. Across phases the order follows the fix

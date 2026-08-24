@@ -51,7 +51,8 @@ function treeReporting(?string $digest): void
     });
 }
 
-function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null): Receipt
+/** @param array<string, string>|null $verdicts */
+function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null, ?array $verdicts = null, ?string $coverage = 'complete'): Receipt
 {
     return new Receipt(
         runId: 'r-test',
@@ -59,9 +60,10 @@ function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $st
         allVerified: $allVerified,
         tree: $tree,
         stale: $stale,
-        verdicts: ['pint' => 'passed', 'phpstan' => 'passed'],
+        verdicts: $verdicts ?? ['pint' => 'passed', 'phpstan' => 'passed'],
         recordedAt: '2026-01-01T00:00:00+00:00',
         scope: $scope,
+        coverage: $coverage,
     );
 }
 
@@ -272,4 +274,183 @@ it('checks the scope before the verdict, so the message names the real problem',
 
     expect(Artisan::call('pipeline:verify'))->toBe(1)
         ->and(Artisan::output())->toContain('not this whole tree');
+});
+
+/**
+ * `--server-run-only` asks a narrower question than the bare call: did every step
+ * the server actually ran pass? It is the honest question for a run that
+ * sequences agent work, where an acknowledged step keeps `all_verified` false
+ * forever and the aggregate answer never changes.
+ */
+it('passes a run whose server-run steps all passed, even with an acknowledged step', function (): void {
+    receiptStoreHolding(receipt(allVerified: false, verdicts: [
+        'pint' => 'passed',
+        'phpstan' => 'passed',
+        'evaluate' => 'acknowledged',
+    ]));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(0)
+        ->and($output)->toContain('passed all 2 step(s)')
+        // The caller must not read the exit code as covering the whole run.
+        ->and($output)->toContain('not a claim that the tree is verified');
+});
+
+it('refuses a run the server never ran a single step of', function (): void {
+    // The guard the predicate cannot go without. "Every server-run step passed"
+    // is vacuously true over an empty set, so a walk of nothing but
+    // acknowledgements would exit 0 having verified nothing at all.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: [
+        'evaluate' => 'acknowledged',
+        'code-review' => 'acknowledged',
+    ]));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('produced a verdict for none of them')
+        ->and($output)->toContain('nothing here it verified');
+});
+
+it('names a non-passing server verdict when it reaches that branch', function (): void {
+    // A live run cannot produce this: a verdict that is not a pass holds the
+    // cursor, so the state would be blocked or halted and the guard above catches
+    // it first. Built by hand, because the branch still has to be right for a
+    // receipt that came from somewhere else.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: [
+        'pint' => 'passed',
+        'phpstan' => 'failed',
+        'oxlint' => 'error',
+        'evaluate' => 'acknowledged',
+    ]));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[phpstan] failed')
+        ->and($output)->toContain('[oxlint] error');
+});
+
+it('refuses a blocked run on the state guard, before the verdicts matter', function (): void {
+    // The reachable shape of the same thing: a failing step leaves the run
+    // blocked, and an unfinished walk is refused for that reason first.
+    receiptStoreHolding(receipt(allVerified: false, state: 'blocked', verdicts: [
+        'pint' => 'passed',
+        'phpstan' => 'failed',
+    ]));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('[blocked]');
+});
+
+it('still refuses a stale receipt before asking the narrower question', function (): void {
+    // The narrower question is about verdicts. A stale receipt's verdicts
+    // describe code that is no longer there, so it fails first either way.
+    receiptStoreHolding(receipt(stale: 'Step [pint] measured a different working tree.'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1);
+});
+
+it('still refuses a scoped receipt asked the whole-tree question', function (): void {
+    // The flag narrows which verdicts count, never which tree the run covered.
+    // A scoped receipt still cannot answer for the whole tree.
+    receiptStoreHolding(receipt(scope: 'backend'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('not this whole tree');
+});
+
+it('combines with --only, answering a scope on server-run steps alone', function (): void {
+    receiptStoreHolding(receipt(allVerified: false, scope: 'backend', verdicts: [
+        'phpstan' => 'passed',
+        'evaluate' => 'acknowledged',
+    ]));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend', '--server-verified' => true]);
+
+    expect($exit)->toBe(0)
+        ->and(Artisan::output())->toContain('scope [backend]');
+});
+
+it('leaves the bare call exactly as it was', function (): void {
+    // The aggregate gate must not loosen by one row. Same receipt, no flag.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: [
+        'pint' => 'passed',
+        'evaluate' => 'acknowledged',
+    ]));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(1);
+});
+
+/**
+ * The two guards that stand before the verdicts. `all_verified` was carrying
+ * three questions at once, and this flag drops only the one about
+ * acknowledgements. Both of these passed before the guards existed.
+ */
+it('refuses a walk abandoned before it finished', function (): void {
+    // `recordReceipt()` writes after every resolution, so a run abandoned at step
+    // one leaves a readable receipt holding one pass. Without the state guard
+    // that reads as "every server verdict passed" and exits 0, reporting a
+    // formatter while the analyser and the suite never ran.
+    receiptStoreHolding(receipt(allVerified: false, state: 'running', verdicts: ['fmt' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[running]')
+        ->and($output)->toContain('did not finish');
+});
+
+it('refuses a run that dropped a gate its config declared', function (): void {
+    // The finding that forced the receipt to record coverage. `all_verified` is
+    // false here for a reason that has nothing to do with acknowledgements, and
+    // the verdict map alone cannot show it: the dropped step left no verdict.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: [
+        'fmt' => 'passed',
+        'analyse' => 'passed',
+    ], coverage: 'incomplete'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('did not cover the config');
+});
+
+it('refuses a receipt written before coverage was recorded', function (): void {
+    // Absent means unknown, never clean. An older receipt did record notices in
+    // memory and dropped them on the way to disk.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: ['fmt' => 'passed'], coverage: null));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('Unknown coverage is not clean coverage');
+});
+
+it('refuses a halted run, because terminal is not finished', function (): void {
+    receiptStoreHolding(receipt(allVerified: false, state: 'halted', verdicts: [
+        'fmt' => 'passed',
+        'oxlint' => 'error',
+    ]));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('[halted]');
 });

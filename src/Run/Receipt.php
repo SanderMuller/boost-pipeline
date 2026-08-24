@@ -40,6 +40,25 @@ final readonly class Receipt
          * tree is verified".
          */
         public ?string $scope = null,
+        /**
+         * Whether the walk covered the config that declared it.
+         *
+         * `all_verified` is false for two unrelated reasons: a step the server
+         * could only acknowledge, and a declared step dropped before the walk
+         * began. Only the first is benign, and nothing on disk told them apart,
+         * so a reader willing to accept acknowledgements had no way to still
+         * refuse a run that never held a gate its config declared.
+         *
+         * `complete` means the walk raised no coverage notice. It is not a claim
+         * that every declared step ran: a scoped run leaves its out-of-scope
+         * steps out deliberately and silently. `scope` answers what the run was
+         * about; this answers whether anything went missing by accident.
+         *
+         * Absent means unknown, never clean. A receipt written before this
+         * existed did record notices in memory and dropped them on the way to
+         * disk.
+         */
+        public ?string $coverage = null,
     ) {}
 
     /**
@@ -56,6 +75,7 @@ final readonly class Receipt
             'verdicts' => $this->verdicts,
             'recorded_at' => $this->recordedAt,
             'scope' => $this->scope,
+            'coverage' => $this->coverage,
         ], static fn (mixed $value): bool => $value !== null);
     }
 
@@ -78,9 +98,19 @@ final readonly class Receipt
 
         if (is_array($raw)) {
             foreach ($raw as $stepId => $verdict) {
-                if (is_string($stepId) && is_string($verdict)) {
-                    $verdicts[$stepId] = $verdict;
+                // Dropping a malformed entry instead would hand back a receipt
+                // holding only what happened to survive, and a predicate reading
+                // it would pass a run whose broken half went missing on the way
+                // in. An unreadable receipt is the honest answer, and the command
+                // already reports that as no run recorded.
+                if (! is_string($verdict)) {
+                    return null;
                 }
+
+                // A step id of "123" arrives as an int, because PHP coerces
+                // numeric-string array keys. Nothing forbids that id, so cast it
+                // back rather than rejecting a legal config.
+                $verdicts[(string) $stepId] = $verdict;
             }
         }
 
@@ -88,6 +118,7 @@ final readonly class Receipt
         $stale = $data['stale'] ?? null;
         $recordedAt = $data['recorded_at'] ?? '';
         $scope = $data['scope'] ?? null;
+        $coverage = $data['coverage'] ?? null;
 
         return new self(
             runId: $runId,
@@ -98,6 +129,7 @@ final readonly class Receipt
             verdicts: $verdicts,
             recordedAt: is_string($recordedAt) ? $recordedAt : '',
             scope: is_string($scope) ? $scope : null,
+            coverage: is_string($coverage) ? $coverage : null,
         );
     }
 }

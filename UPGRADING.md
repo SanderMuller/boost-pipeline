@@ -1,5 +1,21 @@
 # Upgrading
 
+## From 0.7 to 0.8
+
+Additive. No migration needed.
+
+- `Receipt` gains a `coverage` constructor parameter, appended last with a default, so a positional
+  caller keeps working. It records whether the walk covered the config that declared it, which
+  `all_verified` alone could not express: that field goes false both for a step the server could
+  only acknowledge and for a declared step dropped before the walk began.
+
+- A receipt written by an earlier release has no `coverage` key and reads as unknown. The bare
+  `pipeline:verify` answers from it exactly as before; only the new `--server-verified` flag refuses
+  it, because unknown coverage is not clean coverage.
+
+- `Receipt::fromArray()` now rejects a malformed verdict map instead of dropping the bad entries.
+  An unreadable receipt reads as no receipt, which the command already reports as no run recorded.
+
 ## From 0.6 to 0.7
 
 ### Changed

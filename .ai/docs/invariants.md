@@ -84,7 +84,10 @@ once rather than scattered across a limitations section.
 | 8 | Pre-existing failure blocks, so someone loosens the step to get green | **Live risk** | Use the tool's own baseline, or fix it. Do not weaken the step |
 | 9 | A consumer reads `complete` as green | **Yes**, if `all_verified` is ignored | `all_verified` on every terminal response |
 | 10 | A scoped run reads as a full one | No | The receipt records the scope, and a bare `pipeline:verify` fails on a scoped receipt rather than answering a question the run cannot |
-| 11 | A selection matches nothing, so only untagged steps run and pass | No | A blocking notice, so `all_verified` stays false. This is why the selection notice is not carved out of the wholesale `notices !== []` guard |
+| 11 | `--server-verified` passes a run the server verified nothing of | No | The empty set is rejected before the predicate, because "every server verdict passed" is vacuously true over it |
+| 12 | `--server-verified` passes a walk that never finished | No | The state guard. A receipt is written after every resolution, so an abandoned walk leaves a readable receipt holding one pass |
+| 13 | `--server-verified` passes a run that dropped a declared gate | No | The `coverage` key. `all_verified` conflates a dropped gate with an acknowledgement, and this flag accepts the second — so the receipt has to record the first separately, and an absent key fails closed |
+| 14 | A selection matches nothing, so only untagged steps run and pass | No | A blocking notice, so `all_verified` stays false. This is why the selection notice is not carved out of the wholesale `notices !== []` guard |
 
 **Row 5 is the one no mechanism addresses.** A run that never happened produces no false green —
 it produces *no signal*, which a reader may mistake for one. Anything consuming this (a PR

@@ -165,3 +165,47 @@ it('writes the scope into the receipt a scoped run actually leaves behind', func
         ->and($receipt?->allVerified)->toBeTrue()
         ->and($receipt?->verdicts)->toBe(['fmt' => 'passed']);
 });
+
+it('writes complete coverage for a run whose walk dropped nothing', function (): void {
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
+    });
+
+    drain($run);
+
+    expect($this->store->read()?->coverage)->toBe('complete');
+});
+
+it('writes incomplete coverage when the walk dropped a declared step', function (): void {
+    // The case `all_verified` alone could never distinguish from an
+    // acknowledgement once the run was over.
+    $run = walkAll($this->store, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
+        $steps->in(UnregisteredPhase::class)->append(Shell::run('true', id: 'never-ran'));
+    });
+
+    drain($run);
+
+    expect($this->store->read()?->coverage)->toBe('incomplete')
+        ->and($this->store->read()?->allVerified)->toBeFalse();
+});
+
+it('writes complete coverage for a scoped run, which is not a claim about what it left out', function (): void {
+    // A declared scope is not a dropped gate. `scope` says what the run was
+    // about; `coverage` says whether anything went missing by accident.
+    $run = Run::start(
+        Pipeline::configure()->withSteps(function (Steps $steps): void {
+            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->tagged('backend'));
+            $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'js')->tagged('frontend'));
+        })->walk('backend'),
+        new CommandRunner,
+        'r-scoped-coverage',
+        receipts: $this->store,
+        scope: 'backend',
+    );
+
+    drain($run);
+
+    expect($this->store->read()?->coverage)->toBe('complete')
+        ->and($this->store->read()?->scope)->toBe('backend');
+});

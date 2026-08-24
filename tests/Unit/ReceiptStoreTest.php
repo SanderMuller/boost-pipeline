@@ -91,3 +91,52 @@ it('reads a receipt written before scopes existed as unscoped', function (): voi
     expect($receipt?->scope)->toBeNull()
         ->and($receipt?->allVerified)->toBeTrue();
 });
+
+it('round-trips coverage, the signal that tells a dropped gate from an acknowledgement', function (): void {
+    $this->store->write(new Receipt(
+        runId: 'r-cov', state: 'complete', allVerified: false, tree: 'tree-a',
+        stale: null, verdicts: ['fmt' => 'passed'], recordedAt: '2026-01-01T00:00:00+00:00',
+        coverage: 'incomplete',
+    ));
+
+    expect($this->store->read()?->coverage)->toBe('incomplete');
+});
+
+it('reads a receipt written before coverage existed as unknown, not clean', function (): void {
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-old', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'verdicts' => ['pint' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00',
+    ]));
+
+    expect($this->store->read()?->coverage)->toBeNull();
+});
+
+it('treats a malformed verdict map as no receipt rather than dropping entries', function (): void {
+    // Dropping the bad entry would hand back a receipt holding only what survived,
+    // and a predicate reading it would pass a run whose broken half went missing
+    // on the way in.
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-bad', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'verdicts' => ['pint' => 'passed', 'phpstan' => ['not', 'a', 'verdict']],
+        'recorded_at' => '2026-01-01T00:00:00+00:00',
+    ]));
+
+    expect($this->store->read())->toBeNull();
+});
+
+it('keeps a numeric step id through the round trip', function (): void {
+    // A step id of "123" cannot even be written as a PHP array literal: the key
+    // becomes an int. Nothing forbids that id, so the parser has to cast it back
+    // rather than reject or drop it. Written as JSON for that reason.
+    mkdir(dirname($this->path), recursive: true);
+    file_put_contents($this->path, json_encode([
+        'run' => 'r-numeric', 'state' => 'complete', 'all_verified' => true,
+        'tree' => 'tree-a', 'verdicts' => ['123' => 'passed'],
+        'recorded_at' => '2026-01-01T00:00:00+00:00', 'coverage' => 'complete',
+    ]));
+
+    expect($this->store->read()?->verdicts)->toBe(['123' => 'passed']);
+});

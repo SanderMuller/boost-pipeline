@@ -9,6 +9,7 @@ use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Run\Receipt;
+use SanderMuller\BoostPipeline\Run\RunState;
 
 /**
  * Answers "has this tree been verified?" with an exit code.
@@ -24,7 +25,9 @@ use SanderMuller\BoostPipeline\Run\Receipt;
  */
 final class VerifyCommand extends Command
 {
-    protected $signature = 'pipeline:verify {--only= : Ask whether this scope was verified, rather than the whole tree.}';
+    protected $signature = 'pipeline:verify
+        {--only= : Ask whether this scope was verified, rather than the whole tree.}
+        {--server-verified : Ask whether every verdict the server produced is a pass, setting aside steps it could only acknowledge.}';
 
     protected $description = 'Exit 0 only when the pipeline has verified the code currently on disk.';
 
@@ -63,6 +66,10 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        if ($this->option('server-verified') === true) {
+            return $this->answerServerVerified($receipt);
+        }
+
         if (! $receipt->allVerified) {
             $this->components->error($this->explainUnverified($receipt));
 
@@ -74,6 +81,107 @@ final class VerifyCommand extends Command
             $receipt->runId,
             $receipt->scope === null ? 'this tree' : "scope [{$receipt->scope}]",
             count($receipt->verdicts),
+        ));
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Whether every verdict the server produced is a pass.
+     *
+     * A narrower question than the bare call, and the only answerable one for a
+     * run that sequences agent work: an acknowledgement keeps `all_verified`
+     * false forever, so the aggregate answer never changes however green the
+     * shell steps are.
+     *
+     * Narrower is not looser. Three guards stand before the verdicts, because
+     * `all_verified` was carrying all three at once and this predicate drops only
+     * the one about acknowledgements.
+     */
+    private function answerServerVerified(Receipt $receipt): int
+    {
+        // 1. The walk covered the config that declared it. `all_verified` is
+        //    false both for an acknowledgement and for a declared step dropped
+        //    before the walk began, and nothing else on disk tells those apart.
+        //    Accepting the first while still refusing the second is the whole
+        //    reason the receipt records coverage.
+        if ($receipt->coverage !== 'complete') {
+            $this->components->error($receipt->coverage === null
+                ? sprintf(
+                    'Run [%s] was recorded before this command could tell a dropped gate from an acknowledged step, so it cannot answer this. Unknown coverage is not clean coverage. Open a new run.',
+                    $receipt->runId,
+                )
+                : sprintf(
+                    'Run [%s] did not cover the config that declared it: a declared step never reached the cursor, or a selected tag no step carries. What the other steps found says nothing worth having while a gate is missing. Open `status` on a live run to see which.',
+                    $receipt->runId,
+                ));
+
+            return self::FAILURE;
+        }
+
+        // 2. The cursor finished. `recordReceipt()` writes after every
+        //    resolution, deliberately, so a walk abandoned at step one leaves a
+        //    readable receipt holding one pass and nothing else.
+        if ($receipt->state !== RunState::Complete->value) {
+            $this->components->error(sprintf(
+                'Run [%s] is in state [%s], so the walk did not finish and the steps behind the cursor never ran. What resolved before it says nothing about them.',
+                $receipt->runId,
+                $receipt->state,
+            ));
+
+            return self::FAILURE;
+        }
+
+        $serverProduced = array_filter(
+            $receipt->verdicts,
+            static fn (string $verdict): bool => $verdict !== Verdict::Acknowledged->value,
+        );
+
+        // 3. Something was actually verified. "Every server verdict passed" is
+        //    vacuously true over an empty set, so a walk of nothing but
+        //    acknowledgements would pass here having verified nothing at all.
+        if ($serverProduced === []) {
+            $this->components->error(sprintf(
+                'Run [%s] holds %d step(s) and the server produced a verdict for none of them: every one was acknowledged. There is nothing here it verified, so this cannot pass.',
+                $receipt->runId,
+                count($receipt->verdicts),
+            ));
+
+            return self::FAILURE;
+        }
+
+        $unverified = array_filter(
+            $serverProduced,
+            static fn (string $verdict): bool => Verdict::tryFrom($verdict)?->isVerified() !== true,
+        );
+
+        if ($unverified !== []) {
+            $named = [];
+
+            foreach ($unverified as $stepId => $verdict) {
+                $named[] = "[{$stepId}] {$verdict}";
+            }
+
+            $this->components->error(sprintf(
+                'Run [%s] did not pass every verdict the server produced. State [%s], with %s.',
+                $receipt->runId,
+                $receipt->state,
+                implode(', ', $named),
+            ));
+
+            return self::FAILURE;
+        }
+
+        $acknowledged = count($receipt->verdicts) - count($serverProduced);
+
+        $this->components->info(sprintf(
+            'Run [%s] passed all %d step(s) the server verified against this tree%s.%s',
+            $receipt->runId,
+            count($serverProduced),
+            $receipt->scope === null ? '' : " in scope [{$receipt->scope}]",
+            $acknowledged === 0
+                ? ''
+                : sprintf(' %d step(s) were only acknowledged and are not counted, so this is not a claim that the tree is verified.', $acknowledged),
         ));
 
         return self::SUCCESS;

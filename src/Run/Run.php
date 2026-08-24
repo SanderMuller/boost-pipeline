@@ -440,6 +440,10 @@ final class Run
             ),
             recordedAt: gmdate('c'),
             scope: $this->scope,
+            // Records that coverage broke, never which notice broke it. A reader
+            // needing that reads `status` on the live run; copying the text here
+            // would make the receipt a log and invite a consumer to parse it.
+            coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
         ));
     }
 
