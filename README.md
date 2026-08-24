@@ -579,6 +579,12 @@ $steps->in(Tests::class)->append(
 );
 ```
 
+Nothing prunes that directory. One file per step per run accumulates, each holding the step's whole
+output rather than the summary, and Laravel's own log rotation does not reach it. Retention is the
+project's business. It is safe to delete: no run reads another run's logs unless a step you wrote
+globs for them. Left alone it also makes the hazard above worse, since the more history sits there,
+the likelier a `*` match picks up a run you did not mean.
+
 ### What not to do
 
 **Do not build a step that parses another step's stdout to set variables.** GitHub Actions shipped
