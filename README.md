@@ -378,7 +378,7 @@ Inside a parallel group the mechanism can say a write happened and not which ste
 step in a group measures the same tree from before the group ran, so a stale report names the first
 of them that passed, whoever wrote. The message says so rather than letting the named step read as
 proof. It still fails closed: the run is not verified, and `pipeline:verify` exits 1. This is the
-undeclared case — a step that declares `->mutating()` cannot join a group at all.
+undeclared case only. A step that declares `->mutating()` cannot join a group at all.
 
 Order matters, and the run enforces it rather than asking nicely. Each pass records the tree it
 measured, so a rewrite landing after a check has already passed leaves that check describing code
@@ -491,9 +491,12 @@ inspected nothing reports it: *"Inspected 0 files … passed without proving any
 |---|---|
 | `open_run` | Starts a run, returns the first step. Idempotent. |
 | `next_step` | Resolves the current position, returns the next, or the same one again. |
-| — | `position` counts steps, so a group reports the range it covers (`2-3/7`). It is not a count of remaining calls. |
 | `report_step` | Acknowledges a skill step. Only valid while `awaiting`. |
 | `status` | Position, per-step verdicts, verified versus acknowledged. |
+
+`position` counts steps rather than handovers, so a parallel group reports the range it covers
+(`2-3/7`). A seven-step walk holding two groups takes five calls, so do not read the number as
+calls remaining.
 
 ---
 
