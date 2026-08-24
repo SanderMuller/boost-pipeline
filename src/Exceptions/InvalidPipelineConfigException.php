@@ -30,7 +30,7 @@ final class InvalidPipelineConfigException extends RuntimeException
 
     public static function batchStepMustBeShell(string $id): self
     {
-        return new self("Step [{$id}] cannot run in a parallel group: only shell steps can. A skill step handed over alongside others is the wall of context one-step-at-a-time exists to break up, so declare it on its own.");
+        return new self("Step [{$id}] cannot run in a parallel group: only shell steps can. A skill step handed over alongside others is the wall of context one-step-at-a-time exists to break up, so declare it on its own. A skill that fans out internally is still one step, so parallel work inside a skill costs nothing here.");
     }
 
     public static function batchStepCannotMutate(string $id): self

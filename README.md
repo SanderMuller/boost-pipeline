@@ -250,6 +250,10 @@ Two things a group refuses, when the config loads rather than when the run reach
 - **A skill step.** Several lenses handed over at once is the wall of context the cursor exists to
   break up, and the server cannot fan them out to separate agent contexts to avoid that. Declare
   skill steps on their own.
+
+  This is not a limit on parallel review work. A skill can fan out internally, and a review skill
+  dispatching its own subagents is still one step and one handover, so nine lenses inside one skill
+  cost no more than one. What a group refuses is nine separate steps.
 - **A step that declares `->mutating()`.** Its siblings would run against a tree it is rewriting,
   with no ordering between them to attribute the change to, so every sibling verdict would describe
   code that no longer exists. Run a fix-mode step on its own, before the checks that must see its
