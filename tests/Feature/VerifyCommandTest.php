@@ -648,3 +648,13 @@ it('refuses a receipt holding no verdicts, however it came to hold none', functi
     'the key is explicitly null' => [['verdicts' => null]],
     'the map is empty' => [['verdicts' => []]],
 ]);
+
+it('names the empty receipt rather than the tree it does not describe', function (): void {
+    // The tree check would otherwise answer first and report that this receipt
+    // "verified a different working tree". It verified no tree.
+    receiptStoreHolding(receipt(verdicts: []));
+    treeReporting('tree-b');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(1)
+        ->and(Artisan::output())->toContain('recorded no step verdicts at all');
+});
