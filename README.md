@@ -793,6 +793,7 @@ without asking anybody. A consumer that must not trust the working copy runs the
 | Stop an agent abandoning the flow | Nothing prevents it running `gh pr create` directly. Needs client hooks |
 | Time out a skill step | A run stays `awaiting` indefinitely if `report_step` never arrives |
 | Coordinate concurrent callers | No lock; two agents on one server share a cursor |
+| Accumulate scopes across runs | One receipt, so a second scoped run replaces the first. Verifying two scopes separately never adds up to a verified tree; run unscoped for that |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 
