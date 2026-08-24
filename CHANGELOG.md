@@ -10,6 +10,95 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.7.0 - 2026-08-24
+
+A run can walk one scope of the pipeline. A change touching one side of a project no longer pays
+for, or halts on, the steps that can say nothing about it.
+
+### Breaking
+
+Pre-1.0, so this lands in a minor. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md) for the
+migration.
+
+- **`Step::tags(): array` joins the contract.** Add it to any implementation, returning
+  `list<string>`. `Shell` and `Skill` already have it, so a pipeline that only configures steps
+  needs no changes. Empty is the right default: an untagged step runs whatever scope is selected.
+
+### Added
+
+- **Tag a step, then select a scope when the run opens.**
+  
+  ```php
+  $steps->in(Formatting::class)
+      ->append(Shell::run('vendor/bin/pint --test')->tagged('backend'))
+      ->append(Shell::run('yarn lint-all')->tagged('frontend'));
+  
+  ```
+  ```
+  open_run(only: "backend")
+  
+  ```
+  A step with no tag runs in every scope, so tagging one step never drops the ones carrying none. A
+  step may hold several tags and matches on any of them. Matching is case-sensitive, and an empty
+  tag is a config error.
+  
+  **Tag both sides, not just the odd one out.** To select a scope, some step has to carry it.
+  Tagging only the frontend steps gives you `only: "frontend"` but no name for the rest.
+  
+- **`pipeline:verify --only=`** asks whether a scope was verified rather than the whole tree.
+  
+
+### What keeps it honest
+
+A scoped run deliberately omits declared gates, which is what every other rule here exists to
+prevent. Three things stop it becoming a false green.
+
+- **The receipt records the scope**, so a scoped pass is not a full one.
+- **A bare `pipeline:verify` fails on a scoped receipt** rather than answering a question the run
+  cannot. `--only=` compares on coverage rather than equality: a full run answers a question about
+  any single scope, a scoped run answers only its own.
+- **A selection no step carries raises a blocking notice.** That is almost always a mistyped tag,
+  and the untagged steps would otherwise pass and let the run report itself verified.
+
+Scopes do not accumulate. There is one receipt, so a second scoped run replaces the first, and
+verifying two scopes separately never adds up to a verified tree. That is now a row in the
+limitations table rather than a footnote.
+
+### Fixed
+
+- **Filtering reaches inside a parallel group.** Survivors stay a group, an emptied group
+  contributes no position, and a lone survivor drops its `batchId` so nothing downstream describes a
+  step that ran by itself as sharing a measurement with siblings that were never in the walk.
+  
+- **`status` reports `excluded_by_scope`** and the payload reports `scope`, so a reader can see the
+  walk is smaller than the config without diffing the two. The output schema declares both, and the
+  `run_pipeline` prompt says when to reach for `only`.
+  
+
+### Documentation
+
+- The README leads with what the package does for you rather than four paragraphs on how prose
+  instructions fail, and the fluent config builder follows immediately.
+- Two traps are recorded, both rooted in one behaviour: `git status --porcelain` reports a
+  wholly-untracked directory as the directory, so a tool asking git what changed never sees inside
+  it. That is why `pint --dirty` can report clean over a config file, and why a debris guard reading
+  `git status` passes once the work is committed, having checked nothing.
+- Who owns `storage/logs/pipeline/` is stated: nothing prunes it, retention is the project's
+  business, and deleting is safe.
+- A group refuses skill steps because the server cannot fan them out to separate agent contexts, but
+  a skill can fan out internally. One `Skill::run()` invoking a skill that dispatches its own
+  subagents is a single handover, so many lenses inside one skill cost no more than one.
+
+### Verified
+
+226 tests, 564 assertions. PHPStan level max, Rector and Pint clean, `composer validate --strict`
+valid. CI green across all four matrix legs on the last commit carrying code: PHP 8.4 and 8.5,
+Laravel 12 and 13, `prefer-lowest` and `prefer-stable`. The two commits after it change `README.md`
+alone, which the workflow path filters correctly skip.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.6.1...v0.7.0
+
 ## v0.6.1 - 2026-08-24
 
 Two things consumers found by running v0.6.0's parallel groups. One is a number that stopped meaning
@@ -76,6 +165,7 @@ migration.
       $steps->append(Shell::run('composer phpstan'));
       $steps->append(Shell::run('node_modules/.bin/tsc --noEmit'));
   });
+  
   
   
   ```
@@ -166,6 +256,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -419,6 +510,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -476,6 +568,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
