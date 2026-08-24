@@ -10,6 +10,77 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.9.0 - 2026-08-24
+
+A verdict says a step succeeded. It does not say anything was checked about the code on disk, and
+`--server-verified` was reading the first as the second. Four false greens close here, all of them
+found by an independent review and each confirmed against a real receipt before it was fixed.
+
+### Fixed
+
+- **A run whose passing steps only rewrote the tree exited 0.** A step declared `->mutating()`
+  produced the tree rather than reading it, so its pass describes the code it was handed, never the
+  code left behind. A walk holding nothing but a passing formatter reported one verified step, and
+  the only thing that ran had checked nothing.
+  
+  `Run` already knew the difference — it excludes such a step from staleness for the same reason —
+  and the receipt threw it away. The receipt now records `asserted`, and the guard that exists to
+  reject a vacuous set rejects this one too.
+  
+- **`--server-verified` answered with no tree to answer about.** Fingerprints were compared only
+  when both were present, so a receipt with none and a working tree that cannot be fingerprinted
+  exited 0 claiming it had verified "against this tree". Both are required now. The bare call still
+  tolerates a missing fingerprint and answers from the receipt alone, which is a recorded decision
+  and stays: that call is a gate, and this flag exists so a caller can skip work on the strength of
+  the tree still matching.
+  
+- **A receipt holding no verdicts read as verified.** `all_verified` is a claim the receipt makes
+  about itself, and over an empty map it is vacuous — the bare call answered "verified this tree:
+  0 step(s)". Both calls refuse it now. The guard sits on the predicate rather than on the JSON, so
+  an absent key, an explicit null and an empty map close together, and it answers before the tree
+  check so the message names the empty receipt rather than a tree it never described.
+  
+- **Malformed receipt fields coerced to the permissive value.** A bad `stale` read as not stale, a
+  bad `scope` let a partial run answer a whole-tree question, and a bad `tree` removed the
+  fingerprint comparison. `Receipt::fromArray()` rejects `tree`, `stale`, `scope`, `coverage`,
+  `recorded_at`, `all_verified` and `asserted` when present and wrong-typed, and rejects a
+  `verdicts` key that is not a map. Absent and explicitly null still mean "not set".
+  
+
+### Added
+
+- **`--server-verified` names the step ids it counted.**
+  
+  ```
+  Run [r-4f2a] passed all 5 step(s) the server verified against this tree: [phpstan], [pint-test],
+  [typecheck], [test-js], [lint-all]. 1 step(s) rewrote the tree rather than checking it and are not
+  counted. 2 step(s) were only acknowledged and are not counted, so this is not a claim that the
+  tree is verified.
+  
+  ```
+  Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
+  skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
+  no static analysis still exits 0 without any — but it makes it visible rather than silent, and it
+  is now a row in the limitations table.
+  
+
+### Changed
+
+Additive for anyone who only configures steps. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md).
+
+- `Receipt` gains an `asserted` constructor parameter, appended last with a default, so a
+  positional caller keeps working. It lists the step ids whose pass asserted the state of the tree:
+  every passing step not declared `->mutating()`. A receipt written before it existed reads as
+  unknown, and `--server-verified` refuses it, because unknown is not clean.
+
+### Verified
+
+275 tests, 647 assertions. PHPStan level max, Rector and Pint clean. CI green across all four matrix
+legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.8.0...v0.9.0
+
 ## v0.8.0 - 2026-08-24
 
 `pipeline:verify` had one question, and the pipeline shape this package exists for could never
@@ -23,10 +94,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   ```bash
   php artisan pipeline:verify --server-verified
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   ```
   A run that sequences agent work holds acknowledged steps, so `all_verified` stays false however
@@ -114,9 +187,11 @@ migration.
       ->append(Shell::run('yarn lint-all')->tagged('frontend'));
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   ```
@@ -250,6 +325,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -338,6 +414,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -595,6 +672,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -652,6 +730,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
