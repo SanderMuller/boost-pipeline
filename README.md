@@ -300,7 +300,14 @@ vendor/bin/pint --test . .config
 ```
 
 An `exclude` entry in `pint.json` is unrelated: there is no `include`, so the path has to be an
-argument. Whatever else gates the rest of your code deserves the same check: assume nothing covers
+argument.
+
+There is a second way this file escapes the same tool. `vendor/bin/pint --dirty` asks git which
+files changed, and git reports a wholly-untracked directory as the directory: `?? .config/`, never
+`?? .config/pipeline.php`. So while `.config/` holds no tracked file, `--dirty` enumerates nothing
+inside it and reports clean over a file it never opened. Add one tracked file to the directory and
+git starts listing the rest individually. Any tool that parses `git status --porcelain` to decide
+what to look at inherits this, not just Pint. Whatever else gates the rest of your code deserves the same check: assume nothing covers
 this file until you have seen it fail.
 
 ## Verdicts
@@ -500,8 +507,16 @@ commonest source of a false green.
 - `yarn lint` scoped to `git diff` exits 0 without linting anything when nothing changed.
 - `richter:detect-changes` is advisory by default and exits 0 whatever it finds, unless you pass
   `--fail-on`.
+- A guard that reads `git status` to find stray files passes as soon as the work is committed,
+  because its input went empty rather than because the tree is clean of what it looks for.
 
 So check each step you add: if this tool finds a problem, does the process exit non-zero?
+
+That third one is about *when* the step runs rather than how it is configured, and `inspecting()`
+cannot rescue it, because the scope is the working tree itself. A step whose input is the state of
+the tree answers a different question before and after a commit. Run it where its input still
+exists, which for a pre-commit guard means before the commit rather than inside a walk you opened
+afterwards.
 
 Where a step really is scoped, declare the scope:
 
