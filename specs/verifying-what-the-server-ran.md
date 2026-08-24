@@ -13,7 +13,7 @@ skippable — has no answerable question at all.
 Add the narrower one:
 
 ```bash
-php artisan pipeline:verify --server-run-only
+php artisan pipeline:verify --server-verified
 ```
 
 Exit 0 when the run covered the config it declared, the walk finished, and every verdict the
@@ -82,7 +82,7 @@ does not describe this code. Only the last becomes flag-aware:
 
 - **Without the flag** — unchanged. `allVerified` decides; `explainUnverified()` keeps its
   wording.
-- **With `--server-run-only`** — require, in this order: the receipt records `coverage:
+- **With `--server-verified`** — require, in this order: the receipt records `coverage:
   complete`; `state === complete`; every verdict that is not `acknowledged` is `passed`; and
   at least one such verdict exists.
 
@@ -172,22 +172,22 @@ Extends the table in `specs/step-tags-and-scoped-runs.md` section 4. No existing
 
 | Receipt | Command | Exit |
 |---|---|---|
-| complete, all steps passed | `--server-run-only` | 0, same answer the bare call gives |
+| complete, all steps passed | `--server-verified` | 0, same answer the bare call gives |
 | complete, shell steps passed, agent steps acknowledged | `pipeline:verify` | non-zero, unchanged |
-| complete, shell steps passed, agent steps acknowledged | `--server-run-only` | **0** — this is the change |
-| complete, one shell step failed, agent steps acknowledged | `--server-run-only` | non-zero, naming the failed step |
-| `running`, resolved steps all passed | `--server-run-only` | non-zero: the walk did not finish |
-| `coverage: incomplete`, complete, every remaining step passed | `--server-run-only` | non-zero: the walk did not cover the config |
-| no `coverage` key (receipt predates this release) | `--server-run-only` | non-zero: unknown coverage is not clean coverage |
-| verdict map malformed on disk | `--server-run-only` | non-zero: unreadable receipt, same as no run |
-| `halted` after an error, earlier steps passed | `--server-run-only` | non-zero: terminal is not finished |
-| complete, every step acknowledged | `--server-run-only` | non-zero: no server verdict to report |
-| `blocked` | `--server-run-only` | non-zero — and unreachable with all verdicts passing: `blocked` means the current position holds a `failed`, which is in the receipt |
-| tree moved since the run | `--server-run-only` | non-zero, before any verdict is read |
-| receipt records `stale` | `--server-run-only` | non-zero, before any verdict is read |
-| `backend` scoped, complete, shell passed, agent acknowledged | `--server-run-only --only=backend` | 0 |
-| `backend` scoped, complete | `--server-run-only` | non-zero: the scope guard runs first, unchanged |
-| no receipt | `--server-run-only` | non-zero, unchanged |
+| complete, shell steps passed, agent steps acknowledged | `--server-verified` | **0** — this is the change |
+| complete, one shell step failed, agent steps acknowledged | `--server-verified` | non-zero, naming the failed step |
+| `running`, resolved steps all passed | `--server-verified` | non-zero: the walk did not finish |
+| `coverage: incomplete`, complete, every remaining step passed | `--server-verified` | non-zero: the walk did not cover the config |
+| no `coverage` key (receipt predates this release) | `--server-verified` | non-zero: unknown coverage is not clean coverage |
+| verdict map malformed on disk | `--server-verified` | non-zero: unreadable receipt, same as no run |
+| `halted` after an error, earlier steps passed | `--server-verified` | non-zero: terminal is not finished |
+| complete, every step acknowledged | `--server-verified` | non-zero: no server verdict to report |
+| `blocked` | `--server-verified` | non-zero — and unreachable with all verdicts passing: `blocked` means the current position holds a `failed`, which is in the receipt |
+| tree moved since the run | `--server-verified` | non-zero, before any verdict is read |
+| receipt records `stale` | `--server-verified` | non-zero, before any verdict is read |
+| `backend` scoped, complete, shell passed, agent acknowledged | `--server-verified --only=backend` | 0 |
+| `backend` scoped, complete | `--server-verified` | non-zero: the scope guard runs first, unchanged |
+| no receipt | `--server-verified` | non-zero, unchanged |
 
 ## Edge Cases
 
@@ -219,7 +219,7 @@ Extends the table in `specs/step-tags-and-scoped-runs.md` section 4. No existing
 
 **ID:** server-run-only · **Depends:** coverage
 
-- [x] Add `--server-run-only` to the signature, described as the narrower question it is.
+- [x] Add `--server-verified` to the signature, described as the narrower question it is.
 - [x] Check the guards in order: `coverage === complete`, then `state === complete`, then every server verdict passed, then at least one exists.
 - [x] Word the success line so it states what it excluded and that it is not a claim about the tree.
 - [x] Word the failures so incomplete coverage, unknown coverage, unfinished walk, a failed step and nothing-to-report are five distinguishable answers.
@@ -334,6 +334,10 @@ None. The naming question below is resolved.
 - **The "neither string nor int" key branch is unreachable.** A PHP array key is always
   `string|int`, so strict parsing reduces to rejecting a non-string *value* and casting the key.
   The static analyser caught the dead branch.
+- **The flag name changed after the body was written.** Sections 1 to 4 said
+  `--server-run-only` throughout while Resolved Question 0 recorded the decision against it. The
+  body now says `--server-verified`; the Open Questions comment and that rationale keep the old
+  name, because they are the question that was asked and the answer to it.
 - **A non-passing server verdict on a `complete` receipt cannot come from a live run.** A verdict
   that is not a pass holds the cursor, so the state guard catches it first. The branch is kept and
   tested for a receipt that came from elsewhere, and the test says so.

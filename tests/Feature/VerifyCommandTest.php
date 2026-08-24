@@ -454,3 +454,25 @@ it('refuses a halted run, because terminal is not finished', function (): void {
     expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
         ->and(Artisan::output())->toContain('[halted]');
 });
+
+it('refuses a run still awaiting a skill step', function (): void {
+    // The state guard covers every unfinished state, and `awaiting` is the one a
+    // sequencing pipeline actually sits in: the cursor has not passed the skill
+    // step, so nothing behind it has run.
+    receiptStoreHolding(receipt(allVerified: false, state: 'awaiting', verdicts: ['fmt' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('[awaiting]');
+});
+
+it('refuses a complete receipt holding no verdicts at all', function (): void {
+    // A live run cannot write this: an empty walk reaches complete in the
+    // constructor and records no receipt. Built by hand, because the predicate
+    // must not read an empty verdict map as "everything passed".
+    receiptStoreHolding(receipt(allVerified: false, verdicts: []));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('nothing here it verified');
+});
