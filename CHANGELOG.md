@@ -10,6 +10,85 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.8.0 - 2026-08-24
+
+`pipeline:verify` had one question, and the pipeline shape this package exists for could never
+hear yes to it. This release adds the narrower question, with the guards that answer needs.
+
+### Added
+
+- **`pipeline:verify --server-verified`** asks whether every verdict the server produced is a pass,
+  setting aside the steps it could only acknowledge.
+  
+  ```bash
+  php artisan pipeline:verify --server-verified
+  
+  ```
+  ```
+  Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
+  acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
+  ```
+  A run that sequences agent work holds acknowledged steps, so `all_verified` stays false however
+  green the shell steps are. That answer is correct and never changes, which makes it useless for
+  the question a downstream check actually has: were the mechanical steps already run against this
+  exact tree, so it can skip them?
+  
+  The second sentence of the output is the safety margin. A caller reading only the exit code would
+  take it for the whole run, so the answer states what it set aside.
+  
+
+### What keeps it honest
+
+`all_verified` carries three questions at once. This flag drops exactly one of them, so the other
+two become explicit guards. Both were live false greens in the first cut, each confirmed against a
+real receipt.
+
+- **The walk covered the config that declared it.** `all_verified` goes false both for an
+  acknowledgement and for a declared step dropped before the walk began, and the verdict map cannot
+  show the difference, because a dropped step leaves no verdict. A run whose walk had lost a
+  declared gate exited 0 without it.
+- **The cursor finished.** A receipt is written after every resolution, deliberately, so a walk
+  abandoned at step one leaves a readable receipt holding one pass. That run exited 0 too.
+- **Something was verified.** "Every server verdict passed" is vacuously true over an empty set, so
+  a walk of nothing but acknowledgements would pass having verified nothing at all.
+
+The flag narrows which verdicts count, never which tree the run covered. A stale receipt still fails
+on staleness, and a scoped receipt still cannot answer for the whole tree. Combine it with `--only`
+to ask both at once.
+
+### Changed
+
+Additive. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md).
+
+- **The receipt records `coverage`.** The first guard needs a fact the receipt did not hold: the
+  notices that name a dropped gate died with the session. `Receipt` gains a `coverage` constructor
+  parameter, appended last with a default, so a positional caller keeps working.
+  
+- **An older receipt has no `coverage` key and reads as unknown.** The bare call answers from it
+  exactly as before. Only `--server-verified` refuses it, because unknown coverage is not clean
+  coverage.
+  
+- **`Receipt::fromArray()` rejects a malformed verdict map** instead of dropping the bad entries.
+  Dropping them handed back a receipt holding only what survived, which this predicate would then
+  pass. An unreadable receipt now reads as no receipt, which the command already reports as no run
+  recorded. A numeric step id is legal and decodes as an int, so it is cast rather than rejected.
+  
+
+### Why this name
+
+`serverRun()` answers who produced a verdict, and it is true for `failed` as well. The README calls
+conflating those the easiest way to launder a claim. `isVerified()` is the predicate the flag
+actually applies, so the flag says that.
+
+### Verified
+
+247 tests, 603 assertions. PHPStan level max, Rector and Pint clean. CI green across all four matrix
+legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.7.0...v0.8.0
+
 ## v0.7.0 - 2026-08-24
 
 A run can walk one scope of the pipeline. A change touching one side of a project no longer pays
@@ -34,9 +113,11 @@ migration.
       ->append(Shell::run('vendor/bin/pint --test')->tagged('backend'))
       ->append(Shell::run('yarn lint-all')->tagged('frontend'));
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   ```
   A step with no tag runs in every scope, so tagging one step never drops the ones carrying none. A
@@ -168,6 +249,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -256,6 +338,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -511,6 +594,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -568,6 +652,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
