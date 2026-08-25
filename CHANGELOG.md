@@ -10,6 +10,57 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.1 - 2026-08-25
+
+Three pieces of adoption feedback on 0.10.0. No API changes.
+
+### Fixed
+
+- **A moved receipt no longer reads as a broken gate.** Receipts moved to
+  `storage/logs/pipeline/receipts/<name>.json` in 0.10.0 and the old `receipt.json` is deliberately
+  not read, so the first `pipeline:verify` after upgrading answered "No pipeline run has been
+  recorded. Nothing has been verified." True, and useless — the reader diagnoses a move the command
+  already knows about.
+  
+  ```
+  ERROR  No pipeline run has been recorded here. A receipt written before 0.10.0 is still at
+  [storage/logs/pipeline/receipt.json], and is deliberately not read: it predates the keys this
+  command needs, and unknown is not clean. Open a new run — then that file is safe to delete.
+  
+  ```
+  Unchanged when there is no legacy file: a project that never ran an older version still gets the
+  short message, because for it nothing has genuinely been verified.
+  
+
+### Documentation
+
+- **When `--server-verified` is worth having, and when it is not.** The flag pays off on a walk
+  whose mechanical steps sit ahead of the acknowledged one and can pass on their own — that walk
+  reaches `complete` routinely, so the flag routinely has something to report.
+  
+  It gives you nothing on a walk whose mechanical steps are the likely failure. A failing step
+  leaves the run `blocked` and an erroring one `halted`, never `complete`, so the second guard
+  refuses before any verdict is read. Put a slow suite ahead of a judgement step and the flag is
+  silent exactly when an answer was wanted: if the suite failed you never reached the agent step,
+  and if it passed you had already paid for it.
+  
+  That is a pipeline-shape question rather than a defect, and it is the practical reason to name
+  pipelines — a quick `spec` walk can be built for the flag without a `closeout` walk having to be.
+  Now a section beside the flag, and a row in the invariants record.
+  
+- **The pipeline name goes on every tool call, not just `open_run`.** The 0.10.0 notes showed it on
+  `open_run` and `pipeline:verify`, which reads as the rule rather than an example. Each pipeline
+  has its own cursor, so a `next_step` with no name has no run to advance and refuses — correct, and
+  a surprise to anyone who named it once. The README now shows all four calls carrying it.
+  
+
+### Verified
+
+344 tests, 818 assertions. PHPStan level max, Rector and Pint clean. CI green across all four matrix
+legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.0...v0.10.1
+
 ## v0.10.0 - 2026-08-24
 
 A project asks its code more than one question. Is this ready for a PR, is it ready to release,
@@ -37,6 +88,7 @@ had to answer all of them.
           }),
   ];
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -47,6 +99,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   ```
 - **Each pipeline keeps its own cursor**, so an agent can leave the release pipeline part-walked,
@@ -168,6 +221,7 @@ found by an independent review and each confirmed against a real receipt before 
   tree is verified.
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -207,10 +261,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -302,9 +358,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -442,6 +500,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -530,6 +589,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -791,6 +851,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -848,6 +909,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
