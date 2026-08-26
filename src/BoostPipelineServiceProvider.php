@@ -17,6 +17,7 @@ use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
+use SanderMuller\BoostPipeline\Mcp\McpSurface;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
@@ -201,6 +202,16 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         // whenever an artisan command IS a pipeline step — `php artisan test` is
         // one. Only the server process has a protocol stream to protect.
         if ($this->app->make(ServerProcess::class)->isStarting()) {
+            $missing = McpSurface::firstMissingProduction();
+
+            if ($missing !== null) {
+                // Cannot register even the invalid-config fallback: it needs the same
+                // MCP surface. Stderr, never stdout — stdout is the JSON-RPC channel.
+                $this->writeToStderr('[boost-pipeline] laravel/mcp is missing ['.$missing.']; the pipeline server was not registered. Check the installed laravel/mcp version.');
+
+                return;
+            }
+
             $reason = $this->configError();
 
             if ($reason !== null) {

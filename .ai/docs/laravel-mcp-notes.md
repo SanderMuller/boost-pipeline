@@ -13,8 +13,18 @@ minor may move any of these without ceremony:
 `Response::structured()` · `Tool::annotations()` · `Tool::shouldRegister()` ·
 `Tool::outputSchema()` · `Server\Testing\{PendingTestResponse,TestResponse}`
 
-The service provider verifies the load-bearing classes exist at boot with `class_exists`. If a
-bump breaks the design rather than a signature, that is a stop-and-report, not a
+`Tool::shouldRegister()` is not a checkable symbol: it does not exist on the base `Tool` class
+(`method_exists` is `false`). It is an optional hook a consumer tool may define, dispatched
+reflectively by `Server\Primitive`. The design leans on that dispatch convention, but there is
+nothing to `method_exists`-check for it, so it is absent from the guard below.
+
+`SanderMuller\BoostPipeline\Mcp\McpSurface::firstMissingProduction()` checks the rest of this
+list — `class_exists` per class, `method_exists` per `[class, method]` pair — at boot, before
+`Mcp::local()` runs. `Server\Testing\*` is dev-only and is not part of that check; it is never
+touched at boot. When a symbol is missing, the service provider writes one line to stderr
+(never stdout — that is the JSON-RPC channel) via `writeToStderr()` and declines registration
+entirely, including the `InvalidConfigServer` fallback, which needs the same MCP surface. If a
+bump breaks the design rather than a signature, that stderr line is a stop-and-report, not a
 work-around-it.
 
 The package is registered with `Mcp::local('pipeline', PipelineServer::class)` from this
