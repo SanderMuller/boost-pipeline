@@ -17,12 +17,12 @@ Repo-wide rules every executor must follow:
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Make a numeric step id survive the batch runner and the staleness check | P1 | S | — | TODO |
+| 001 | Make a numeric step id survive the batch runner and the staleness check | P1 | S | — | DONE (commit `467cbb3`) |
 | 002 | Stop a web request from reading `$_SERVER['argv']` unconditionally | P1 | S | — | DONE (commit `32e58ca`) |
-| 003 | Silence the log write so a failed write cannot discard a real verdict | P1 | S | — | TODO |
+| 003 | Silence the log write so a failed write cannot discard a real verdict | P1 | S | — | DONE (commit `a722a0e`) |
 | 004 | Add the `class_exists` boot guard the design record says already exists | P1 | S | — | TODO |
 | 005 | Write the receipt atomically so a concurrent reader cannot see a torn file | P2 | S | — | TODO |
-| 006 | Test Laravel 12 at its ceiling, not only its floor | P2 | S | — | TODO |
+| 006 | Test Laravel 12 at its ceiling, not only its floor | P2 | S | — | DONE (commit `5c9ce37`) |
 | 007 | Design a machine-readable receipt read path (spike) | P2 | M | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
@@ -30,7 +30,7 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 ## Dependency notes
 
 - No hard dependencies. Soft ordering: 001–004 are user-facing crash/outage fixes and go first; 005–006 are hardening; 007 is a design spike that can run any time.
-- Plans 003 and 005 both add a chmod-unwritable-directory test with a root-skip guard — whichever lands second should reuse the first one's guard helper.
+- Plan 003 has landed; its chmod-unwritable-directory test in `tests/Unit/LogWriterTest.php` carries the root-skip guard plan 005 should reuse verbatim.
 - Plan 007's production build (if approved from the spike's spec) should be preceded by the verify-policy extraction recorded under "Audited, not planned" below.
 
 ## Drift since planning
