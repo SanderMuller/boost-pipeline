@@ -50,3 +50,14 @@ it('keeps two ids that reduce to the same safe text in separate files', function
         ->and(file_get_contents((string) $slash))->toBe('from slash')
         ->and(file_get_contents((string) $space))->toBe('from space');
 });
+
+it('returns null instead of throwing when the log directory exists but is unwritable', function (): void {
+    mkdir($this->dir);
+    chmod($this->dir, 0500);
+
+    $path = new LogWriter($this->dir)->write('r-4f2a', 'pint', 'output');
+
+    expect($path)->toBeNull();
+
+    chmod($this->dir, 0700);
+})->skip(fn (): bool => ! function_exists('posix_geteuid') || posix_geteuid() === 0, 'Root ignores directory modes.');

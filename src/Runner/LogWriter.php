@@ -25,7 +25,7 @@ final readonly class LogWriter
             $this->filenameSafe($stepId),
         );
 
-        return file_put_contents($path, $contents) === false ? null : $path;
+        return @file_put_contents($path, $contents) === false ? null : $path;
     }
 
     /**
