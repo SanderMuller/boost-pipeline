@@ -50,13 +50,14 @@ The load-bearing 0.x surface, from `.ai/docs/laravel-mcp-notes.md`:
 
 `Server\Testing\*` is dev-only — do NOT guard it at boot. The runtime set to guard (each verified against the installed `vendor/laravel/mcp` at planning time):
 
-- classes: `Laravel\Mcp\Server`, `Laravel\Mcp\Server\Tool`, `Laravel\Mcp\Server\Prompt`, `Laravel\Mcp\Response`, `Laravel\Mcp\Server\Registrar`
+- classes: `Laravel\Mcp\Server`, `Laravel\Mcp\Server\Tool`, `Laravel\Mcp\Server\Prompt`, `Laravel\Mcp\Response`, `Laravel\Mcp\Server\Registrar`, `Laravel\Mcp\Facades\Mcp` (the facade the provider actually calls — see the second trap below)
 - methods (as `[class, method]` pairs on those classes): `Response::error`, `Response::structured`, `Tool::annotations` (inherited from `Server\Concerns\HasAnnotations` — `method_exists` is true), `Tool::outputSchema`, `Registrar::local`
 
 Two traps, both verified:
 
 - Do NOT guard `Tool::shouldRegister` — it does NOT exist on the base `Tool` class (`method_exists` is `false`). It is an optional consumer hook dispatched reflectively at `vendor/laravel/mcp/src/Server/Primitive.php:93-94`; this repo supplies its own in `src/Mcp/Tools/Concerns/PipelineTool.php`. The notes doc lists it in the load-bearing set anyway — that listing is about the DESIGN depending on the hook's dispatch convention, not about a checkable method. Guarding it makes the test in step 3 fail against a correctly installed vendor.
-- Do NOT guard the `Laravel\Mcp\Facades\Mcp` facade's `local` — it is a `@method` docblock over `Facade::__callStatic`, so `method_exists` is `false` there too. Guard `Server\Registrar::local`, the real method.
+- Guard the `Laravel\Mcp\Facades\Mcp` CLASS — the provider calls `Mcp::local(...)` through the facade (`src/BoostPipelineServiceProvider.php:226,232`), so a moved facade class fatals even when `Registrar` survives. But do NOT put its `local` in the METHOD list: `local` is a `@method` docblock over `Facade::__callStatic`, so `method_exists` is `false` there. Guard `Server\Registrar::local` as the real method, and the facade as a class only.
+  (This distinction was wrong in the first version of this plan — it excluded the facade entirely, and an external review caught the resulting gap after the work merged. Fixed in commit `fix/guard-mcp-facade`.)
 
 Key design constraint: if the MCP surface itself is broken, the `InvalidConfigServer` fallback is NOT safe to register — it goes through the same `Mcp::local()` and `Response` API. So the guard must write one line to stderr (never stdout — that is the JSON-RPC channel) and decline registration entirely. This is a deliberate exception to the "register something rather than nothing" comment, because that comment assumes `Mcp::local` works.
 
