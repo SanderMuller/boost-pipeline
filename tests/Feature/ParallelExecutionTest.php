@@ -198,3 +198,20 @@ it('resolves a group one step at a time for a runner that cannot batch', functio
         ->and($run->state())->toBe(RunState::Complete)
         ->and($run->allVerified())->toBeTrue();
 });
+
+it('settles a numeric step id without throwing', function (): void {
+    // A numeric string id ('123') coerces to an int array key when used as a
+    // foreach key, so a batch that keys its pending list by step id crashes
+    // under strict_types. Nothing forbids a numeric id (see Receipt.php), so
+    // the batch runner must survive one.
+    $run = runParallel(function (StepCollection $steps): void {
+        $steps->append(Shell::run('true', id: '123'));
+        $steps->append(Shell::run('true', id: 'b'));
+    }, $this->runner);
+
+    $results = $run->resolveCurrent();
+
+    expect($results)->toHaveCount(2)
+        ->and($run->resultFor('123')?->verdict)->toBe(Verdict::Passed)
+        ->and($run->state())->toBe(RunState::Complete);
+});

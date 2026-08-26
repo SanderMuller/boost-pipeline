@@ -341,6 +341,30 @@ it('keeps the run id when the tree moves before anything has been recorded', fun
     expect($manager->open()->id)->toBe($first->id);
 });
 
+it('refuses to verify when a numeric step id measured a tree that moved', function (): void {
+    // A numeric string id ('123') coerces to an int array key wherever it is
+    // used as a foreach key, so $this->measuredAt keys it as an int too. The
+    // staleness check must survive that instead of throwing a TypeError.
+    $tree = new SettableFingerprint;
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)
+            ->append(Shell::run('true', id: '123'))
+            ->append(Shell::run('true', id: 'second'));
+    });
+
+    $run = Run::start($pipeline->walk(), new AlwaysPasses, 'r-test', $tree);
+
+    $run->resolveCurrent();
+
+    $tree->value = 'edited';
+
+    $run->resolveCurrent();
+
+    expect($run->staleReason())->toContain('Step [123] measured a different working tree')
+        ->and($run->allVerified())->toBeFalse();
+});
+
 it('never reports verified and stale from different readings of the tree', function (): void {
     // Asking separately let the tree move between the two questions, so one
     // payload could carry all_verified: true beside a stale message. A fingerprint

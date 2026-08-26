@@ -92,15 +92,15 @@ final readonly class ProcessStepRunner implements BatchStepRunner
                 continue;
             }
 
-            $pending[$step->id()] = [$process, $step, $scope, $timeout];
+            $pending[] = [$process, $step, $scope, $timeout];
         }
 
         // Everything is already running, so waiting in order costs nothing beyond
         // the slowest step.
-        foreach ($pending as $id => [$process, $step, $scope, $timeout]) {
-            $timedOut = $this->settle($process, $id, $timeout);
+        foreach ($pending as [$process, $step, $scope, $timeout]) {
+            $timedOut = $this->settle($process, $step->id(), $timeout);
 
-            $results[$id] = $timedOut instanceof Result
+            $results[$step->id()] = $timedOut instanceof Result
                 ? $timedOut
                 : $this->verdictFor($step, $process, $scope, $runId);
         }

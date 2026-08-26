@@ -48,7 +48,10 @@ final class Run
      * nothing is left asserting anything about the old tree. A run-level flag
      * stayed stuck there and called the run stale for having been fixed.
      *
-     * @var array<string, string|null>
+     * A numeric-string id (e.g. '123') coerces to an int key on write, so the
+     * key type is array-key, not string.
+     *
+     * @var array<array-key, string|null>
      */
     private array $measuredAt = [];
 
@@ -407,6 +410,10 @@ final class Run
         }
 
         foreach ($this->measuredAt as $stepId => $measuredAt) {
+            // A step id of "123" arrives as an int, because PHP coerces
+            // numeric-string array keys. Cast it back rather than crash on a legal id.
+            $stepId = (string) $stepId;
+
             if ($measuredAt !== null && $measuredAt !== $now) {
                 return sprintf(
                     'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Either something edited files, or a step that rewrites code is missing ->mutating() — and a rewrite belongs before the checks that must see it.%s Open a new run.',
