@@ -9,14 +9,19 @@ a test that goes through the server.
 `laravel/mcp` is `v0.9.4`. It is a direct requirement here, constrained to `^0.9.4`, but a 0.x
 minor may move any of these without ceremony:
 
-`Registrar::local()` · `Server` · `Server\Tool` · `Server\Prompt` · `Response::error()` ·
-`Response::structured()` · `Tool::annotations()` · `Tool::shouldRegister()` ·
-`Tool::outputSchema()` · `Server\Testing\{PendingTestResponse,TestResponse}`
+`Facades\Mcp` · `Registrar::local()` · `Server` · `Server\Tool` · `Server\Prompt` ·
+`Response::error()` · `Response::structured()` · `Tool::annotations()` ·
+`Tool::shouldRegister()` · `Tool::outputSchema()` ·
+`Server\Testing\{PendingTestResponse,TestResponse}`
 
 `Tool::shouldRegister()` is not a checkable symbol: it does not exist on the base `Tool` class
 (`method_exists` is `false`). It is an optional hook a consumer tool may define, dispatched
 reflectively by `Server\Primitive`. The design leans on that dispatch convention, but there is
 nothing to `method_exists`-check for it, so it is absent from the guard below.
+
+`Facades\Mcp::local()` is likewise not checkable: `local` is a `@method` docblock over
+`Facade::__callStatic`, so `method_exists` reports it missing even when the facade is intact.
+Only the `Facades\Mcp` class itself is guarded; its `local` method is not.
 
 `SanderMuller\BoostPipeline\Mcp\McpSurface::firstMissingProduction()` checks the rest of this
 list — `class_exists` per class, `method_exists` per `[class, method]` pair — at boot, before

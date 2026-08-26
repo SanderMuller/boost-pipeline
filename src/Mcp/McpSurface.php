@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Mcp;
 
+use Laravel\Mcp\Facades\Mcp;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Prompt;
@@ -27,6 +28,10 @@ use Laravel\Mcp\Server\Tool;
  * the base `Tool` class. It is an optional hook a consumer tool may define,
  * dispatched reflectively by `Server\Primitive`. The design leans on that
  * dispatch convention, but there is no symbol here to check for it.
+ *
+ * `Facades\Mcp` is checked as a class but not for its `local` method: `local`
+ * is a `@method` docblock over `Facade::__callStatic`, so `method_exists`
+ * would always report it missing.
  */
 final class McpSurface
 {
@@ -39,6 +44,7 @@ final class McpSurface
         Prompt::class,
         Response::class,
         Registrar::class,
+        Mcp::class,
     ];
 
     /**
