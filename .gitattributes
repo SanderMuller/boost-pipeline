@@ -37,3 +37,6 @@ workbench/ export-ignore
 
 # Design specs are working documents for this repo, not part of the package.
 specs/ export-ignore
+
+# Implementation plans are working documents for this repo, not part of the package.
+plans/ export-ignore
