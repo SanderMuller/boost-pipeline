@@ -13,10 +13,13 @@ final readonly class ConsoleServerProcess implements ServerProcess
 
     public function isStarting(): bool
     {
-        $argv = $_SERVER['argv'];
+        if (! $this->app->runningInConsole()) {
+            return false;
+        }
 
-        return $this->app->runningInConsole()
-            && is_array($argv)
+        $argv = $_SERVER['argv'] ?? null;
+
+        return is_array($argv)
             && ($argv[1] ?? null) === 'mcp:start';
     }
 }
