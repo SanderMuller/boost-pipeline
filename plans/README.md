@@ -20,7 +20,7 @@ Repo-wide rules every executor must follow:
 | 001 | Make a numeric step id survive the batch runner and the staleness check | P1 | S | — | DONE (commit `467cbb3`) |
 | 002 | Stop a web request from reading `$_SERVER['argv']` unconditionally | P1 | S | — | DONE (commit `32e58ca`) |
 | 003 | Silence the log write so a failed write cannot discard a real verdict | P1 | S | — | DONE (commit `a722a0e`) |
-| 004 | Add the `class_exists` boot guard the design record says already exists | P1 | S | — | TODO |
+| 004 | Add the `class_exists` boot guard the design record says already exists | P1 | S | — | DONE (commit `2343c8c`) |
 | 005 | Write the receipt atomically so a concurrent reader cannot see a torn file | P2 | S | — | TODO |
 | 006 | Test Laravel 12 at its ceiling, not only its floor | P2 | S | — | DONE (commit `5c9ce37`) |
 | 007 | Design a machine-readable receipt read path (spike) | P2 | M | — | TODO |
