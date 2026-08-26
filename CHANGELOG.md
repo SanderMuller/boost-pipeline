@@ -10,6 +10,19 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.2 - 2026-08-26
+
+Consumer applications running under a standard production PHP configuration
+(`register_argc_argv = Off`, the `php.ini-production` default) hit a 500 on every
+web request once `.config/pipeline.php` existed. Upgrade if you have installed
+this package into an application that serves web traffic.
+
+### Fixed
+
+- `ConsoleServerProcess::isStarting()` read `$_SERVER['argv']` before checking whether the process was running in console. With `register_argc_argv` off the key is absent, so the warning became an `ErrorException` thrown from service-provider boot. The console check now runs first and the read is null-coalesced, keeping the package inert outside the MCP server process.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.1...v0.10.2
+
 ## v0.10.1 - 2026-08-25
 
 Three pieces of adoption feedback on 0.10.0. No API changes.
@@ -26,6 +39,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   ERROR  No pipeline run has been recorded here. A receipt written before 0.10.0 is still at
   [storage/logs/pipeline/receipt.json], and is deliberately not read: it predates the keys this
   command needs, and unknown is not clean. Open a new run — then that file is safe to delete.
+  
   
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
@@ -89,6 +103,7 @@ had to answer all of them.
   ];
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -99,6 +114,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   ```
@@ -222,6 +238,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -262,10 +279,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -359,9 +378,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -501,6 +522,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -589,6 +611,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -852,6 +875,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -909,6 +933,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
