@@ -10,6 +10,18 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.4 - 2026-08-27
+
+### Fixed
+
+- A `laravel/mcp` 0.x update that moved or removed a symbol this package binds at boot produced a raw PHP fatal on stdout — the JSON-RPC channel a client cannot parse a fatal from, which reads as a broken server rather than a version problem. The service provider now checks that surface before registering, and on a miss writes one line to stderr naming the missing symbol and declines registration. The `InvalidConfigServer` fallback is skipped deliberately in that case: it needs the same surface.
+
+### Internal
+
+- `.ai/docs/laravel-mcp-notes.md` claimed the provider already performed this check. It did not. The design record now describes what ships, including which symbols are not checkable — `Tool::shouldRegister()` and the `Mcp` facade's `local()` are resolved dynamically, so neither answers `method_exists`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.3...v0.10.4
+
 ## v0.10.3 - 2026-08-26
 
 Two crash fixes for pipelines that use a numeric step id, and one that could
@@ -55,6 +67,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   ERROR  No pipeline run has been recorded here. A receipt written before 0.10.0 is still at
   [storage/logs/pipeline/receipt.json], and is deliberately not read: it predates the keys this
   command needs, and unknown is not clean. Open a new run — then that file is safe to delete.
+  
   
   
   
@@ -122,6 +135,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -132,6 +146,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -259,6 +274,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -301,10 +317,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -402,9 +420,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -548,6 +568,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -636,6 +657,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -903,6 +925,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -960,6 +983,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
