@@ -6,7 +6,7 @@
 > row for this plan in `plans/README.md` — unless a reviewer dispatched you and
 > told you they maintain the index.
 >
-> **Drift check (run first)**: `git diff --stat a05b7fa..HEAD -- src/Console/VerifyCommand.php src/Run/Receipt.php specs/ tests/Feature/VerifyCommandTest.php`
+> **Drift check (run first)**: `git diff --stat 334831e..HEAD -- src/Console/VerifyCommand.php src/Run/Receipt.php specs/ tests/Feature/VerifyCommandTest.php`
 > On drift, compare the "Current state" excerpts against the live code; on a
 > mismatch, STOP.
 
@@ -15,9 +15,18 @@
 - **Priority**: P2
 - **Effort**: M (coarse — this is a spike; the build that may follow is scoped by the spec this produces)
 - **Risk**: MED — a published read shape becomes a compatibility surface
-- **Depends on**: none (but see Maintenance notes on audit finding "verify-policy extraction")
+- **Depends on**: plans/008-extract-verify-policy.md — execute 008 first
 - **Category**: direction
-- **Planned at**: commit `a05b7fa`, 2026-08-25
+- **Planned at**: commit `334831e`, 2026-08-27 (refreshed; originally planned at `a05b7fa`)
+
+> **Refreshed 2026-08-27.** Re-verified against `origin/main` (`334831e`). The
+> finding stands and the RQ analysis is unchanged, but `VerifyCommand` gained a
+> guard since this plan was written and the line references below were
+> updated. The substantive change: `nothingRecorded()` (`VerifyCommand.php:127`)
+> now splits the no-receipt case in two — a plain "nothing recorded", and a
+> "receipt predates 0.10.0 and is deliberately unread" message keyed on
+> `JsonReceiptStore::LEGACY_PATH`. The JSON shape must represent BOTH; see the
+> category list in step 1. `Receipt::toArray()` and `specs/` did not change.
 
 ## Why this matters
 
@@ -64,9 +73,9 @@ Its acceptance rules (fingerprint match, empty-verdicts refusal, state/coverage 
 - RQ3, naming passing steps in prose output: "No. It gives a caller prose to parse instead of an exit code, and makes every message a compatibility surface. The exit code is the interface."
 - RQ4, consumers reading `receipt.json` directly: "No. Freshness is a comparison against a fingerprint whose algorithm lives here. A consumer doing it themselves either re-implements that or omits it, and the second is both more likely and more dangerous."
 
-Read RQ3 and RQ4 together and the unclaimed territory is precise: the package computes the answers (freshness included) and emits them in a STRUCTURED shape — for example `pipeline:verify --json`. Against RQ4 this is clean: the consumer never touches `receipt.json` or the fingerprint algorithm — the package hands over the computed answer, which is the shape RQ4 implicitly demands. Against RQ3, be honest about both of its clauses: the "prose to parse" objection is not triggered (a declared JSON contract is not prose), but the "every message a compatibility surface" objection IS — `--json` deliberately creates a versioned compatibility surface, and answers that objection with an explicit guaranteed-key list under semver rather than by denial. The spec must say this outright. Supporting context: the shipped success path already names the passing steps in its output (`src/Console/VerifyCommand.php:316-319`, with a comment explaining why), so the repo has already accepted that exit 0 alone is too thin an answer; RQ3's refusal was about the NON-ZERO prose paths.
+Read RQ3 and RQ4 together and the unclaimed territory is precise: the package computes the answers (freshness included) and emits them in a STRUCTURED shape — for example `pipeline:verify --json`. Against RQ4 this is clean: the consumer never touches `receipt.json` or the fingerprint algorithm — the package hands over the computed answer, which is the shape RQ4 implicitly demands. Against RQ3, be honest about both of its clauses: the "prose to parse" objection is not triggered (a declared JSON contract is not prose), but the "every message a compatibility surface" objection IS — `--json` deliberately creates a versioned compatibility surface, and answers that objection with an explicit guaranteed-key list under semver rather than by denial. The spec must say this outright. Supporting context: the shipped success path already names the passing steps in its output (in `reportAssertions()`, from :306, with a comment explaining why), so the repo has already accepted that exit 0 alone is too thin an answer; RQ3's refusal was about the NON-ZERO prose paths.
 
-Vocabulary trap the executor must not fall into: "stale" is overloaded here. `Receipt::$stale` is a SELF-REPORTED field the run recorded about itself, with its own guard (`VerifyCommand.php:84-88`); the tree-mismatch guard (`VerifyCommand.php:75-82`) is a SEPARATE comparison of `receipt->tree` against the current fingerprint. This plan's `fresh` key means ONLY the second: `fresh` = receipt tree equals the tree on disk now. The self-reported `stale` field is carried through as its own key, never folded into `fresh`.
+Vocabulary trap the executor must not fall into: "stale" is overloaded here. `Receipt::$stale` is a SELF-REPORTED field the run recorded about itself, with its own guard (`VerifyCommand.php:85-90`); the tree-mismatch guard (`VerifyCommand.php:76-83`) is a SEPARATE comparison of `receipt->tree` against the current fingerprint. This plan's `fresh` key means ONLY the second: `fresh` = receipt tree equals the tree on disk now. The self-reported `stale` field is carried through as its own key, never folded into `fresh`.
 
 **Also standing** (`.ai/docs/design-history.md`, "Rejected, with the reason to keep rejecting it"): pipeline-level baselining, oracle steps, step-to-step data passing. None of these may creep into the design.
 
@@ -110,7 +119,7 @@ Vocabulary trap the executor must not fall into: "stale" is overloaded here. `Re
 
 Write `specs/receipt-read-path.md` answering, at minimum:
 
-1. **Shape**: the JSON document `--json` emits. Starting point — everything the command already computes: `run`, `state`, `all_verified`, `coverage`, `scope`, `verdicts` (id → verdict string), `asserted`, `recorded_at`, the self-reported `stale` field, plus the COMPUTED answers a consumer must not derive: `fresh` (bool — receipt tree vs current tree ONLY, see the vocabulary trap in Current state), a failure `category` when not verified, and the `--server-verified` answer. Enumerate the categories in the spec and use those exact literals in the tests — provisional list: `no_run`, `empty_verdicts`, `tree_mismatch`, `self_stale`, `scope_mismatch`, `not_verified`, `no_pipeline_selected`, `unknown_pipeline`. The last two matter because `storeFor()` (`VerifyCommand.php:131-166`) refuses BEFORE any receipt exists — the shape must define what those receipt-less documents contain. Decide and record: is the raw `tree` fingerprint included or withheld?
+1. **Shape**: the JSON document `--json` emits. Starting point — everything the command already computes: `run`, `state`, `all_verified`, `coverage`, `scope`, `verdicts` (id → verdict string), `asserted`, `recorded_at`, the self-reported `stale` field, plus the COMPUTED answers a consumer must not derive: `fresh` (bool — receipt tree vs current tree ONLY, see the vocabulary trap in Current state), a failure `category` when not verified, and the `--server-verified` answer. Enumerate the categories in the spec and use those exact literals in the tests — take these from `VerifyOutcome` (introduced by plan 008) rather than inventing a parallel vocabulary — it already names every terminal answer: `no_run`, `no_run_legacy_receipt`, `empty_verdicts`, `tree_mismatch`, `self_stale`, `scope_mismatch`, `not_verified`, `no_pipeline_selected`, `unknown_pipeline`. `no_run_legacy_receipt` is the 0.10.0 case `nothingRecorded()` (`VerifyCommand.php:127`) added: a pre-0.10.0 receipt still sits at `JsonReceiptStore::LEGACY_PATH` and is deliberately not read. Both no-run shapes exit 1, so the category is the only thing distinguishing them — decide in the spec whether the legacy path is also carried as a field. The last two matter because `storeFor()` (`VerifyCommand.php:154-201`) refuses BEFORE any receipt exists — the shape must define what those receipt-less documents contain. Decide and record: is the raw `tree` fingerprint included or withheld?
 2. **Contract**: exit code semantics unchanged (`--json` changes the FORMAT of the answer, never the answer); the JSON keys are a compatibility surface governed by semver — say which keys are guaranteed and what "additive only" means here.
 3. **Consumer story**: one worked example — a skill (call it a "review skill", no product names) asking "did static analysis pass against this exact tree?" via `pipeline:verify --json` + a `jq` expression, and what it does on `fresh: false`.
 4. **Open questions** (recorded, not resolved): should this also be an MCP tool or resource; does `--json` on the multi-pipeline `--pipeline` selector need a list mode; how does a consumer discover step ids generically given RQ2's standing rejection.
@@ -119,9 +128,9 @@ Write `specs/receipt-read-path.md` answering, at minimum:
 
 ### Step 2: Prototype `--json`
 
-Add the flag to `VerifyCommand`. Implementation constraint: do NOT restructure the guard ordering — the cheapest honest prototype collects the same answers the existing branches compute and emits one `$this->output->writeln(json_encode(...))` instead of the prose lines when the flag is set.
+**This step assumes plan 008 has landed.** With the policy extracted, `--json` is a serializer: call `VerifyPolicy::judge()` as the command already does, then emit `$result->outcome->value` as `category` plus the receipt fields, instead of printing `$result->message`. Do NOT restructure the guard ordering. If 008 has NOT landed, STOP and execute it first — building `--json` over the un-extracted guards means duplicating them, which is the whole reason 008 exists.
 
-Know the real shape of the work before starting — the guards are NOT uniform: `storeFor()` prints and returns `null` before any receipt exists; `scopeMismatch()` and `explainUnverified()` return message strings; `answerServerVerified()`/`reportAssertions()` print inline across several guards. Roughly a dozen `$this->components->error(...)` sites across four methods must route to the single JSON emitter, and under `--json` ALL `components->*` output must be suppressed or the emitted document will not parse. If that forces duplicating guard logic, note the duplication in the spec's findings (it is the evidence for the "extract a verification policy object" refactor recorded under "Audited, not planned" in plans/README.md) rather than doing the refactor here.
+Know the real shape of the work before starting — the guards are NOT uniform: `storeFor()` (:154) prints and returns `null` before any receipt exists; `nothingRecorded()` (:127) RETURNS one of two strings; `scopeMismatch()` (:362) and `explainUnverified()` (:403) return message strings; `answerServerVerified()` (:203) / `reportAssertions()` (:306) print inline across several guards. Roughly a dozen `$this->components->error(...)` sites across five methods must route to the single JSON emitter, and under `--json` ALL `components->*` output must be suppressed or the emitted document will not parse. If that forces duplicating guard logic, note the duplication in the spec's findings (it is the evidence for the "extract a verification policy object" refactor recorded under "Audited, not planned" in plans/README.md) rather than doing the refactor here.
 
 **Verify**: `vendor/bin/pest tests/Feature/VerifyCommandTest.php` → existing tests untouched and green.
 
@@ -133,6 +142,7 @@ In `tests/Feature/VerifyCommandTest.php` (model on its existing cases — it cov
 2. Tree mismatch + `--json` → build a receipt recording one fingerprint against a tree reporting another (the file's own helpers: `receipt(tree: 'tree-a')` + a fingerprint double returning `'tree-b'` — read how existing tree-mismatch cases arrange it) → exit 1, `fresh: false`, `category: "tree_mismatch"`.
 3. Self-reported stale receipt + `--json` → `receipt(stale: '...')` with a MATCHING tree → exit 1, `fresh: true` (the tree did not move), `category: "self_stale"`. This is the case that proves the vocabulary split in Current state.
 4. No receipt + `--json` → exit 1, output parses as JSON, `category: "no_run"`.
+4b. No receipt but a pre-0.10.0 file present at `JsonReceiptStore::LEGACY_PATH` + `--json` → exit 1, `category: "no_run_legacy_receipt"`. `nothingRecorded()` keys on `is_file()` against `storagePath(LEGACY_PATH)`, so the test must place a file there; read how the existing legacy-receipt case in this file arranges it.
 5. Multi-pipeline project without `--pipeline` + `--json` → exit 1, output parses as JSON, `category: "no_pipeline_selected"` (the receipt-less document shape from step 1).
 6. `--json --server-verified` → the server-verified answer appears in the document.
 
@@ -168,6 +178,6 @@ Stop and report back (do not improvise) if:
 
 ## Maintenance notes
 
-- The verify-policy extraction lead ("verify-policy logic locked inside `VerifyCommand`", see "Audited, not planned" in plans/README.md) is the natural refactor BEFORE the production build of this feature: a policy object returning a structured result makes `--json` a serializer instead of a second copy of the guards. The spike deliberately tolerates duplication to keep scope honest; the spec should say whether the build requires the refactor first.
+- Plan 008 (verify-policy extraction) is now a hard dependency rather than a suggestion is the natural refactor BEFORE the production build of this feature: a policy object returning a structured result makes `--json` a serializer instead of a second copy of the guards. The spike deliberately tolerates duplication to keep scope honest; the spec should say whether the build requires the refactor first.
 - Once the JSON shape ships, every key is public API — additions are minor versions, removals are major. The spec's "guaranteed keys" list is the thing reviewers must gate hardest.
 - The consumer wiring (`evaluate` reading the receipt) is the follow-up this spike exists to unblock; it lives in the consumer's repo and its skills, not here.

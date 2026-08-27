@@ -8,7 +8,7 @@
 > update the status row for this plan in `plans/README.md` — unless a
 > reviewer dispatched you and told you they maintain the index.
 >
-> **Drift check (run first)**: `git diff --stat a05b7fa..HEAD -- src/Run/JsonReceiptStore.php tests/Unit/ReceiptStoreTest.php`
+> **Drift check (run first)**: `git diff --stat 334831e..HEAD -- src/Run/JsonReceiptStore.php tests/Unit/ReceiptStoreTest.php`
 > On any change since this plan was written, compare the "Current state"
 > excerpt against the live code; on a mismatch, STOP.
 
@@ -19,7 +19,12 @@
 - **Risk**: LOW
 - **Depends on**: none
 - **Category**: bug
-- **Planned at**: commit `a05b7fa`, 2026-08-25
+- **Planned at**: commit `334831e`, 2026-08-27 (refreshed; originally planned at `a05b7fa`)
+
+> **Refreshed 2026-08-27.** Re-verified against `origin/main` (`334831e`): the
+> finding still stands. `write()` is byte-identical to when this plan was
+> written — only its line numbers moved (22-36 → 32-46) because a
+> `LEGACY_PATH` constant was added above the constructor in 0.10.0.
 
 ## Why this matters
 
@@ -27,7 +32,7 @@ The receipt is rewritten in place after every resolution (`Run::recordReceipt()`
 
 ## Current state
 
-`src/Run/JsonReceiptStore.php:22-36` (the write path):
+`src/Run/JsonReceiptStore.php:32-46` (the write path):
 
 ```php
     public function write(Receipt $receipt): void
@@ -63,13 +68,14 @@ Semantics that must be preserved exactly:
 ## Scope
 
 **In scope** (the only files you should modify):
-- `src/Run/JsonReceiptStore.php`
+- `src/Run/JsonReceiptStore.php` (the `write()` method only)
 - `tests/Unit/ReceiptStoreTest.php`
 - `plans/README.md` (status row for this plan only)
 
 **Out of scope** (do NOT touch, even though they look related):
 - `src/Run/Run.php` — the write cadence (every resolution) is deliberate; see the comment above `recordReceipt()` in `record()`.
 - `src/Console/VerifyCommand.php` — the reader stays ignorant of the write mechanics.
+- `JsonReceiptStore::LEGACY_PATH` — a constant added in 0.10.0 above the constructor, read by `VerifyCommand` to explain a moved receipt. Nothing to do with the write path.
 - Any locking scheme — concurrent *writers* are a settled non-goal (README: "No lock; two agents on one server share a cursor"). This plan fixes torn *reads* only.
 
 ## Git workflow
