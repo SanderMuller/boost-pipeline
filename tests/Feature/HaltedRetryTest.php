@@ -68,12 +68,10 @@ it('retries the halted step instead of refusing for the rest of the session', fu
         // The cursor has not moved, so the instruction has to say the step is
         // retryable — the old wording told the agent the opposite.
         ->assertSee('fix what stopped it')
-        // And which call to make, which depends on whether the fix touched the
-        // tree: a missing binary is installed without editing anything, but the
-        // same halt fixed by correcting a path in the config is an edit, and
-        // next_step does not re-check the tree the earlier passes were measured
-        // against.
-        ->assertSee('open_run if the fix edited a file');
+        // And which call to make. Not a judgement the reader has to get right:
+        // open_run is idempotent on an unmoved tree, so it is the safe call
+        // whether or not the fix touched anything.
+        ->assertSee('hands back this same run when nothing moved');
 
     PipelineServer::tool(NextStep::class)
         ->assertOk()
@@ -145,6 +143,11 @@ it('tells a blocked run to reopen rather than continue, on every surface that ad
     // Three surfaces carried the old advice and an agent reads whichever it sees,
     // so asserting one would leave the other two free to drift back.
     //
+    // The rule is deliberately not "reopen if your fix changed a file". A commit
+    // moves the fingerprint with no file changed, so that version contradicted
+    // the stale message. `open_run` is idempotent on an unmoved tree, which lets
+    // the advice remove the judgement instead of trying to state it.
+    //
     // Each phrase is specific to the new wording. `open_run` alone would pass
     // vacuously: the prompt's first step already tells the agent to call it.
     $tool = new NextStep(resolve(RunManager::class));
@@ -154,9 +157,9 @@ it('tells a blocked run to reopen rather than continue, on every surface that ad
 
     $advises = [
         'tool description' => is_string($description)
-            && str_contains($description, 'call open_run when the fix changed any file'),
+            && str_contains($description, 'call open_run rather than this'),
         'server instructions' => is_string($instructions)
-            && str_contains($instructions, 'open_run rather than next_step'),
+            && str_contains($instructions, 'do not try to work out whether your fix'),
     ];
 
     expect($advises)->toBe([
@@ -166,5 +169,33 @@ it('tells a blocked run to reopen rather than continue, on every surface that ad
 
     PipelineServer::prompt(RunPipeline::class)
         ->assertOk()
-        ->assertSee('call `open_run` again, not');
+        ->assertSee('Do not work out whether your fix moved the tree');
+});
+
+it('never tells the reader that no file changed means next_step is safe', function (): void {
+    // The rule this replaced said exactly that, and it contradicted the stale
+    // message shipped two releases earlier: the fingerprint covers the commit, so
+    // an amend moves the tree with nothing on disk changed. A rule the reader has
+    // to apply is a rule they can apply wrongly; `open_run` being idempotent on an
+    // unmoved tree is what lets the advice drop the judgement entirely.
+    $tool = new NextStep(resolve(RunManager::class));
+    $description = new ReflectionClass($tool)->getProperty('description')->getValue($tool);
+    $instructions = new ReflectionClass(PipelineServer::class)->getDefaultProperties()['instructions'];
+
+    $carriesOldRule = [
+        'tool description' => ! is_string($description)
+            || str_contains($description, 'nothing on disk changed'),
+        'server instructions' => ! is_string($instructions)
+            || str_contains($instructions, 'nothing on disk changed'),
+    ];
+
+    expect($carriesOldRule)->toBe([
+        'tool description' => false,
+        'server instructions' => false,
+    ])
+        // And a surface names a commit as moving the tree, so a reader cannot
+        // conclude that an amend leaves the run intact.
+        ->and(is_string($instructions) && str_contains($instructions, 'amend'))->toBeTrue();
+
+    PipelineServer::prompt(RunPipeline::class)->assertOk()->assertSee('amend');
 });

@@ -37,13 +37,18 @@ final class PipelineServer extends Server
     error rather than a guess, because guessing would advance the wrong cursor.
 
     A step reporting "failed" returns the same step again. Fix the cause, then call
-    open_run rather than next_step whenever the fix changed a file: the steps that
-    already passed were measured against the tree before your edit, and next_step
-    does not re-check that — the walk would finish carrying passes that no longer
-    describe the code, and report all_verified false. open_run notices the moved
-    tree and starts a fresh run. next_step is right only when nothing on disk
-    changed, such as installing a missing binary. A "skill" step is handed to you to invoke, then acknowledged with
-    report_step; it is recorded as acknowledged, never as verified.
+    open_run rather than next_step — and do not try to work out whether your fix
+    moved the tree. open_run hands back the run you were already in when nothing
+    moved, and a fresh one when anything did: an edit, but also a commit, an
+    amend, a checkout or a rebase, because the fingerprint covers the commit too.
+    next_step never re-checks, so carrying on finishes a walk whose earlier passes
+    no longer describe the code, and reports all_verified false.
+
+    Neither call sees a fix that touches only a git-ignored file, `.env` for
+    instance: nothing moves, so judge that one yourself.
+
+    A "skill" step is handed to you to invoke, then acknowledged with report_step;
+    it is recorded as acknowledged, never as verified.
 
     "complete" means the walk finished, not that everything passed. Only
     all_verified: true means every step was verified by the server.

@@ -56,13 +56,13 @@ final class RunPipeline extends Prompt
           counts separately, and say plainly if the run `halted`.
 
         If a step fails, fix the cause and then call `open_run` again, not
-        `next_step`. Fixing a failing check means editing a file, which moves the
-        tree the earlier steps were measured against — carry on and the walk
-        finishes with `all_verified: false` and a `stale` key, having verified
-        nothing. `open_run` sees the tree moved and hands you a fresh run to walk
-        from the start. `next_step` is the right call only when the fix touched no
-        file, such as installing a missing binary; then you get the same step
-        until it passes. If a step reports it inspected 0 files, say so:
+        `next_step`. Do not work out whether your fix moved the tree: `open_run`
+        hands back the run you were already in when nothing moved, and a fresh one
+        when anything did — an edit, and equally a commit, an amend, a checkout or
+        a rebase. `next_step` never re-checks, so carrying on finishes the walk
+        with `all_verified: false` and a `stale` key, and the steps that passed
+        before your fix no longer describe the code. Neither call sees a fix that
+        touches only a git-ignored file such as `.env`; decide that one yourself. If a step reports it inspected 0 files, say so:
         it passed without proving anything.
         TXT);
     }

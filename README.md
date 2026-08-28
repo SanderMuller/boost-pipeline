@@ -156,8 +156,10 @@ the whole pipeline with `Pipeline::configure()->withTimeout(1800)`. The step's o
 | `acknowledged` | Skill step with no proof, which the agent reports it invoked       | Advances          |
 
 An `error` travels on MCP's error channel; a `failed` verdict does not, because a failing check is a
-*successful* tool call reporting a finding. Either way the cursor holds, so fix the cause and call
-`next_step` again — only that step re-runs. The server cannot verify that `/evaluate` really ran, so
+*successful* tool call reporting a finding. Either way the cursor holds, so fix the cause — then
+call `open_run` rather than deciding whether your fix moved the tree. It hands back the same run
+when nothing moved and a fresh one when anything did, including a commit; `next_step` re-runs only
+that step and never re-checks. The server cannot verify that `/evaluate` really ran, so
 `state: complete` means the walk finished, never "everything passed". A *failed* step is still
 `server_run: true`: that key answers who produced the verdict, not whether it passed.
 
