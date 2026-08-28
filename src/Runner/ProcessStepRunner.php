@@ -298,7 +298,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         ], static fn (string $part): bool => $part !== ''));
     }
 
-    /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
+    /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool, clipped: bool} $summary */
     private function describePass(array $summary, ?int $scope): string
     {
         $text = $this->orElse($summary['summary'], 'Passed.');
@@ -310,13 +310,17 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         return "Inspected 0 files: this step is scoped to a set that is currently empty, so it passed without proving anything.\n\n".$text;
     }
 
-    /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool} $summary */
+    /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool, clipped: bool} $summary */
     private function describeFailure(array $summary, ?string $logPath): string
     {
         $text = $this->orElse($summary['summary'], 'Failed with no output.');
 
         if (! $summary['truncated']) {
-            return $text;
+            // Same loss, no omitted line to count: a clipped long line still went
+            // somewhere, and nowhere when the log could not be written.
+            return $summary['clipped'] && $logPath === null
+                ? $text."\n\n".$this->lostLog()
+                : $text;
         }
 
         $remaining = $summary['output_lines'] - $summary['shown_lines'];
@@ -324,7 +328,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         return $text."\n\n".sprintf(
             '… %d more line(s)%s',
             $remaining,
-            $logPath === null ? '.' : " — full output at {$logPath}",
+            $logPath === null ? '. '.$this->lostLog() : " — full output at {$logPath}",
         );
     }
 
@@ -378,11 +382,29 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         // what it counted is not something the reader can be left to infer from
         // an absent path. Both halves behave as designed and the pair loses data,
         // so the pair is what gets reported.
-        if ($summary['truncated'] && $logPath === null) {
-            $text .= sprintf(' No log could be written to %s, so the omitted lines are lost.', $this->logs->directory());
+        // `clipped` as well as `truncated`: a single very long line is dropped by
+        // the byte cap or the per-line clamp while omitting no line at all, so a
+        // condition on omitted lines alone stays silent on real loss.
+        if (($summary['truncated'] || $summary['clipped']) && $logPath === null) {
+            // Its own line: the summary's tail IS program output, so a note glued
+            // to it reads as one more line the step printed.
+            $text .= "\n".$this->lostLog();
         }
 
         return $text;
+    }
+
+    /**
+     * Said wherever output was dropped and no log holds it.
+     *
+     * The directory is the actionable half: "no log could be written" alone
+     * leaves the reader nothing to fix, and the fix is a path permission — a
+     * read-only mount or a bad owner after a deploy, which is the trigger the
+     * write tolerance already exists for.
+     */
+    private function lostLog(): string
+    {
+        return sprintf('No log could be written to %s, so the dropped output is lost.', $this->logs->directory());
     }
 
     private function orElse(string $value, string $fallback): string

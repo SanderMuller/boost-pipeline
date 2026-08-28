@@ -128,7 +128,9 @@ final class NextStep extends Tool
                         'Step [%s] could not run: %s%s',
                         $result->stepId,
                         $result->reason ?? $result->summary,
-                        $result->logPath === null ? '' : sprintf(' Full output: %s', $result->logPath),
+                        // Its own line for the same reason the summary's own notes
+                        // take one: what precedes it is the step's output.
+                        $result->logPath === null ? '' : sprintf("\nFull output: %s", $result->logPath),
                     ),
                     $errors,
                 )),

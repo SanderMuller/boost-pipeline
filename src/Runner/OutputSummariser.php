@@ -80,7 +80,7 @@ final readonly class OutputSummariser
     }
 
     /**
-     * @return array{summary: string, output_lines: int, shown_lines: int, truncated: bool}
+     * @return array{summary: string, output_lines: int, shown_lines: int, truncated: bool, clipped: bool}
      */
     public function summarise(string $output, int $maxLines = self::MAX_LINES): array
     {
@@ -91,10 +91,18 @@ final readonly class OutputSummariser
 
         $shown = $this->headAndTail($lines, $maxLines);
 
+        $clipped = strlen($output) > self::MAX_BYTES;
+
         $clamped = array_map(
-            static fn (string $line): string => mb_strlen($line) > self::MAX_LINE_LENGTH
-                ? mb_substr($line, 0, self::MAX_LINE_LENGTH).'…'
-                : $line,
+            static function (string $line) use (&$clipped): string {
+                if (mb_strlen($line) <= self::MAX_LINE_LENGTH) {
+                    return $line;
+                }
+
+                $clipped = true;
+
+                return mb_substr($line, 0, self::MAX_LINE_LENGTH).'…';
+            },
             $shown,
         );
 
@@ -112,6 +120,11 @@ final readonly class OutputSummariser
             'output_lines' => count($lines),
             'shown_lines' => count($shown),
             'truncated' => $omitted > 0,
+            // Content dropped by a bound that omits no LINE: the byte cap, or a
+            // single line clamped to its limit. `truncated` cannot carry this —
+            // it is paired with a line count, and a clipped line omits none — but
+            // a caller asking "was anything lost" needs both answers.
+            'clipped' => $clipped,
         ];
     }
 

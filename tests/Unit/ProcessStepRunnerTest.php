@@ -424,7 +424,7 @@ it('says the omitted lines are lost when no log could be written', function (): 
         // Naming the directory is the actionable half: "no log" alone leaves the
         // reader nothing to fix, and the fix is a path permission.
         ->and($result->reason)->toContain($blocker.'/logs')
-        ->and($result->reason)->toContain('the omitted lines are lost')
+        ->and($result->reason)->toContain('the dropped output is lost')
         // The bound still holds. Reporting the loss must not become a reason to
         // send the whole thing.
         ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
@@ -466,6 +466,63 @@ it('says nothing about a lost log when the log was written', function (): void {
     );
 
     $result = runStep($runner, Shell::run('seq 1 400; sleep 3', id: 'noisy-logged'));
+
+    expect($result->logPath)->not->toBeNull()
+        ->and($result->reason)->toContain('lines omitted')
+        ->and($result->reason)->not->toContain('No log could be written');
+});
+
+it('reports a clipped long line as lost, even though no line was omitted', function (): void {
+    // The bound that omits nothing. One line over the per-line clamp loses its
+    // tail while `truncated` stays false, so a condition on omitted lines alone
+    // reported nothing at all — the quietest shape of the same loss.
+    $blocker = sys_get_temp_dir().'/bp-long-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($runner, Shell::run('printf "%0.sX" $(seq 1 900); sleep 3', id: 'one-long-line'));
+
+    unlink($blocker);
+
+    expect($result->logPath)->toBeNull()
+        ->and($result->reason)->not->toContain('lines omitted')
+        ->and($result->reason)->toContain('the dropped output is lost');
+});
+
+it('names the lost log on an unrunnable command that printed too much', function (): void {
+    // Exit 127 takes a different branch from the timeout, and it passes the same
+    // log path into the same summariser. Without a case here, dropping that
+    // argument would make the reason claim a loss while `logPath` names the file.
+    $blocker = sys_get_temp_dir().'/bp-127-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+    );
+
+    $result = runStep($runner, Shell::run('seq 1 400; definitely-not-a-real-binary-xyz', id: 'noisy-127-unloggable'));
+
+    unlink($blocker);
+
+    expect($result->logPath)->toBeNull()
+        ->and($result->reason)->toStartWith('Command did not run (exit 127):')
+        ->and($result->reason)->toContain('the dropped output is lost');
+});
+
+it('says nothing about a lost log on an unrunnable command that could log', function (): void {
+    // The other half: the note must not appear when the path is there, or the
+    // reason and `logPath` contradict each other in the same result.
+    $result = runStep($this->runner, Shell::run('seq 1 400; definitely-not-a-real-binary-xyz', id: 'noisy-127-logged'));
 
     expect($result->logPath)->not->toBeNull()
         ->and($result->reason)->toContain('lines omitted')
