@@ -114,7 +114,10 @@ rewriting).
 Return a map when a project asks its code more than one question:
 
 ```php
-return ['pr' => Pipeline::configure()->…, 'release' => Pipeline::configure()->…];
+return [
+    'pr' => Pipeline::configure()->…, 
+    'release' => Pipeline::configure()->…,
+];
 ```
 
 A file returning a single `Pipeline` keeps working and is named `default`. Each pipeline has its
@@ -126,8 +129,12 @@ invisibly.
 
 ```php
 $steps->in(Formatting::class)
-    ->append(Shell::run('vendor/bin/pint --test')->tagged('backend'))
-    ->append(Shell::run('yarn lint-all')->tagged('frontend'));
+    ->append(
+        Shell::run('vendor/bin/pint --test')->tagged('backend')
+    )
+    ->append(
+        Shell::run('yarn lint-all')->tagged('frontend')
+    );
 ```
 
 Then `open_run(only: "backend")`. An untagged step runs in every scope, matching is case-sensitive,
@@ -141,12 +148,12 @@ the whole pipeline with `Pipeline::configure()->withTimeout(1800)`. The step's o
 
 ## Verdicts
 
-| Verdict | Meaning | Cursor |
-|---|---|---|
-| `passed` | Shell step exited 0, or a skill step whose declared proof exited 0 | Advances |
-| `failed` | The step ran and found problems, or a declared proof did not hold | Holds (`blocked`) |
-| `error` | Shell step did not run: missing binary, timeout, exception | Holds (`halted`) |
-| `acknowledged` | Skill step with no proof, which the agent reports it invoked | Advances |
+| Verdict        | Meaning                                                            | Cursor            |
+|----------------|--------------------------------------------------------------------|-------------------|
+| `passed`       | Shell step exited 0, or a skill step whose declared proof exited 0 | Advances          |
+| `failed`       | The step ran and found problems, or a declared proof did not hold  | Holds (`blocked`) |
+| `error`        | Shell step did not run: missing binary, timeout, exception         | Holds (`halted`)  |
+| `acknowledged` | Skill step with no proof, which the agent reports it invoked       | Advances          |
 
 An `error` travels on MCP's error channel; a `failed` verdict does not, because a failing check is a
 *successful* tool call reporting a finding. Either way the cursor holds, so fix the cause and call
@@ -159,12 +166,12 @@ An `error` travels on MCP's error channel; a `failed` verdict does not, because 
 `run_pipeline` ships as an MCP prompt, so it appears as a slash command
 (`/mcp__pipeline__run_pipeline`). Or drive the tools directly:
 
-| Tool | What it does |
-|---|---|
-| `open_run` | Starts a run, returns the first step. Idempotent. |
-| `next_step` | Resolves the current position, returns the next, or the same one again. |
-| `report_step` | Acknowledges a skill step. Only valid while `awaiting`. |
-| `status` | Position, per-step verdicts, verified versus acknowledged. |
+| Tool          | What it does                                                            |
+|---------------|-------------------------------------------------------------------------|
+| `open_run`    | Starts a run, returns the first step. Idempotent.                       |
+| `next_step`   | Resolves the current position, returns the next, or the same one again. |
+| `report_step` | Acknowledges a skill step. Only valid while `awaiting`.                 |
+| `status`      | Position, per-step verdicts, verified versus acknowledged.              |
 
 `position` counts steps rather than handovers, so a parallel group reports the range it covers
 (`2-3/7`). `open_run` warns when a step's binary is not on disk, and a step you declared that never
@@ -180,7 +187,10 @@ starts a fresh one once you change something, which is what makes the fix loop w
 A step that rewrites code declares it, so its own writes do not count against the run:
 
 ```php
-$steps->in(Formatting::class)->append(Shell::run('vendor/bin/pint')->mutating());
+$steps->in(Formatting::class)
+    ->append(
+        Shell::run('vendor/bin/pint')->mutating()
+    );
 ```
 
 Attribution is by declaration, not by timing: a change nothing declared is reported rather than
@@ -211,10 +221,11 @@ Where an agent step leaves a side effect, the server can check for it instead of
 report:
 
 ```php
-$steps->in(Agent::class)->append(
-    Skill::run('/eye-verification')
-        ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
-);
+$steps->in(Agent::class)
+    ->append(
+        Skill::run('/eye-verification')
+            ->proving('find storage/verify -name "*.png" -newer .git/HEAD | grep -q .')
+    );
 ```
 
 The proof runs through the same runner as any shell step, so a step with one reports **`passed`**,
@@ -263,25 +274,18 @@ directory, and deleting it is safe.
 
 ## What it deliberately does not do
 
-| Not yet | Why it matters |
-|---|---|
-| Tolerate failures that predate your change | Every step is strict, so use the tool's own baseline |
-| Verify an agent step whose work leaves no trace | A proof needs an artifact to check |
-| Stop an agent abandoning the flow | Nothing prevents `gh pr create`. Needs client hooks |
-| Time out a skill step | A run stays `awaiting` forever if `report_step` never arrives |
-| Coordinate concurrent callers | No lock; two agents on one server share a cursor |
-| Accumulate scopes across runs | A second scoped run replaces the first. Run unscoped for the whole tree |
-| Notice two pipelines sharing a name | PHP collapses duplicate array keys, so the later one silently wins |
-| Know which checks your pipeline ought to hold | Exit 0 reports on the steps that ran, and nothing more |
+| Not yet                                         | Why it matters                                                          |
+|-------------------------------------------------|-------------------------------------------------------------------------|
+| Tolerate failures that predate your change      | Every step is strict, so use the tool's own baseline                    |
+| Verify an agent step whose work leaves no trace | A proof needs an artifact to check                                      |
+| Stop an agent abandoning the flow               | Nothing prevents `gh pr create`. Needs client hooks                     |
+| Time out a skill step                           | A run stays `awaiting` forever if `report_step` never arrives           |
+| Coordinate concurrent callers                   | No lock; two agents on one server share a cursor                        |
+| Accumulate scopes across runs                   | A second scoped run replaces the first. Run unscoped for the whole tree |
+| Notice two pipelines sharing a name             | PHP collapses duplicate array keys, so the later one silently wins      |
+| Know which checks your pipeline ought to hold   | Exit 0 reports on the steps that ran, and nothing more                  |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
-
-## Why it is built this way
-
-`.ai/docs/` holds the design record: [design-history.md][design-history],
-[invariants.md][invariants], and verified `laravel/mcp` behaviour
-([laravel-mcp-notes.md][mcp-notes]). Read the invariants before changing `src/Run/`, `src/Runner/`
-or `src/Mcp/`.
 
 ## Requirements
 
@@ -308,7 +312,4 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please do not open a publ
 
 MIT. See [LICENSE](LICENSE).
 
-[design-history]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/design-history.md
-[invariants]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/invariants.md
-[mcp-notes]: https://github.com/SanderMuller/boost-pipeline/blob/main/.ai/docs/laravel-mcp-notes.md
 [changelog]: https://github.com/SanderMuller/boost-pipeline/blob/main/CHANGELOG.md
