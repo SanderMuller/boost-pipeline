@@ -10,6 +10,23 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.5 - 2026-08-28
+
+### Fixed
+
+- Error paths threw away the output they had already captured. A timeout, a signal and a failing scope command all discarded the process buffer — the single most useful diagnostic a timeout can produce — and exit 126/127 wrote its log but put the raw, unbounded text into the payload. Every path that has captured output now writes it to `storage/logs/pipeline/<run>-<step>.log` and returns a bounded summary carrying that log path. Two paths stay bare because they have nothing captured: a process that could not be built, and one whose launch failed.
+- A phase named but never appended to made every run unverifiable. `Steps::in()` registers a phase on access, so `$steps->in(SomePhase::class);` with nothing appended left a phase holding no steps. If that phase was not also registered in the pipeline, the walk emitted a dropped-steps notice naming no steps, and that notice pinned `all_verified` to false and coverage to `incomplete`. The run could never exit 0, and the message could not tell you what to fix, because nothing had been dropped. A phase holding at least one step still produces its notice with its step ids, unchanged.
+
+### Changed
+
+- The README is about a third of its former length. It now covers what the package does and how to configure it; the reasoning behind the design moved to the design notes that ship in `.ai/docs/`.
+
+### Internal
+
+- Three documented paths did not match the code. The design notes and the design history both put step logs at `storage/pipeline/logs/`, and the provider binds `storage/logs/pipeline/`. The README still named the receipt file as it was before 0.10.0, when receipts moved to `storage/logs/pipeline/receipts/<name>.json`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.4...v0.10.5
+
 ## v0.10.4 - 2026-08-27
 
 ### Fixed
@@ -67,6 +84,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   ERROR  No pipeline run has been recorded here. A receipt written before 0.10.0 is still at
   [storage/logs/pipeline/receipt.json], and is deliberately not read: it predates the keys this
   command needs, and unknown is not clean. Open a new run — then that file is safe to delete.
+  
   
   
   
@@ -136,6 +154,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -146,6 +165,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -275,6 +295,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -318,10 +339,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -421,9 +444,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -569,6 +594,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -657,6 +683,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -926,6 +953,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -983,6 +1011,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
