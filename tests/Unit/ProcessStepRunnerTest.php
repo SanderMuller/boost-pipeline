@@ -396,3 +396,78 @@ it('does not read the output of a step whose process could not be launched', fun
         ->and($result->reason)->toStartWith('Could not run:')
         ->and($result->logPath)->toBeNull();
 });
+
+it('says the omitted lines are lost when no log could be written', function (): void {
+    // Both features behaving as designed, and the pair losing data: the bound
+    // fires and announces what it dropped, and there is nowhere it went. Reached
+    // by a read-only mount or a bad owner after a deploy — the same trigger the
+    // log-write tolerance exists for — so it lands exactly when the environment
+    // is already misbehaving and the output is least reproducible.
+    $blocker = sys_get_temp_dir().'/bp-lost-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($runner, Shell::run('seq 1 400; sleep 3', id: 'noisy-unloggable'));
+
+    unlink($blocker);
+
+    expect($result->logPath)->toBeNull()
+        ->and($result->reason)->toContain('lines omitted')
+        ->and($result->reason)->toContain('No log could be written to')
+        // Naming the directory is the actionable half: "no log" alone leaves the
+        // reader nothing to fix, and the fix is a path permission.
+        ->and($result->reason)->toContain($blocker.'/logs')
+        ->and($result->reason)->toContain('the omitted lines are lost')
+        // The bound still holds. Reporting the loss must not become a reason to
+        // send the whole thing.
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('says nothing about a lost log when the output was not truncated', function (): void {
+    // No truncation, no loss to report — the log is missing but nothing was
+    // dropped, so the note would be noise on an already-degraded path.
+    $blocker = sys_get_temp_dir().'/bp-quiet-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($runner, Shell::run('echo just-one-line; sleep 3', id: 'quiet-unloggable'));
+
+    unlink($blocker);
+
+    expect($result->logPath)->toBeNull()
+        ->and($result->reason)->toContain('just-one-line')
+        ->and($result->reason)->not->toContain('No log could be written');
+});
+
+it('says nothing about a lost log when the log was written', function (): void {
+    // Truncated, but the pointer is there — the normal noisy-timeout case, which
+    // must not grow a scary sentence about losing output it did not lose. Its own
+    // runner because the shared one allows 20s, so `sleep 3` would simply pass.
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($runner, Shell::run('seq 1 400; sleep 3', id: 'noisy-logged'));
+
+    expect($result->logPath)->not->toBeNull()
+        ->and($result->reason)->toContain('lines omitted')
+        ->and($result->reason)->not->toContain('No log could be written');
+});

@@ -11,6 +11,18 @@ final readonly class LogWriter
 {
     public function __construct(private string $directory) {}
 
+    /**
+     * Where a log would have gone.
+     *
+     * Named in the message when a write fails, because "no log could be written"
+     * without a path leaves the reader nothing to fix — and the write fails on a
+     * read-only mount or a bad owner after a deploy, which is a path problem.
+     */
+    public function directory(): string
+    {
+        return $this->directory;
+    }
+
     public function write(string $runId, string $stepId, string $contents): ?string
     {
         if (! is_dir($this->directory) && ! @mkdir($this->directory, recursive: true) && ! is_dir($this->directory)) {

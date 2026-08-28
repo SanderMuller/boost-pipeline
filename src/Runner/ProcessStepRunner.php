@@ -152,7 +152,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         if (in_array($exitCode, self::UNRUNNABLE_EXIT_CODES, true)) {
             return Result::error(
                 $step->id(),
-                sprintf('Command did not run (exit %d): %s', $exitCode, $this->summarised($output)),
+                sprintf('Command did not run (exit %d): %s', $exitCode, $this->summarised($output, $logPath)),
                 logPath: $logPath,
             );
         }
@@ -209,7 +209,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
             return Result::error($step->id(), sprintf(
                 "Scope command exited %d, so the step's scope is unknown: %s",
                 $process->getExitCode() ?? 1,
-                $this->summarised($output),
+                $this->summarised($output, $logPath),
             ), logPath: $logPath);
         }
 
@@ -356,17 +356,33 @@ final readonly class ProcessStepRunner implements BatchStepRunner
     private function preserving(Process $process, string $stepId, string $runId, string $message): Result
     {
         $output = $this->combinedOutput($process);
+        $logPath = $this->logs->write($runId, $stepId, $output);
 
         return Result::error(
             $stepId,
-            $message.' '.$this->summarised($output),
-            logPath: $this->logs->write($runId, $stepId, $output),
+            $message.' '.$this->summarised($output, $logPath),
+            logPath: $logPath,
         );
     }
 
-    private function summarised(string $output): string
+    /**
+     * @param  string|null  $logPath  where the full output went, when it went anywhere
+     */
+    private function summarised(string $output, ?string $logPath = null): string
     {
-        return $this->orElse(trim($this->summariser->summarise($output)['summary']), 'no output');
+        $summary = $this->summariser->summarise($output);
+        $text = $this->orElse(trim($summary['summary']), 'no output');
+
+        // Truncated with nowhere to truncate to. The bound stays — unbounded
+        // output on a halting path is the worse trade — but silently discarding
+        // what it counted is not something the reader can be left to infer from
+        // an absent path. Both halves behave as designed and the pair loses data,
+        // so the pair is what gets reported.
+        if ($summary['truncated'] && $logPath === null) {
+            $text .= sprintf(' No log could be written to %s, so the omitted lines are lost.', $this->logs->directory());
+        }
+
+        return $text;
     }
 
     private function orElse(string $value, string $fallback): string
