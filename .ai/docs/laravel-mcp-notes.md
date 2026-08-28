@@ -127,6 +127,12 @@ MCP output warns at 10,000 tokens and caps at 25,000. Every shell step writes it
 log path. `Server::$defaultPaginationLength` in `laravel/boost` is the reminder that pagination
 is the alternative if truncation costs the agent too much.
 
+The error paths honour the same contract. A timeout, a signal, an exit 126/127 and a failing
+scope command all write their captured output to the log and hand back a truncation. Only a
+process that never started is exempt, because it has nothing captured to preserve — and
+`Process::start()` marks a process started before it checks the timeout, so that branch is
+narrower than it looks.
+
 `anthropic/maxResultSizeChars` goes on `next_step`, which is the tool carrying the large
 payloads. `readOnlyHint` goes on `open_run` and `status`.
 

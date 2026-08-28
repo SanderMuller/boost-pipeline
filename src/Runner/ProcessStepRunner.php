@@ -75,7 +75,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
                 continue;
             }
 
-            $scope = $this->resolveScope($step);
+            $scope = $this->resolveScope($step, $runId);
 
             if ($scope instanceof Result) {
                 $results[$step->id()] = $scope;
@@ -84,7 +84,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
             }
 
             $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
-            $process = $this->start($step, $timeout);
+            $process = $this->start($step, $timeout, $runId);
 
             if ($process instanceof Result) {
                 $results[$step->id()] = $process;
@@ -98,7 +98,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         // Everything is already running, so waiting in order costs nothing beyond
         // the slowest step.
         foreach ($pending as [$process, $step, $scope, $timeout]) {
-            $timedOut = $this->settle($process, $step->id(), $timeout);
+            $timedOut = $this->settle($process, $step->id(), $timeout, $runId);
 
             $results[$step->id()] = $timedOut instanceof Result
                 ? $timedOut
@@ -116,7 +116,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
 
     private function execute(Shell $step, string $runId): Result
     {
-        $scope = $this->resolveScope($step);
+        $scope = $this->resolveScope($step, $runId);
 
         if ($scope instanceof Result) {
             return $scope;
@@ -128,13 +128,13 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
         // scope command that silently matches nothing, permanently disables the
         // gate — a false green of exactly the kind this pipeline exists to stop.
-        $process = $this->start($step, $timeout);
+        $process = $this->start($step, $timeout, $runId);
 
         if ($process instanceof Result) {
             return $process;
         }
 
-        $timedOut = $this->settle($process, $step->id(), $timeout);
+        $timedOut = $this->settle($process, $step->id(), $timeout, $runId);
 
         if ($timedOut instanceof Result) {
             return $timedOut;
@@ -152,7 +152,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         if (in_array($exitCode, self::UNRUNNABLE_EXIT_CODES, true)) {
             return Result::error(
                 $step->id(),
-                sprintf('Command did not run (exit %d): %s', $exitCode, $this->orElse(trim($output), 'no output')),
+                sprintf('Command did not run (exit %d): %s', $exitCode, $this->summarised($output)),
                 logPath: $logPath,
             );
         }
@@ -184,7 +184,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
      * A declared-but-uncomputable scope is a broken config, not "unknown": if the
      * scope command cannot run, treating it as zero would hand back a pass.
      */
-    private function resolveScope(Shell $step): int|null|Result
+    private function resolveScope(Shell $step, string $runId): int|null|Result
     {
         $command = $step->scopeCommand();
 
@@ -192,62 +192,90 @@ final readonly class ProcessStepRunner implements BatchStepRunner
             return null;
         }
 
-        $process = $this->process($step->id(), $command, self::SCOPE_TIMEOUT_SECONDS, $step->env());
+        $process = $this->process($step->id(), $runId, $command, self::SCOPE_TIMEOUT_SECONDS, $step->env());
 
         if ($process instanceof Result) {
-            return Result::error($step->id(), "Could not determine declared scope: {$process->summary}");
+            return Result::error(
+                $step->id(),
+                "Could not determine declared scope: {$process->summary}",
+                logPath: $process->logPath,
+            );
         }
 
         if ($process->getExitCode() !== 0) {
+            $output = $this->combinedOutput($process);
+            $logPath = $this->logs->write($runId, $step->id(), $output);
+
             return Result::error($step->id(), sprintf(
                 "Scope command exited %d, so the step's scope is unknown: %s",
                 $process->getExitCode() ?? 1,
-                $this->orElse(trim($this->combinedOutput($process)), 'no output'),
-            ));
+                $this->summarised($output),
+            ), logPath: $logPath);
         }
 
         return count($this->nonEmptyLines($process->getOutput()));
     }
 
     /** Started but not waited on, so a caller can have several running at once. */
-    private function start(Shell $step, float $timeout): Process|Result
+    private function start(Shell $step, float $timeout, string $runId): Process|Result
     {
         try {
             $process = $this->processFor($step->command(), $timeout, $step->env());
+        } catch (Throwable $throwable) {
+            // Nothing was built, so there is no captured output to preserve.
+            return Result::error($step->id(), "Could not run: {$throwable->getMessage()}");
+        }
+
+        try {
             $process->start();
 
             return $process;
         } catch (Throwable $throwable) {
-            return Result::error($step->id(), "Could not run: {$throwable->getMessage()}");
+            // start() marks the process started and reads its pipes BEFORE it
+            // checks the timeout, so a small enough timeout throws here with
+            // output already buffered.
+            return $process->isStarted()
+                ? $this->preserving($process, $step->id(), $runId, "Could not run: {$throwable->getMessage()}")
+                : Result::error($step->id(), "Could not run: {$throwable->getMessage()}");
         }
     }
 
     /** A Result when the step never produced a verdict, null when it did. */
-    private function settle(Process $process, string $stepId, float $timeout): ?Result
+    private function settle(Process $process, string $stepId, float $timeout, string $runId): ?Result
     {
         try {
             $process->wait();
 
             return null;
         } catch (ProcessTimedOutException) {
-            return Result::error($stepId, "Timed out after {$timeout}s.");
+            return $this->preserving($process, $stepId, $runId, "Timed out after {$timeout}s.");
         } catch (Throwable $exception) {
-            return Result::error($stepId, "Could not run: {$exception->getMessage()}");
+            return $this->preserving($process, $stepId, $runId, "Could not run: {$exception->getMessage()}");
         }
     }
 
     /** @param array<string, string> $env */
-    private function process(string $stepId, string $command, float $timeout, array $env = []): Process|Result
+    private function process(string $stepId, string $runId, string $command, float $timeout, array $env = []): Process|Result
     {
         try {
             $process = $this->processFor($command, $timeout, $env);
+        } catch (Throwable $throwable) {
+            // Nothing was built, so there is no captured output to preserve.
+            return Result::error($stepId, "Could not run: {$throwable->getMessage()}");
+        }
+
+        try {
             $process->run();
 
             return $process;
         } catch (ProcessTimedOutException) {
-            return Result::error($stepId, "Timed out after {$timeout}s.");
+            return $this->preserving($process, $stepId, $runId, "Timed out after {$timeout}s.");
         } catch (Throwable $exception) {
-            return Result::error($stepId, "Could not run: {$exception->getMessage()}");
+            // run() is start() plus wait(). A start() failure leaves the process
+            // unstarted, and reading its output would throw out of this catch.
+            return $process->isStarted()
+                ? $this->preserving($process, $stepId, $runId, "Could not run: {$exception->getMessage()}")
+                : Result::error($stepId, "Could not run: {$exception->getMessage()}");
         }
     }
 
@@ -315,6 +343,30 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         $lines = preg_split('/\R/', trim($output));
 
         return $lines === false ? [] : $lines;
+    }
+
+    /**
+     * An error verdict that keeps what the process had already printed.
+     *
+     * These paths produce no verdict, so this summary is the only diagnostic the
+     * agent sees, and the full text goes to the log in the same step. A failed
+     * log write does NOT widen the summary: the MCP payload has a hard ceiling
+     * that raw output would blow, so it stays bounded either way.
+     */
+    private function preserving(Process $process, string $stepId, string $runId, string $message): Result
+    {
+        $output = $this->combinedOutput($process);
+
+        return Result::error(
+            $stepId,
+            $message.' '.$this->summarised($output),
+            logPath: $this->logs->write($runId, $stepId, $output),
+        );
+    }
+
+    private function summarised(string $output): string
+    {
+        return $this->orElse(trim($this->summariser->summarise($output)['summary']), 'no output');
     }
 
     private function orElse(string $value, string $fallback): string

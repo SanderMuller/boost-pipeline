@@ -228,3 +228,171 @@ it('lets a step pin its own environment, which is the point of the scrubber', fu
 
     expect($result->summary)->toContain('my_tp_phpunit_iso');
 });
+
+it('logs the full scope output and bounds what reaches the payload', function (): void {
+    $result = runStep($this->runner,
+        Shell::run('echo would have run', id: 'noisy-scope')->inspecting('seq 1 100; exit 4')
+    );
+
+    $logs = glob($this->logDir.'/*.log');
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toContain('scope')
+        ->and($result->logPath)->not->toBeNull()
+        ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30)
+        // A scope failure short-circuits before the step runs, so nothing else
+        // claims `<run>-<step>.log` for this step.
+        ->and($logs)->toHaveCount(1);
+});
+
+it('keeps the output a timed-out step had already printed', function (): void {
+    // A timeout is when the output matters most: it shows where the command
+    // stalled. The original implementation threw all of it away.
+    $fast = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($fast, Shell::run('seq 1 100; sleep 3', id: 'noisy-timeout'));
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toStartWith('Timed out')
+        ->and($result->logPath)->not->toBeNull()
+        ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('says so rather than inventing output when a timed-out step printed nothing', function (): void {
+    $fast = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.3,
+    );
+
+    $result = runStep($fast, Shell::run('sleep 3', id: 'silent-timeout'));
+
+    expect($result->reason)->toBe('Timed out after 0.3s. no output');
+});
+
+it('keeps the output of a step killed by a signal', function (): void {
+    $result = runStep($this->runner, Shell::run('seq 1 100; kill -9 $$', id: 'signalled'));
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toStartWith('Could not run:')
+        ->and($result->logPath)->not->toBeNull()
+        ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('keeps the output of a scope command killed by a signal, and names its log', function (): void {
+    // The synchronous path. `process()` discarded the Process in both catches,
+    // and `resolveScope()` then dropped the log path on the floor.
+    $result = runStep($this->runner,
+        Shell::run('echo would have run', id: 'signalled-scope')->inspecting('seq 1 100; kill -9 $$')
+    );
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toContain('scope')
+        ->and($result->logPath)->not->toBeNull()
+        ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('bounds the payload of a command that could not run, however much it printed', function (): void {
+    // Exit 127 already wrote its log; it was the payload that stayed unbounded.
+    $result = runStep($this->runner, Shell::run('seq 1 100; definitely-not-a-real-binary-xyz', id: 'noisy-127'));
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toStartWith('Command did not run (exit 127):')
+        ->and($result->logPath)->not->toBeNull()
+        ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('still returns an error verdict when the log cannot be written', function (): void {
+    // A log directory that cannot exist: its parent is a file. Losing the log
+    // must not turn a real error verdict into an exception.
+    $blocker = sys_get_temp_dir().'/bp-blocker-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.5,
+    );
+
+    $result = runStep($runner, Shell::run('seq 1 100; sleep 3', id: 'unloggable'));
+
+    unlink($blocker);
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->logPath)->toBeNull()
+        ->and($result->reason)->toStartWith('Timed out')
+        // The summary survived losing the log: 100 is the last line the step
+        // printed, and the tail of a truncation is where it lands.
+        ->and($result->reason)->toContain('100')
+        ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30);
+});
+
+it('does not read the output of a process that never started', function (): void {
+    // A working directory that does not exist fails inside `run()`, at start.
+    // Reading output from an unstarted process throws, so this path must stay
+    // on the bare message.
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir().'/bp-absent-'.bin2hex(random_bytes(4)),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+    );
+
+    $result = runStep($runner,
+        Shell::run('echo would have run', id: 'no-cwd')->inspecting('true')
+    );
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toContain('scope')
+        ->and($result->logPath)->toBeNull();
+});
+
+it('treats a timeout inside start() as a started process, not a missing one', function (): void {
+    // `Process::start()` marks the process started and reads its pipes before it
+    // checks the timeout, so a small enough timeout throws from there rather
+    // than from `wait()`. In practice the child has not printed anything yet, so
+    // what this pins is that the path reads the process at all instead of
+    // treating it as never started — which would throw out of the catch.
+    //
+    // The command must not be able to exit inside that window: `updateStatus()`
+    // marks an already-exited process terminated, and `checkTimeout()` returns
+    // silently for anything but a started one. `checkTimeout()` calls `stop(0)`
+    // before it throws, so this does not wait three seconds.
+    $result = runStep($this->runner, Shell::run('sleep 3', id: 'start-timeout')->timeout(0.000001));
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toStartWith('Could not run:')
+        ->and($result->logPath)->not->toBeNull();
+});
+
+it('does not read the output of a step whose process could not be launched', function (): void {
+    // The asynchronous path's counterpart: `start()` fails before the process is
+    // marked started, so there is nothing to read and reading it would throw.
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir().'/bp-absent-'.bin2hex(random_bytes(4)),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+    );
+
+    $result = runStep($runner, Shell::run('echo would have run', id: 'unlaunchable'));
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->reason)->toStartWith('Could not run:')
+        ->and($result->logPath)->toBeNull();
+});
