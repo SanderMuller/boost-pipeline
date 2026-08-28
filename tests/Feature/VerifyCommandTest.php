@@ -922,3 +922,21 @@ it('says nothing about a legacy receipt when there is none', function (): void {
         ->and($output)->toContain('Nothing has been verified')
         ->and($output)->not->toContain('0.10.0');
 });
+
+it('names the moved commit at the gate, not only in the receipt', function (): void {
+    // The two messages reach different readers. `stale` reaches an agent mid-walk;
+    // this one reaches a person running the gate, typically right after merging a
+    // base branch in — the ordinary way to arrive here having changed no file.
+    // Reading "a different working tree" then sends them hunting for an edit that
+    // does not exist.
+    receiptStoreHolding(receipt(tree: 'tree-a'));
+    treeReporting('tree-b');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('verified a different working tree')
+        ->and($output)->toContain('rebase')
+        ->and($output)->toContain('nothing to undo');
+});

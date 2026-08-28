@@ -71,11 +71,15 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        // Named here as well as in the receipt's `stale` message, because these
+        // two reach different readers: `stale` reaches an agent mid-walk, this
+        // reaches a person at a gate. Merging a base branch in before opening a
+        // PR is the ordinary way to arrive here having changed no file.
         $now = $tree->capture();
 
         if ($now !== null && $receipt->tree !== null && $receipt->tree !== $now) {
             $this->components->error(sprintf(
-                'Run [%s] verified a different working tree, so its result does not describe this code. Open a new run.',
+                'Run [%s] verified a different working tree, so its result does not describe this code. A commit, amend, checkout or rebase counts as much as an edit does — the fingerprint covers the commit — so there may be nothing to hunt for and nothing to undo. Open a new run.',
                 $receipt->runId,
             ));
 
