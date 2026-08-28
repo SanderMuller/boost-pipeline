@@ -46,7 +46,15 @@ final class RunPipeline extends Prompt
            and will not advance.
         4. Report the final tally exactly as `status` gives it.
 
-        Two things you must not do:
+        Three things you must not do:
+
+        - Do not do unrelated repository work while a walk is open — committing
+          finished work, amending, rebasing, switching branches, stashing. A run
+          holds a claim about one tree and any git-visible change invalidates it,
+          so the walk you are in is spent. Committing is the one that catches
+          people, because it feels like progress rather than a change. Fixing what
+          a step reported is the exception, and `open_run` is how you resume from
+          it.
 
         - Do not run a step's command yourself. The server executes shell steps and
           owns their verdicts; running them again costs time and proves nothing.

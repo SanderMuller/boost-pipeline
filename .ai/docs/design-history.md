@@ -82,6 +82,7 @@ reverting the file with caches cleared is what settles it.
 | An MCP prompt drives the flow | A thin driving skill file | `laravel/boost` already does this with `LaravelCodeSimplifier`, and Claude Code surfaces prompts as slash commands. No extra file, works in any MCP client, and it cannot drift from the tool descriptions because it lives beside them |
 | Deterministic truncation plus a log file | Paginating oversized output | Simplest and deterministic. Pagination stays available if truncation turns out to cost the agent too much |
 | No feature flag | A flag | Additive internal tooling. Omitting the `.mcp.json` entry is the off switch |
+| The fix-loop advice removes the judgement | A rule the reader applies | Two rules were written and shipped before this one, both plausible, both wrong. Splitting by run state failed for a halt fixed by editing a config path. Keying on "did your fix change a file" failed because the fingerprint covers `HEAD`, so a commit or amend moves the tree with nothing on disk changed — contradicting the stale message shipped one release earlier. `open_run` is idempotent on an unmoved tree, which lets the advice say "call open_run" and stop. A rule its own author applied wrongly twice is a rule to delete, not to reword |
 
 Two smaller ones, both removals made during review:
 

@@ -47,6 +47,10 @@ final class PipelineServer extends Server
     Neither call sees a fix that touches only a git-ignored file, `.env` for
     instance: nothing moves, so judge that one yourself.
 
+    While a walk is open, do no unrelated repository work — no committing finished
+    work, amending, rebasing or switching branches. A run holds a claim about one
+    tree, and any git-visible change invalidates it.
+
     A "skill" step is handed to you to invoke, then acknowledged with report_step;
     it is recorded as acknowledged, never as verified.
 
