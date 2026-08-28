@@ -133,7 +133,7 @@ Four systems were checked:
 
 Every one of them splits a *small named values* tier from a *large blob* tier and caps the
 small one hard. The blob tier already exists here: every step writes its full output to
-`storage/pipeline/logs/`. And the motivating case is covered by the shell —
+`storage/logs/pipeline/`. And the motivating case is covered by the shell —
 `richter:affected-tests --plain` exists expressly "for command substitution", so
 `php artisan test $(php artisan richter:affected-tests --plain)` needs no new machinery. The
 README's "Passing data between steps" section documents the three patterns that replace it.

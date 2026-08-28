@@ -123,7 +123,7 @@ rather than `failed`, along with the timeout and thrown-exception paths.
 ## Output limits
 
 MCP output warns at 10,000 tokens and caps at 25,000. Every shell step writes its full output to
-`storage_path('pipeline/logs/<run>-<step>.log')` and returns a deterministic truncation plus the
+`storage_path('logs/pipeline/<run>-<step>.log')` and returns a deterministic truncation plus the
 log path. `Server::$defaultPaginationLength` in `laravel/boost` is the reminder that pagination
 is the alternative if truncation costs the agent too much.
 

@@ -198,8 +198,8 @@ explained away. Only a pass records a tree, so fixing a blocked step and retryin
 
 ## Letting something else read the run
 
-Run state lives in the server process. A receipt goes to `storage/logs/pipeline/receipt.json` after
-each resolution, and `php artisan pipeline:verify` turns it into an exit code.
+Run state lives in the server process. A receipt goes to `storage/logs/pipeline/receipts/<pipeline>.json`
+after each resolution, and `php artisan pipeline:verify` turns it into an exit code.
 
 Exit 0 only when a run verified the code now on disk. It fails when no run was recorded, when the
 receipt describes a different tree, when the run recorded itself stale, and when any step is
