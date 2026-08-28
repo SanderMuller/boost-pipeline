@@ -10,6 +10,78 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.6 - 2026-08-28
+
+Messages that told the reader less than the code knew. Sourced from production dogfood across two
+consuming applications; no API removed and no verdict changed.
+
+### Fixed
+
+- **A halted step named no way to reach its output.** An `error` verdict travels on MCP's error
+  channel, which is text only, while a `failed` verdict goes through structured output and carries
+  `log`. So the state where output is least reproducible was the one that dropped the pointer — and
+  because the payload is bounded, it announced how many lines it was omitting and then omitted them:
+  
+  ```
+  Step [noisy-slow] could not run: Timed out after 3s. 1
+  … 380 lines omitted …
+  400
+  Full output: storage/logs/pipeline/r-d2634f-noisy-slow.log
+  
+  ```
+- **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
+  and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
+  the payload counted lines it then discarded with nothing to say so. The note names the log
+  directory, because the fix is a path permission — a read-only mount or a bad owner after a deploy,
+  which is the same trigger the write tolerance already exists for.
+  
+  The bound is kept deliberately. Unbounded output on a halting path is the worse trade, and it is
+  the path least able to afford it.
+  
+- **Output is dropped three ways, and only one of them was reported.** Beyond omitting whole lines,
+  the summariser caps total bytes and clamps a single long line. A step printing one very long line
+  lost its tail while the "lines omitted" count stayed at zero, so the quietest form of the loss was
+  also the one nothing mentioned. `summarise()` now reports `clipped` alongside `truncated`, and the
+  note fires on either.
+  
+- **The stale message named two causes for a three-cause condition.** The tree fingerprint covers
+  the commit as well as every uncommitted file, so `git commit`, `--amend`, `checkout` and `rebase`
+  move it with no file changed and nothing to undo. A run staled by an amend sent its author looking
+  for an edit that had not happened. The message names that cause now, and says it needs no file to
+  change.
+  
+
+### Changed
+
+Additive. See
+[UPGRADING.md](https://github.com/SanderMuller/boost-pipeline/blob/main/UPGRADING.md).
+
+- `OutputSummariser::summarise()` returns one more key, `clipped`. `truncated` keeps its exact
+  meaning: it is paired with a line count, and a clipped line omits no line, so the two are separate
+  rather than one widened flag. A caller reading by key is unaffected; one comparing or serialising
+  the whole array sees an extra key.
+- `LogWriter` gains a `directory()` accessor, so a message can name where a log would have gone.
+
+### Documentation
+
+- **Do not work in the repository while a walk is open.** A run holds a claim about one tree, and any
+  git-visible change invalidates it — not only an edit. Two consumers have now staled a run by
+  working during one, once by editing and once by committing, which is enough to make it a stated
+  rule rather than something each project rediscovers. Nothing needs undoing when it happens: reopen
+  against the commit you now have.
+
+### Internal
+
+- The 0.10.2 web-request guard is now pinned. Its tests all ran under a harness that always reports
+  running-in-console, so the guard could be deleted with the suite staying green.
+
+### Verified
+
+387 tests, 937 assertions. PHPStan level max, Rector and Pint clean. CI green across all five matrix
+legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.5...v0.10.6
+
 ## v0.10.5 - 2026-08-28
 
 ### Fixed
@@ -89,6 +161,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -155,6 +228,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -165,6 +239,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -296,6 +371,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -340,10 +416,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -445,9 +523,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -595,6 +675,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -683,6 +764,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -954,6 +1036,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1011,6 +1094,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
