@@ -31,6 +31,7 @@ _ide_helper_models.php
 
 # Claude Code
 .claude/scheduled_tasks.lock
+.claude/worktrees
 
 # Misc
 phpstan.neon
