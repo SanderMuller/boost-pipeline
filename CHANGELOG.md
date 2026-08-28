@@ -10,6 +10,50 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.8 - 2026-08-28
+
+0.10.7 told you to call `open_run` after fixing a failing step. It did not say — and could not have,
+because it was not true — that taking the other branch could not be undone. Sourced from production
+dogfood. No API changed.
+
+### Fixed
+
+- **A stale run can be reopened.** Resolving a step absorbs the current tree as the one the run last
+  saw, so a `next_step` that followed a fix left the run permanently stale: the steps that passed
+  before the fix stayed pinned to the tree from before it, while the run reported no movement.
+  `open_run` handed that same run back, so the obvious recovery — see the stale key, reopen — did
+  nothing, and the only way out was to move the tree again.
+  
+  `open_run` now replaces a stale run. Nothing is lost by it: a stale run cannot reach
+  `all_verified: true` by any route, so returning it served only to look like a recovery. A healthy
+  run is still handed back unchanged.
+  
+  *Regressed, calling `open_run` after a `next_step` that followed a fix returns the same run id,
+  still carrying the `stale` key.*
+  
+- **One tree reading per reuse decision.** `open_run` asked whether the tree had moved and whether
+  the run was stale, and each question captured the fingerprint — two `git status` runs plus a hash
+  of every dirty file, on the call an agent makes most. The consistency cost was the worse half: the
+  tree can move between two readings, and then the answers describe different trees.
+  
+  *Regressed, a run reopened while the tree is being written to can report movement and staleness
+  measured against different trees.*
+  
+
+### Changed
+
+- **The rule against working in the repository during a walk is now in the prompt and the server
+  instructions**, not only the README. Every message about a moved tree reaches an agent mid-walk,
+  and all of them arrive after the walk is already spent; the rule that avoids it lived somewhere an
+  agent never reads. Committing finished work is the case that catches people, because it feels like
+  progress rather than a change.
+  
+  If your own instructions carry that rule locally, they can drop it once you are on this release.
+  
+  *Regressed, an agent driving the pipeline is told what to do about a moved tree and never told how
+  to avoid one.*
+  
+
 ## v0.10.7 - 2026-08-28
 
 Guidance that told the reader to do the thing that breaks the run, and three messages that named
@@ -90,6 +134,7 @@ consuming applications; no API removed and no verdict changed.
   … 380 lines omitted …
   400
   Full output: storage/logs/pipeline/r-d2634f-noisy-slow.log
+  
   
   
   ```
@@ -230,6 +275,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -298,6 +344,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -308,6 +355,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -443,6 +491,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -489,10 +538,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -598,9 +649,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -752,6 +805,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -840,6 +894,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1115,6 +1170,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1172,6 +1228,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
