@@ -64,24 +64,31 @@ final class RunManager
             $run = null;
         }
 
-        if ($run instanceof Run && $run->treeHasMoved()) {
-            // A run that has recorded nothing has no verdict to lose, so it takes
-            // the new tree and keeps its id instead of being thrown away.
-            if ($run->results() === []) {
+        if ($run instanceof Run) {
+            // One capture answers both. Asking separately reads the tree twice on
+            // the call an agent makes most, and lets the two answers describe
+            // different trees when it moves in between.
+            //
+            // A run that is then replaced or rebaselined reads the tree again,
+            // and should: that read is the new baseline the run starts from, not
+            // a repeat of this question. Threading this digest into it would
+            // baseline against a moment already past.
+            ['moved' => $moved, 'stale' => $stale] = $run->condition();
+
+            if ($moved && $run->results() === []) {
+                // Nothing recorded, so no verdict to lose: it takes the new tree
+                // and keeps its id instead of being thrown away.
                 $run->rebaseline();
-            } else {
+            } elseif ($moved) {
+                $run = null;
+            } elseif ($stale) {
+                // A stale run can never verify: an earlier step measured a tree
+                // that no longer exists, and no later resolution undoes that.
+                // Reopening is the documented way out of a fix applied with
+                // next_step, so it has to be a real one — and by then the tree has
+                // stopped moving, because resolving that step absorbed it.
                 $run = null;
             }
-        }
-
-        // A stale run can never verify: an earlier step measured a tree that no
-        // longer exists, and no later resolution undoes that. Reopening is the
-        // documented way out of a fix applied with next_step, so it has to be a
-        // real one — and by then `treeHasMoved()` says no, because resolving that
-        // step absorbed the new tree as the last one seen. Without this the
-        // obvious recovery silently returns the same unverifiable run.
-        if ($run instanceof Run && $run->staleReason() !== null) {
-            $run = null;
         }
 
         if (! $run instanceof Run) {

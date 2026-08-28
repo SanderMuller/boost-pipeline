@@ -318,3 +318,35 @@ it('still hands back the same run when it is neither stale nor moved', function 
     expect($run->staleReason())->toBeNull()
         ->and($manager->open('pr')->id)->toBe($run->id);
 });
+
+it('reads the tree once to decide whether a run is reusable', function (): void {
+    // `open()` asks two things — has the tree moved, and is the run stale — and
+    // each used to capture. That is two `git status` runs plus a hash of every
+    // dirty file on the call an agent makes most, and it lets the two answers
+    // describe different trees when it moves in between.
+    //
+    // Scoped to the decision on purpose. A run that gets replaced or rebaselined
+    // reads the tree once more to set its own baseline, which is a different
+    // question and not something this should pin to a number.
+    $counting = new class implements TreeFingerprint
+    {
+        public int $captures = 0;
+
+        public function capture(): string
+        {
+            $this->captures++;
+
+            return 'tree-a';
+        }
+    };
+
+    $stores = [];
+    $manager = managerOver(pipelinesOf(['pr' => 2]), $stores, $counting);
+
+    $manager->open('pr')->resolveCurrent();
+
+    $before = $counting->captures;
+    $manager->open('pr');
+
+    expect($counting->captures - $before)->toBe(1);
+});

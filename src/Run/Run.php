@@ -403,6 +403,26 @@ final class Run
         return $this->staleGiven($this->tree?->capture());
     }
 
+    /**
+     * Whether this run can still be reused, read from ONE fingerprint capture.
+     *
+     * `treeHasMoved()` and `staleReason()` each capture, so asking both costs two
+     * `git status` runs plus a hash of every dirty file — on the call an agent
+     * makes most. Worse, the tree can move between the two readings, and then the
+     * answers describe different trees.
+     *
+     * @return array{moved: bool, stale: bool}
+     */
+    public function condition(): array
+    {
+        $now = $this->tree?->capture();
+
+        return [
+            'moved' => $now !== null && $this->lastSeen !== null && $now !== $this->lastSeen,
+            'stale' => $this->staleGiven($now) !== null,
+        ];
+    }
+
     private function staleGiven(?string $now): ?string
     {
         if ($now === null) {
