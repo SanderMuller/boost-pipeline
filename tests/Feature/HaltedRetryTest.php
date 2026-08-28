@@ -6,6 +6,7 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
+use SanderMuller\BoostPipeline\Mcp\Prompts\RunPipeline;
 use SanderMuller\BoostPipeline\Mcp\Tools\NextStep;
 use SanderMuller\BoostPipeline\Mcp\Tools\OpenRun;
 use SanderMuller\BoostPipeline\Mcp\Tools\Status;
@@ -66,7 +67,13 @@ it('retries the halted step instead of refusing for the rest of the session', fu
         ->assertHasErrors()
         // The cursor has not moved, so the instruction has to say the step is
         // retryable — the old wording told the agent the opposite.
-        ->assertSee('fix what stopped it and call next_step again');
+        ->assertSee('fix what stopped it')
+        // And which call to make, which depends on whether the fix touched the
+        // tree: a missing binary is installed without editing anything, but the
+        // same halt fixed by correcting a path in the config is an edit, and
+        // next_step does not re-check the tree the earlier passes were measured
+        // against.
+        ->assertSee('open_run if the fix edited a file');
 
     PipelineServer::tool(NextStep::class)
         ->assertOk()
@@ -129,4 +136,35 @@ it('says nothing about a log when the step wrote none', function (): void {
     PipelineServer::tool(NextStep::class)
         ->assertHasErrors()
         ->assertDontSee('Full output:');
+});
+
+it('tells a blocked run to reopen rather than continue, on every surface that advises', function (): void {
+    // The fix loop's advice used to end a walk that could never verify: fixing a
+    // failing check edits a file, the tree moves, the steps that already passed
+    // are stale, and `next_step` never re-checks that — only `open_run` does.
+    // Three surfaces carried the old advice and an agent reads whichever it sees,
+    // so asserting one would leave the other two free to drift back.
+    //
+    // Each phrase is specific to the new wording. `open_run` alone would pass
+    // vacuously: the prompt's first step already tells the agent to call it.
+    $tool = new NextStep(resolve(RunManager::class));
+
+    $description = new ReflectionClass($tool)->getProperty('description')->getValue($tool);
+    $instructions = new ReflectionClass(PipelineServer::class)->getDefaultProperties()['instructions'];
+
+    $advises = [
+        'tool description' => is_string($description)
+            && str_contains($description, 'call open_run when the fix changed any file'),
+        'server instructions' => is_string($instructions)
+            && str_contains($instructions, 'open_run rather than next_step'),
+    ];
+
+    expect($advises)->toBe([
+        'tool description' => true,
+        'server instructions' => true,
+    ]);
+
+    PipelineServer::prompt(RunPipeline::class)
+        ->assertOk()
+        ->assertSee('call `open_run` again, not');
 });

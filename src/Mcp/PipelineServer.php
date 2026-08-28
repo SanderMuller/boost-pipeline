@@ -36,8 +36,13 @@ final class PipelineServer extends Server
     Pass the same name for a whole walk. There is no default: naming nothing is an
     error rather than a guess, because guessing would advance the wrong cursor.
 
-    A step reporting "failed" returns the same step again: fix the cause and call
-    next_step. A "skill" step is handed to you to invoke, then acknowledged with
+    A step reporting "failed" returns the same step again. Fix the cause, then call
+    open_run rather than next_step whenever the fix changed a file: the steps that
+    already passed were measured against the tree before your edit, and next_step
+    does not re-check that — the walk would finish carrying passes that no longer
+    describe the code, and report all_verified false. open_run notices the moved
+    tree and starts a fresh run. next_step is right only when nothing on disk
+    changed, such as installing a missing binary. A "skill" step is handed to you to invoke, then acknowledged with
     report_step; it is recorded as acknowledged, never as verified.
 
     "complete" means the walk finished, not that everything passed. Only

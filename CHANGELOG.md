@@ -91,7 +91,7 @@ legs: PHP 8.4 and 8.5, Laravel 12 and 13, `prefer-lowest` and `prefer-stable`.
 
 ### Changed
 
-- The README is about a third of its former length. It now covers what the package does and how to configure it; the reasoning behind the design moved to the design notes that ship in `.ai/docs/`.
+- The README is about a third of its former length. It now covers what the package does and how to configure it; the reasoning behind the design moved to the design notes in `.ai/docs/`, which live in the repository rather than in the Composer archive.
 
 ### Internal
 
@@ -131,8 +131,11 @@ discard a verdict the server had already earned.
 
 Consumer applications running under a standard production PHP configuration
 (`register_argc_argv = Off`, the `php.ini-production` default) hit a 500 on every
-web request once `.config/pipeline.php` existed. Upgrade if you have installed
-this package into an application that serves web traffic.
+web request once `.config/pipeline.php` existed. Upgrade if you install this
+package outside `require-dev`, or if any environment installs dev dependencies
+and serves HTTP — a dev or staging box under a production ini is where this
+lands. A `require-dev` install deployed with `composer install --no-dev` never
+registers the provider and was never affected.
 
 ### Fixed
 

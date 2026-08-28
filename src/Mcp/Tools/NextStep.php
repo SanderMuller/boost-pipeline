@@ -25,7 +25,7 @@ final class NextStep extends Tool
 
     protected string $name = 'next_step';
 
-    protected string $description = 'Resolve the current step and get the next one. Shell steps are executed by the server — do not run the command yourself. If a step failed, fix the cause and call this again; you will get the same step until it passes.';
+    protected string $description = 'Resolve the current step and get the next one. Shell steps are executed by the server — do not run the command yourself. If a step failed, fix the cause, then call open_run when the fix changed any file: the earlier passes were measured against the tree before your edit, and this tool does not re-check that. Call this again only when nothing on disk changed; you will get the same step until it passes.';
 
     public function __construct(private readonly RunManager $runs) {}
 
@@ -115,7 +115,7 @@ final class NextStep extends Tool
 
         if ($errors !== []) {
             return Response::error(sprintf(
-                "%s\nRun state: halted. The cursor stays here — fix what stopped it and call next_step again.",
+                "%s\nRun state: halted. The cursor stays here — fix what stopped it, then call next_step if nothing on disk changed, or open_run if the fix edited a file.",
                 implode("\n", array_map(
                     // The log path goes in the text because this channel has no
                     // structured half to put it in. A `failed` verdict reports

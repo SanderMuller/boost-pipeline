@@ -222,6 +222,12 @@ the narrower question — were the mechanical steps already run against this tre
 skip them — use `pipeline:verify --server-verified`. It counts only server verdicts on a complete
 walk, and names the ids it counted, because exit 0 never said which checks ran.
 
+Whether it can answer at all depends on your step order. A walk whose mechanical steps sit ahead of
+the acknowledged ones reaches `complete` routinely; one that puts a slow or failure-prone step first
+does not, so the flag goes quiet exactly when you wanted an answer. That is a property of the
+pipeline you built rather than a guarantee, and reordering can take it away without anything saying
+so.
+
 ## Proving an agent step
 
 Where an agent step leaves a side effect, the server can check for it instead of trusting the
@@ -278,6 +284,11 @@ is the pattern GitHub Actions deprecated as a security vulnerability.
 
 Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`. Nothing prunes that
 directory, and deleting it is safe.
+
+**The receipts under it are not logs.** `storage/logs/pipeline/receipts/` sits inside a directory
+whose name says disposable, and a Laravel app clearing `storage/logs/` as routine maintenance takes
+the receipts with it. Nothing breaks — the tree simply reads as unverified until the next run — but
+clear the `*.log` files rather than the directory if you want to keep the answer.
 
 ## What it deliberately does not do
 

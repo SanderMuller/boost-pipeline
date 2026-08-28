@@ -55,8 +55,14 @@ final class RunPipeline extends Prompt
           complete on acknowledgements alone. Report verified and acknowledged
           counts separately, and say plainly if the run `halted`.
 
-        If a step fails, fix the cause and call `next_step` again; you will get the
-        same step until it passes. If a step reports it inspected 0 files, say so:
+        If a step fails, fix the cause and then call `open_run` again, not
+        `next_step`. Fixing a failing check means editing a file, which moves the
+        tree the earlier steps were measured against — carry on and the walk
+        finishes with `all_verified: false` and a `stale` key, having verified
+        nothing. `open_run` sees the tree moved and hands you a fresh run to walk
+        from the start. `next_step` is the right call only when the fix touched no
+        file, such as installing a missing binary; then you get the same step
+        until it passes. If a step reports it inspected 0 files, say so:
         it passed without proving anything.
         TXT);
     }
