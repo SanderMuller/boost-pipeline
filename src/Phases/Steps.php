@@ -48,6 +48,16 @@ final class Steps
      */
     public function declaredPhases(): array
     {
-        return array_keys($this->inPhase);
+        return array_keys(array_filter(
+            $this->inPhase,
+            // in() registers a phase on access, so asking for a collection and
+            // never appending to it leaves one holding nothing. Nothing was
+            // declared into that phase, and a dropped-steps notice naming no
+            // steps pins the run to unverified while telling nobody what to fix.
+            //
+            // all(), not entries(): a parallel group with no steps in it is one
+            // entry holding nothing, and it must count as nothing too.
+            static fn (StepCollection $collection): bool => $collection->all() !== [],
+        ));
     }
 }

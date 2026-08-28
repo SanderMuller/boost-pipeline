@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Phase;
+use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Phases\Defaults\Agent;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
+use SanderMuller\BoostPipeline\Phases\StepCollection;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\AcknowledgementNotAllowed;
+use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Steps\Shell;
@@ -227,5 +230,102 @@ it('refuses to claim all_verified when a declared step was dropped before the wa
     expect($run->state())->toBe(RunState::Complete)
         ->and($run->walk->notices)->toHaveCount(1)
         ->and($run->walk->notices[0])->toContain('never-ran')
+        ->and($run->allVerified())->toBeFalse();
+});
+
+/**
+ * A receipt store the test can read back through the contract's own `read()`,
+ * built here rather than shared: the only other fake is file-local to another
+ * test file, and two assertions do not earn a shared double.
+ */
+function collectingReceipts(): ReceiptStore
+{
+    return new class implements ReceiptStore
+    {
+        private ?Receipt $receipt = null;
+
+        public function write(Receipt $receipt): void
+        {
+            $this->receipt = $receipt;
+        }
+
+        public function read(): ?Receipt
+        {
+            return $this->receipt;
+        }
+    };
+}
+
+it('raises no dropped-steps notice for a phase that was named but never appended to', function (): void {
+    // `in()` registers a phase on access, so naming one and appending nothing
+    // used to emit `Step(s)  dropped: ...` — a notice with no step ids, which
+    // pinned the run to unverified with nothing a reader could act on.
+    $receipts = collectingReceipts();
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'ran'));
+        $steps->in(UnregisteredPhase::class);
+    });
+
+    $run = Run::start($pipeline->walk(), new FakeRunner, 'r-named-only', receipts: $receipts);
+    $run->resolveCurrent();
+
+    expect($run->walk->notices)
+        ->toBeEmpty()
+        ->and($run->state())->toBe(RunState::Complete)
+        ->and($run->allVerified())->toBeTrue()
+        ->and($receipts->read()?->coverage)->toBe('complete');
+});
+
+it('raises no dropped-steps notice for a phase holding only an empty parallel group', function (): void {
+    // The case a `StepCollection::isEmpty()` check would miss: the group is one
+    // entry, so `entries` is not empty even though it holds no steps.
+    $receipts = collectingReceipts();
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'ran'));
+        $steps->in(UnregisteredPhase::class)->parallel(function (StepCollection $steps): void {});
+    });
+
+    $run = Run::start($pipeline->walk(), new FakeRunner, 'r-empty-group', receipts: $receipts);
+    $run->resolveCurrent();
+
+    expect($run->walk->notices)
+        ->toBeEmpty()
+        ->and($run->state())->toBe(RunState::Complete)
+        ->and($run->allVerified())->toBeTrue()
+        ->and($receipts->read()?->coverage)->toBe('complete');
+});
+
+it('still drops a phase that holds one real step and one empty parallel group', function (): void {
+    // The filter must not read "has an empty group" as "declares nothing".
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'ran'));
+        $steps->in(UnregisteredPhase::class)
+            ->append(Shell::run('true', id: 'also-never-ran'))
+            ->parallel(function (StepCollection $steps): void {});
+    });
+
+    $run = Run::start($pipeline->walk(), new FakeRunner, 'r-mixed');
+    $run->resolveCurrent();
+
+    expect($run->walk->notices)->toHaveCount(1)
+        ->and($run->walk->notices[0])->toContain('also-never-ran')
+        ->and($run->allVerified())->toBeFalse();
+});
+
+it('does not turn a run that verified nothing into a green one', function (): void {
+    // Removing the notice must not hand back a pass. This walk is empty, so the
+    // run is unverified for the other reason — it has no results — and that
+    // reason has to keep holding on its own.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(UnregisteredPhase::class);
+    });
+
+    $run = Run::start($pipeline->walk(), new FakeRunner, 'r-nothing');
+
+    expect($run->walk->notices)->toBeEmpty()
+        ->and($run->walk->isEmpty())->toBeTrue()
+        ->and($run->state())->toBe(RunState::Complete)
         ->and($run->allVerified())->toBeFalse();
 });
