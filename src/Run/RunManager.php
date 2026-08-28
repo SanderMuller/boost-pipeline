@@ -74,6 +74,16 @@ final class RunManager
             }
         }
 
+        // A stale run can never verify: an earlier step measured a tree that no
+        // longer exists, and no later resolution undoes that. Reopening is the
+        // documented way out of a fix applied with next_step, so it has to be a
+        // real one — and by then `treeHasMoved()` says no, because resolving that
+        // step absorbed the new tree as the last one seen. Without this the
+        // obvious recovery silently returns the same unverifiable run.
+        if ($run instanceof Run && $run->staleReason() !== null) {
+            $run = null;
+        }
+
         if (! $run instanceof Run) {
             $run = Run::start(
                 $this->pipelineNamed($name)->walk($selection),

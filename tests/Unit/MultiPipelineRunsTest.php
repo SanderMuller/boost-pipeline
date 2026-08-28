@@ -280,3 +280,41 @@ it('keeps two pipelines apart even when they declare the same step id', function
         ->and($stores['release']->receipt?->verdicts)->toBe(['phpstan' => 'passed'])
         ->and($stores['pr']->receipt?->runId)->not->toBe($stores['release']->receipt?->runId);
 });
+
+it('reopens a stale run rather than handing the same unverifiable one back', function (): void {
+    // The recovery path after taking the wrong branch of the fix loop. Calling
+    // next_step after an edit resolves the step against the new tree, which
+    // becomes the last tree the run saw — so `treeHasMoved()` is false from then
+    // on while the earlier passes stay pinned to the tree before the edit. The
+    // run is stale forever, and without this the obvious recovery — notice the
+    // stale note, call open_run — returns that same run and does nothing.
+    $stores = [];
+    $tree = new MovableTree;
+    $manager = managerOver(pipelinesOf(['pr' => 2]), $stores, $tree);
+
+    $first = $manager->open('pr');
+    $first->resolveCurrent();
+
+    // The fix an agent makes for the failing step.
+    $tree->digest = 'tree-b';
+
+    // Taking the wrong branch: next_step rather than open_run.
+    $first->resolveCurrent();
+
+    expect($first->staleReason())->not->toBeNull()
+        ->and($first->treeHasMoved())->toBeFalse()
+        ->and($manager->open('pr')->id)->not->toBe($first->id);
+});
+
+it('still hands back the same run when it is neither stale nor moved', function (): void {
+    // The idempotency the reopen rule must not cost: a healthy run is returned as
+    // it stands, so open_run remains safe to call at any point in a walk.
+    $stores = [];
+    $manager = managerOver(pipelinesOf(['pr' => 3]), $stores, new MovableTree);
+
+    $run = $manager->open('pr');
+    $run->resolveCurrent();
+
+    expect($run->staleReason())->toBeNull()
+        ->and($manager->open('pr')->id)->toBe($run->id);
+});
