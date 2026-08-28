@@ -416,7 +416,7 @@ final class Run
 
             if ($measuredAt !== null && $measuredAt !== $now) {
                 return sprintf(
-                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Either something edited files, or a step that rewrites code is missing ->mutating() — and a rewrite belongs before the checks that must see it.%s Open a new run.',
+                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Something edited files, or the commit moved (a commit, amend, checkout or rebase — the fingerprint covers HEAD too, so this needs no file to change and nothing to undo), or a step that rewrites code is missing ->mutating(), which belongs before the checks that must see it.%s Open a new run.',
                     $stepId,
                     // Naming a step in a group would read as identifying the writer.
                     // Every step in a group measures the same tree from before the

@@ -387,3 +387,20 @@ it('never reports verified and stale from different readings of the tree', funct
 
     expect($verification['all_verified'] && $verification['stale'] !== null)->toBeFalse();
 });
+
+it('names the moved commit as a cause, not just an edit', function (): void {
+    // The fingerprint is HEAD plus everything uncommitted, so a commit, amend,
+    // checkout or rebase moves it with no file changed and nothing to undo. A
+    // consumer who amended mid-walk went looking for an edit that never happened,
+    // because the message enumerated two causes for a three-cause condition.
+    $tree = new SettableFingerprint;
+    $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-amend', $tree);
+
+    $run->resolveCurrent();
+
+    $tree->value = 'moved';
+
+    expect($run->staleReason())->toContain('the commit moved')
+        ->and($run->staleReason())->toContain('amend')
+        ->and($run->staleReason())->toContain('no file to change');
+});

@@ -184,6 +184,13 @@ untracked. Edit code after a run went green and `all_verified` flips to false, w
 saying so. `open_run` uses the same signal — it returns the open run while the tree sits still, and
 starts a fresh one once you change something, which is what makes the fix loop work.
 
+**Do not work in the repository while a walk is open.** A run holds a claim about one tree, and
+*any* git-visible change invalidates it — not only an edit. The commit is part of the fingerprint,
+so `git commit`, `--amend`, `checkout`, `rebase` and `stash` all move it with nothing on disk
+changed. That is the mechanism working, and it is worth knowing before it surprises you: finishing
+a step and committing the work feels like progress rather than a change, and it stales the run all
+the same. Nothing needs undoing when it happens — reopen against the commit you now have.
+
 A step that rewrites code declares it, so its own writes do not count against the run:
 
 ```php

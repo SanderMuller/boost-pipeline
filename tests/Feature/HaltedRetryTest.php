@@ -89,3 +89,44 @@ it('answers whether the run can be trusted while it is still halted', function (
         ->assertSee('"state":"halted"')
         ->assertSee('"all_verified":false');
 });
+
+it('names the log path when a halted step wrote one', function (): void {
+    // The state where the output matters most was the one naming no way to reach
+    // it: an `error` verdict takes MCP's text-only error channel, while `failed`
+    // goes through `Response::structured()` and carries `log`. Truncation made it
+    // worse — the summary said how many lines were dropped and then dropped them.
+    $runner = new class implements StepRunner
+    {
+        public function run(Step $step, string $runId): Result
+        {
+            return Result::error(
+                $step->id(),
+                "Timed out after 3s. 1\n… 380 lines omitted …\n400",
+                logPath: '/tmp/pipeline/r-abc123-noisy-slow.log',
+            );
+        }
+    };
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('seq 1 400; sleep 30', id: 'noisy-slow'));
+    });
+
+    app()->instance(RunManager::class, runManagerFor($pipeline, $runner));
+
+    PipelineServer::tool(OpenRun::class);
+
+    PipelineServer::tool(NextStep::class)
+        ->assertHasErrors()
+        ->assertSee('380 lines omitted')
+        ->assertSee('Full output: /tmp/pipeline/r-abc123-noisy-slow.log');
+});
+
+it('says nothing about a log when the step wrote none', function (): void {
+    // The existing harness errors without a log path, so the clause has to be
+    // conditional rather than printing an empty pointer.
+    PipelineServer::tool(OpenRun::class);
+
+    PipelineServer::tool(NextStep::class)
+        ->assertHasErrors()
+        ->assertDontSee('Full output:');
+});

@@ -117,10 +117,18 @@ final class NextStep extends Tool
             return Response::error(sprintf(
                 "%s\nRun state: halted. The cursor stays here — fix what stopped it and call next_step again.",
                 implode("\n", array_map(
+                    // The log path goes in the text because this channel has no
+                    // structured half to put it in. A `failed` verdict reports
+                    // `log` through `Response::structured()`; an `error` verdict
+                    // takes MCP's error channel, which is text only — so without
+                    // this the one state where the output matters most is the one
+                    // that names no way to reach it, while the summary above it
+                    // says how many lines were dropped.
                     static fn (Result $result): string => sprintf(
-                        'Step [%s] could not run: %s',
+                        'Step [%s] could not run: %s%s',
                         $result->stepId,
                         $result->reason ?? $result->summary,
+                        $result->logPath === null ? '' : sprintf(' Full output: %s', $result->logPath),
                     ),
                     $errors,
                 )),

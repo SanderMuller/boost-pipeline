@@ -125,17 +125,22 @@ function withArgv(?array $argv, Closure $assert): void
 }
 
 it('stays inert in a web request, even with argv saying mcp:start', function (): void {
-    // Deliberately the value that WOULD start the server in a console app, so a
-    // pass here cannot come from the argv guard standing in for the console one.
+    // Pins the CONSOLE guard, and only this case does. argv is deliberately the
+    // value that WOULD start the server in a console app, so a pass cannot come
+    // from the argv guard standing in for it — delete the console guard and this
+    // goes red. The property is "do not read argv at all outside console", which
+    // is narrower than the outage below and worth having on its own terms.
     withArgv(['artisan', 'mcp:start'], function (): void {
         expect(new ConsoleServerProcess(new WebApplication)->isStarting())->toBeFalse();
     });
 });
 
 it('stays inert in a web request when argv is absent too', function (): void {
-    // Both guards facing the same call: the reported production shape, a
-    // dev-dependency install serving HTTP under an ini with register_argc_argv
-    // off. Neither guard is asked to carry it alone.
+    // Pins the OUTAGE: a dev-dependency install serving HTTP under an ini with
+    // register_argc_argv off, which raised an ErrorException on the undefined
+    // key. The null-coalesce alone fixes this, so deleting the console guard
+    // leaves it green — that is correct, not redundancy. Neither case covers the
+    // other, and removing either one un-pins a property.
     withArgv(null, function (): void {
         expect(new ConsoleServerProcess(new WebApplication)->isStarting())->toBeFalse();
     });
