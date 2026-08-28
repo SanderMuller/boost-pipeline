@@ -159,7 +159,8 @@ An `error` travels on MCP's error channel; a `failed` verdict does not, because 
 *successful* tool call reporting a finding. Either way the cursor holds, so fix the cause — then
 call `open_run` rather than deciding whether your fix moved the tree. It hands back the same run
 when nothing moved and a fresh one when anything did, including a commit; `next_step` re-runs only
-that step and never re-checks. The server cannot verify that `/evaluate` really ran, so
+that step and never re-checks. It also replaces a run that has gone stale — so if you did continue
+with `next_step` and stranded the walk, reopening is the way out rather than a no-op. The server cannot verify that `/evaluate` really ran, so
 `state: complete` means the walk finished, never "everything passed". A *failed* step is still
 `server_run: true`: that key answers who produced the verdict, not whether it passed.
 
@@ -170,7 +171,7 @@ that step and never re-checks. The server cannot verify that `/evaluate` really 
 
 | Tool          | What it does                                                            |
 |---------------|-------------------------------------------------------------------------|
-| `open_run`    | Starts a run, returns the first step. Idempotent.                       |
+| `open_run`    | Starts a run, returns the first step. Idempotent on a healthy run; replaces one whose tree moved or that has gone stale. |
 | `next_step`   | Resolves the current position, returns the next, or the same one again. |
 | `report_step` | Acknowledges a skill step. Only valid while `awaiting`.                 |
 | `status`      | Position, per-step verdicts, verified versus acknowledged.              |
