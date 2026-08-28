@@ -10,6 +10,69 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.10.7 - 2026-08-28
+
+Guidance that told the reader to do the thing that breaks the run, and three messages that named
+fewer causes than the code knows about. Sourced from production dogfood across two consuming
+applications. No API changed.
+
+### Fixed
+
+- **The fix loop advised the call that stales the run.** Fixing a failing check means editing a
+  file. That moves the tree the already-passed steps were measured against, and `next_step` never
+  re-checks it — only `open_run` does. So "fix the cause and call next_step again" finished a walk
+  carrying passes that no longer described the code.
+  
+  The guidance now says to call `open_run` and not to work out whether the fix moved anything:
+  `open_run` hands back the run you were already in when nothing moved, and a fresh one when
+  anything did. If your own instructions tell an agent to continue with `next_step` after a fix,
+  update them — that is the shape this corrects.
+  
+  *Regressed, this reads "fix the cause and call next_step again", and a walk that fixed a failing
+  check finishes with `all_verified: false` and a `stale` key.*
+  
+- **`pipeline:verify` named an edit as the only cause of a moved tree.** The receipt's `stale`
+  message learned in 0.10.6 that a commit, amend, checkout or rebase moves the fingerprint with no
+  file changed; the command did not. That message is the one a person reads at a gate, and merging a
+  base branch in before opening a pull request is the ordinary way to reach it having touched
+  nothing.
+  
+  *Regressed, a rebase that changed no file reports only "verified a different working tree", and
+  the reader goes looking for an edit that never happened.*
+  
+- **A selection nothing carries blamed a typo.** An unquoted shell variable word-splitting into the
+  next flag arrives as a scope like `backend --server-verified`, and "check the spelling" sends the
+  reader hunting a tag that never existed.
+  
+  *Regressed, a scope containing a space or starting with a dash is reported as a possible
+  misspelling and nothing else.*
+  
+
+### Documentation
+
+- **`--server-verified` answering at all is a property of your step order**, not a guarantee. A walk
+  whose mechanical steps sit ahead of the acknowledged ones reaches `complete` routinely; one that
+  puts a slow or failure-prone step first does not, so the flag goes quiet exactly when an answer
+  was wanted. Reordering can take that away without anything saying so.
+  
+- **The receipts under `storage/logs/pipeline/` are not logs.** They sit in a directory whose name
+  says disposable, and a Laravel app clearing `storage/logs/` as routine maintenance discards them.
+  Nothing breaks — the tree reads as unverified until the next run — but clear the `*.log` files
+  rather than the directory if you want to keep the answer.
+  
+- **`inspecting()` is not the default answer to the vacuous-pass trap.** It needs a second command
+  that enumerates what will be checked, and most tools offer none. Dropping the scope is usually
+  cheaper: `yarn lint-all` cannot pass vacuously and needs no enumerator. Reach for `inspecting()`
+  when the scoped command is the one you actually mean to run.
+  
+- **`withEnv()` is documented, with a derived value rather than a literal.** The value most likely to
+  need pinning is a test database name, and a literal is exactly wrong for it — several checkouts
+  against one server collide on a committed name. The example derives it from the checkout, with the
+  constraint that makes it safe: the same checkout must produce the same value on every run.
+  
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.6...v0.10.7
+
 ## v0.10.6 - 2026-08-28
 
 Messages that told the reader less than the code knew. Sourced from production dogfood across two
@@ -27,6 +90,7 @@ consuming applications; no API removed and no verdict changed.
   … 380 lines omitted …
   400
   Full output: storage/logs/pipeline/r-d2634f-noisy-slow.log
+  
   
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
@@ -165,6 +229,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -232,6 +297,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -242,6 +308,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -375,6 +442,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -420,10 +488,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -527,9 +597,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -679,6 +751,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -767,6 +840,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1040,6 +1114,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1097,6 +1172,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
