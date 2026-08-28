@@ -263,6 +263,11 @@ step really is scoped, declare it with
 `Shell::run('yarn lint')->inspecting('git diff --name-only HEAD')`. The command still always runs,
 and a step that inspected nothing says so in its verdict.
 
+Usually the cheaper fix is to remove the scope instead. `yarn lint-all` cannot pass vacuously, needs
+no second command to enumerate what it will check, and is what most projects want from a gate
+anyway. Reach for `inspecting()` when the scoped command is the one you actually mean to run — a
+slow suite you deliberately narrow — rather than as the default answer to the trap.
+
 ## Extending
 
 A phase is a name and a position, so a custom one costs no machinery. Implement `Phase`, then place
@@ -277,6 +282,22 @@ it with `->withPhases(fn (Phases $phases) => $phases->append(BlastRadius::class)
 Each step runs in a subprocess with every key your app's `.env` **defines** removed, so the child
 re-reads `.env` rather than inheriting resolved values. This is not a sandbox: anything exported in
 the parent shell reaches every step command.
+
+`withEnv()` pins a value for one step, which is what the scrubbing above is for: a test step must
+set its own `DB_DATABASE` rather than inherit whatever the app booted with. The value most likely to
+need pinning is also the one a literal gets wrong — several checkouts on one database server collide
+on a committed name — so derive it:
+
+```php
+$database = substr('myapp_phpunit_'.preg_replace('/[^A-Za-z0-9_]/', '_', basename(base_path())), 0, 64);
+
+$steps->in(Tests::class)->append(
+    Shell::run('php artisan test', id: 'phpunit')->withEnv(['DB_DATABASE' => $database]),
+);
+```
+
+The config is real PHP, so anything you can compute is available. Keep it deterministic — the same
+checkout must produce the same value on every run, or steps stop sharing the resource they set up.
 
 There is no step-output mechanism, deliberately. Use command substitution inside one step, or have
 one step write a file (`--json`) that a later step reads. Never parse another step's stdout — that

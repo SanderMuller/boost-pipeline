@@ -47,7 +47,7 @@ final readonly class Walk
         // verified while the scope the caller asked about was never checked.
         if ($selection !== null && ! $matchedSelection) {
             $notices[] = sprintf(
-                'No step carries the tag [%s], so this run holds only the steps that carry no tag at all. Check the spelling: matching is case-sensitive.',
+                'No step carries the tag [%s], so this run holds only the steps that carry no tag at all. Check the spelling: matching is case-sensitive. A value containing a space, or starting with a dash, is an unquoted shell variable far more often than it is a tag.',
                 $selection,
             );
         }

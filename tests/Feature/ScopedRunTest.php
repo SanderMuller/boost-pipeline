@@ -127,3 +127,13 @@ it('surfaces the bad-scope notice through the tool and refuses to call the run v
 
     expect($run?->allVerified())->toBeFalse();
 });
+
+it('names an unquoted shell variable as the likelier cause than a typo', function (): void {
+    // The reported shape: an unquoted `$SCOPE` in a shell command word-split into
+    // the next flag, so the selection arrived as `backend --server-verified`.
+    // "Check the spelling" sends the reader hunting a typo in something that was
+    // never a tag, and every surface reads this one notice.
+    PipelineServer::tool(OpenRun::class, ['only' => 'backend --server-verified'])
+        ->assertOk()
+        ->assertSee('unquoted shell variable');
+});
