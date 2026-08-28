@@ -117,3 +117,23 @@ it('keeps the end of a huge output, where the verdict usually is', function (): 
 
     expect($result['summary'])->toContain('FAILED 3 tests');
 });
+
+it('reports the byte cap as clipping, with no line long enough to clamp', function (): void {
+    // Isolates the byte cap from the per-line clamp: every line here is four
+    // bytes, so the clamp cannot fire and `clipped` can only come from the cap.
+    // The existing multi-megabyte case uses long lines, so the clamp sets the
+    // flag there whether the cap contributes or not.
+    $output = str_repeat("abc\n", 600_000);
+    $summary = (new OutputSummariser)->summarise($output);
+
+    expect(strlen($output))->toBeGreaterThan(OutputSummariser::MAX_BYTES)
+        ->and($summary['clipped'])->toBeTrue();
+});
+
+it('reports short whole output as neither truncated nor clipped', function (): void {
+    // The ordinary case, and the one that keeps the note off every normal step.
+    $summary = (new OutputSummariser)->summarise("one\ntwo\n");
+
+    expect($summary['truncated'])->toBeFalse()
+        ->and($summary['clipped'])->toBeFalse();
+});

@@ -589,3 +589,14 @@ it('says nothing about a lost log on a quiet passing step', function (): void {
     expect($result->verdict)->toBe(Verdict::Passed)
         ->and($result->summary)->not->toContain('No log could be written');
 });
+
+it('says nothing about a lost log on a noisy passing step that could log', function (): void {
+    // The opposite direction of the unloggable pass. Without it, cutting the log
+    // path out of describePass() would make every noisy pass claim a loss while
+    // its log sits on disk, and no passing-step test would notice.
+    $result = runStep($this->runner, Shell::run('seq 1 400', id: 'noisy-pass-logged'));
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->logPath)->not->toBeNull()
+        ->and($result->summary)->not->toContain('No log could be written');
+});
