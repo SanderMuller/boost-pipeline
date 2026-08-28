@@ -241,6 +241,9 @@ it('logs the full scope output and bounds what reaches the payload', function ()
         ->and($result->logPath)->not->toBeNull()
         ->and(substr_count((string) file_get_contents((string) $result->logPath), "\n"))->toBeGreaterThan(50)
         ->and(substr_count((string) $result->reason, "\n"))->toBeLessThan(30)
+        // The log is right there, so the reason must not claim it was lost —
+        // otherwise the two halves of one result contradict each other.
+        ->and($result->reason)->not->toContain('No log could be written')
         // A scope failure short-circuits before the step runs, so nothing else
         // claims `<run>-<step>.log` for this step.
         ->and($logs)->toHaveCount(1);
@@ -527,4 +530,62 @@ it('says nothing about a lost log on an unrunnable command that could log', func
     expect($result->logPath)->not->toBeNull()
         ->and($result->reason)->toContain('lines omitted')
         ->and($result->reason)->not->toContain('No log could be written');
+});
+
+it('names the lost log when a noisy scope command could not be logged', function (): void {
+    // The third call site that passes a log path into the summariser. Without a
+    // case here, dropping that argument makes the reason claim a loss on a run
+    // whose log exists — and the test above only proves the opposite direction.
+    $blocker = sys_get_temp_dir().'/bp-scope-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+    );
+
+    $result = runStep($runner,
+        Shell::run('echo would have run', id: 'noisy-scope-unloggable')->inspecting('seq 1 400; exit 4')
+    );
+
+    unlink($blocker);
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->logPath)->toBeNull()
+        ->and($result->reason)->toContain('scope')
+        ->and($result->reason)->toContain('the dropped output is lost');
+});
+
+it('names the lost log on a step that passed but could not be logged', function (): void {
+    // A pass drops output the same way a failure does. Nothing needs diagnosing
+    // here, but the summary is still offered as the step's output and was
+    // silently incomplete.
+    $blocker = sys_get_temp_dir().'/bp-pass-'.bin2hex(random_bytes(4));
+    file_put_contents($blocker, 'not a directory');
+
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($blocker.'/logs'),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+    );
+
+    $result = runStep($runner, Shell::run('seq 1 400', id: 'noisy-pass-unloggable'));
+
+    unlink($blocker);
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->logPath)->toBeNull()
+        ->and($result->summary)->toContain('the dropped output is lost');
+});
+
+it('says nothing about a lost log on a quiet passing step', function (): void {
+    // The note must not appear on the ordinary case, which is every passing step
+    // in a working project.
+    $result = runStep($this->runner, Shell::run('echo all good', id: 'quiet-pass'));
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->not->toContain('No log could be written');
 });

@@ -1,5 +1,23 @@
 # Upgrading
 
+## From 0.10.5 to 0.10.6
+
+Additive. No migration needed for a project that only configures steps.
+
+- `OutputSummariser::summarise()` returns one more key, `clipped`: true when output was dropped by
+  the byte cap or the per-line clamp rather than by omitting whole lines. `truncated` keeps its
+  meaning exactly — it is paired with a line count, and a clipped line omits no line, so the two
+  are separate rather than one widened flag.
+
+  A caller reading the array by key is unaffected. A caller comparing, snapshotting or serialising
+  the whole array sees an extra key. `OutputSummariser` is a runner internal in practice — nothing
+  in the README treats it as a seam — but it carries no `@internal` marker, so the shape change is
+  stated here rather than assumed harmless.
+
+- Messages now say when output was dropped and no log holds it, on every verdict: passed, failed
+  and error. The note names the log directory, because the fix is a path permission. Nothing about
+  a verdict changed — only what the message admits.
+
 ## From 0.9 to 0.10
 
 A project that declares one pipeline needs no config change. Two behaviour changes reach it anyway,

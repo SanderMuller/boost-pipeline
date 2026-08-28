@@ -171,7 +171,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
 
         return Result::passed(
             $step->id(),
-            $this->describePass($summary, $scope),
+            $this->describePass($summary, $scope, $logPath),
             $scope,
             $logPath,
         );
@@ -299,9 +299,17 @@ final readonly class ProcessStepRunner implements BatchStepRunner
     }
 
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool, clipped: bool} $summary */
-    private function describePass(array $summary, ?int $scope): string
+    private function describePass(array $summary, ?int $scope, ?string $logPath): string
     {
         $text = $this->orElse($summary['summary'], 'Passed.');
+
+        // A pass drops output the same way a failure does. Nothing needs
+        // diagnosing when a step passed, but the summary is still offered as the
+        // step's output, and offering an incomplete one silently is the thing
+        // being fixed — not the severity of the step it happened on.
+        if (($summary['truncated'] || $summary['clipped']) && $logPath === null) {
+            $text .= "\n\n".$this->lostLog();
+        }
 
         if ($scope !== 0) {
             return $text;
