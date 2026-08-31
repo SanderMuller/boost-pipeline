@@ -266,7 +266,7 @@ it('reports the same verdicts and log paths as the page does for one run', funct
     recordRun('r-shared', ['fmt' => 'passed', 'analyse' => 'failed'], state: 'blocked', allVerified: false, logs: ['analyse' => '/logs/r-shared-analyse.log']);
 
     $result = runHistory(['--run' => 'r-shared']);
-    $fromOverview = resolve(PipelineOverview::class)->run('default', 'r-shared');
+    $fromOverview = app(PipelineOverview::class)->run('default', 'r-shared');
 
     // Two readers of one projection. The moment they disagree, a terminal and a
     // browser tell a developer different things about the same run.
@@ -279,7 +279,7 @@ it('reports with the page disabled and outside a local environment', function ()
     // The command reads the same records the page would, but nothing about it is
     // gated: history is worth having in a terminal without serving anything.
     config()->set('boost-pipeline.ui.enabled', false);
-    app()->instance('env', 'production');
+    app()['env'] = 'production';
 
     recordRun('r-headless', ['fmt' => 'passed']);
 

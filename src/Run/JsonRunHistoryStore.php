@@ -217,7 +217,6 @@ final readonly class JsonRunHistoryStore implements RunHistoryStore
     {
         $directory = rtrim($this->directory, '/');
         $entries = @scandir($directory);
-        $cutoff = time() - 60;
 
         foreach ($entries === false ? [] : $entries as $entry) {
             $path = $directory.'/'.$entry;
@@ -228,7 +227,7 @@ final readonly class JsonRunHistoryStore implements RunHistoryStore
 
             $modified = @filemtime($path);
 
-            if ($modified !== false && $modified < $cutoff) {
+            if ($modified !== false && time() - $modified > 60) {
                 @unlink($path);
             }
         }

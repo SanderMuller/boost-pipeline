@@ -38,8 +38,7 @@ function bootUi(bool $enabled, string $environment, ?string $config = null): voi
     // The default middleware group encrypts cookies, and the test app ships no
     // key. Throwaway, and never reused outside this suite.
     config()->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
-
-    app()->instance('env', $environment);
+    app()['env'] = $environment;
     app()->instance(Registrar::class, new Registrar);
 
     new BoostPipelineServiceProvider(app())->boot();
@@ -70,7 +69,7 @@ it('registers no route outside a local environment, even when enabled', function
 
 it('registers no route when the project declares no pipeline', function (): void {
     config()->set('boost-pipeline.ui.enabled', true);
-    app()->instance('env', 'local');
+    app()['env'] = 'local';
     app()->instance(Registrar::class, new Registrar);
 
     new BoostPipelineServiceProvider(app())->boot();
@@ -186,7 +185,7 @@ it('keeps the loopback gate when the published config drops it', function (): vo
     // A partial published config must not leave routes serving raw command output
     // open. Only a list the consumer actually wrote replaces the shipped default.
     bootUi(enabled: true, environment: 'local');
-    config()->set('boost-pipeline.ui.middleware');
+    config()->set('boost-pipeline.ui.middleware', null);
     app()->instance(Registrar::class, new Registrar);
     new BoostPipelineServiceProvider(app())->boot();
 

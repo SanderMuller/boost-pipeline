@@ -15,7 +15,7 @@ use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Steps\Shell;
 
 /** Passes every step, reporting the log path a shipped runner would have written. */
-final readonly class LoggingRunner implements StepRunner
+final class LoggingRunner implements StepRunner
 {
     public function __construct(private ?string $logPath = '/logs/{run}-{step}.log') {}
 
@@ -26,7 +26,6 @@ final readonly class LoggingRunner implements StepRunner
             : str_replace(['{run}', '{step}'], [$runId, $step->id()], $this->logPath));
     }
 }
-
 use SanderMuller\BoostPipeline\Run\JsonRunHistoryStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Runner\SafeFilename;
@@ -114,7 +113,7 @@ it('keeps only the newest runs and deletes the rest', function (): void {
         static fn (string $path): string => basename($path, '.json'),
         historyFiles($this->directory),
     ))->toEqualCanonicalizing(array_map(
-        SafeFilename::for(...),
+        static fn (string $runId): string => SafeFilename::for($runId),
         ['r-4', 'r-5', 'r-6'],
     ));
 });
@@ -141,7 +140,7 @@ it('cannot be made to write outside its own directory by a run id', function ():
 
     // It encodes to `..-escape-<hash>` and lands inside the directory. The file
     // starting with a dot is exactly why the store lists with scandir, not glob.
-    expect(dirname($this->directory).'/escape.json')->not->toBeFile()
+    expect(is_file(dirname($this->directory).'/escape.json'))->toBeFalse()
         ->and(historyFiles($this->directory))->toHaveCount(1)
         ->and($this->store->all())->toHaveCount(1);
 });
@@ -154,8 +153,7 @@ it('reads a run id holding separators back through the same encoding', function 
 
 it('reports an unwritten run as absent rather than failing', function (): void {
     expect($this->store->read('r-never'))->toBeNull()
-        ->and($this->store->all())
-        ->toBeEmpty();
+        ->and($this->store->all())->toBe([]);
 });
 
 it('treats an unparseable file as absent', function (): void {
@@ -163,8 +161,7 @@ it('treats an unparseable file as absent', function (): void {
     file_put_contents($this->directory.'/r-broken.json', 'not json');
 
     expect($this->store->read('r-broken'))->toBeNull()
-        ->and($this->store->all())
-        ->toBeEmpty();
+        ->and($this->store->all())->toBe([]);
 });
 
 it('records a run through every resolution, keeping one entry for it', function (): void {
@@ -277,7 +274,7 @@ it('does not let unreadable files evict the runs it kept', function (): void {
     // The valid runs survive, and the directory stays bounded: an unreadable
     // file in this store's own directory is its own failed write.
     expect($runs)->toEqualCanonicalizing(['r-real-3', 'r-real-2'])
-        ->and($this->directory.'/junk-a.json')->not->toBeFile()
+        ->and(is_file($this->directory.'/junk-a.json'))->toBeFalse()
         ->and(historyFiles($this->directory))->toHaveCount(2);
 });
 
@@ -296,8 +293,7 @@ it('clears temporary files a crashed write left behind', function (): void {
 
     $store->write(historyRecord('r-newer'));
 
-    expect($abandoned)->not->toBeFile()
+    expect(is_file($abandoned))->toBeFalse()
         // A write in another process is left alone.
-        ->and($inFlight)
-        ->toBeFile();
+        ->and(is_file($inFlight))->toBeTrue();
 });
