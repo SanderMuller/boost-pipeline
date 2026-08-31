@@ -10,6 +10,64 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.15.0 - 2026-08-31
+
+Two more ways a run can fail to prove what it claims, and the first tests that check the gate across
+two processes rather than one.
+
+### Changed
+
+- **A scoped `pipeline:verify` now refuses a config that declares a step no phase registers.** Only a
+  whole-tree call did before. Such a step never reaches the cursor, so it cannot fail and cannot be
+  skipped. It just never runs, and counting recorded step ids finds nothing wrong.
+  
+  A scoped call was exempt for a reason: the walk described the drop in prose, and a sentence cannot
+  say which scope the dropped step belonged to, so applying it would have failed a backend answer over
+  a frontend step. The walk now reports its drops as data, filtered while it resolves by the same rule
+  it selects steps with. A scoped call refuses a drop inside its own scope and still ignores one
+  outside it.
+  
+  **A scoped gate that passed before can now exit 1.** Register the phase, or move the step. An
+  untagged dropped step belongs to every scope, matching how an untagged step is part of every walk.
+  The refusal names the step ids and their phase rather than quoting the notice whole.
+  
+- **The config digest carries a format version.** A run records `v1:<digest>` where it recorded a bare
+  digest before. Digests written by 0.14.0 keep working, read as this format's content.
+  
+  This is about the next time the digest algorithm changes. Two of its inputs have already been
+  corrected once (env values excluded, float precision normalised), and each changed what the digest
+  produces. Untagged, a digest from a newer algorithm is indistinguishable from a digest of a
+  different declaration, so the gate would report the second: every consumer failing at once, with a
+  message blaming a stale server that was never stale.
+  
+  Tagged, a digest this version cannot reproduce is treated as unknown instead. The bare call ignores
+  it; `--server-verified` refuses it, which is where an absent digest already sits. A malformed value
+  is unknown too, never a mismatch — a value this build could not have written says nothing about your
+  declaration.
+  
+  Nothing about your setup changes today. This is what stops a future release from breaking your gate.
+  
+- **`verify.config_fingerprint: false` now also stops `--server-verified` refusing a receipt that
+  cannot answer the declaration question.** In 0.14.0 that refusal ignored the toggle. The toggle
+  governs the whole question rather than only the comparison. Only affects projects that turned it off.
+  
+
+### Internal
+
+- The gate is now tested across two processes. Every previous test bound one config into one container
+  and asked one process, while the digest exists precisely because the server hashes a declaration
+  when it records a run and the command hashes it again later, elsewhere. The new tests record a run,
+  then run `pipeline:verify` as a real subprocess that loads the config and hashes it itself.
+  
+  Worth stating what that caught: putting a per-process value into the digest fails those tests and
+  nothing else in the suite. Two digest inputs had already been removed for that exact reason, both
+  found by reading rather than by a failing test.
+  
+
+See `UPGRADING.md` for the full migration notes.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.14.0...v0.15.0
+
 ## v0.14.0 - 2026-08-31
 
 `pipeline:verify` no longer exits 0 when the run walked a pipeline declaration your config no longer
@@ -403,6 +461,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -546,6 +605,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -619,6 +679,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -629,6 +690,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -774,6 +836,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -825,10 +888,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -944,9 +1009,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1108,6 +1175,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1196,6 +1264,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1481,6 +1550,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1538,6 +1608,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
