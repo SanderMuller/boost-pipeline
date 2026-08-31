@@ -29,6 +29,14 @@ scope it was resolved for — and the check stops needing a scope exemption at a
 - **Tags are reachable at the point steps are dropped.** `noticesForUnregisteredPhases()` iterates
   `$steps->forPhase($phaseClass)`, which returns `Step` objects, so `tags()` is available where the
   notice is currently built. Load-bearing — without it there is nothing to filter on.
+- **`excluded` is unaffected.** It counts steps the SELECTION left out, and `buildWalk()` iterates
+  registered phases only (`src/Walk/Walk.php:87`), so a step in an unregistered phase never reaches
+  the selection loop and never contributes to that count. Checked, because a second meaning creeping
+  into `excluded` would be a silent behaviour change on the page and in `status`.
+- **For a whole-tree walk, `dropped !== []` and `notices !== []` are equivalent.** With no selection
+  the unmatched-selection notice cannot arise, so the only notice source left is the unregistered
+  phase — which is exactly what populates `dropped`. That equivalence is what makes STOP condition 3
+  checkable rather than a matter of opinion.
 - **Membership, not order, decides scope.** `Walk::selected()` tests `in_array`, so a step carrying no
   tag is in every scope and tag order is irrelevant. The filter reuses that predicate rather than
   restating it, so the two cannot drift.
@@ -144,8 +152,9 @@ Stop and report — do not improvise — if any of these proves false during imp
    two copies of "is this step in this scope" will disagree eventually, and the disagreement would be
    a false failure in a gate.
 3. **The whole-tree call's behaviour is identical after the change.** Phase 2 removes an exemption for
-   scoped calls only. If a whole-tree case changes outcome, the derivation is wrong rather than the
-   exemption.
+   scoped calls only, and the two conditions are provably equivalent when there is no selection (see
+   `## Assumptions`). If a whole-tree case changes outcome, the derivation is wrong rather than the
+   exemption — do not adjust the test.
 4. **No existing test asserts `Walk::$notices` is the only description of a dropped step.** If one
    pins that, it is stating a contract this spec extends — read it before editing it.
 

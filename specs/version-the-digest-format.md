@@ -34,6 +34,9 @@ accumulate: v0.14.0 shipped hours ago, so almost none exist yet.
 - **The prefix is part of the recorded string, not a second field.** A separate receipt key would
   make the pair splittable: a digest could arrive with no format, or a format with no digest, and
   every reader would need to handle both. One string cannot come apart.
+- **The digest never becomes a path component, so a colon is safe.** Checked before choosing a
+  separator, because that is the obvious way this change could break something: it is stored in two
+  JSON records and compared as a string, and nothing derives a filename or directory from it.
 - **Nothing outside this package parses the digest.** It is written and read by `Receipt`, compared by
   `VerifyCommand`, and compared by `PipelineOverview`. A consumer reading it would be reading an
   opaque token, which is what it stays.
@@ -48,13 +51,17 @@ accumulate: v0.14.0 shipped hours ago, so almost none exist yet.
 return substr(hash('xxh3', serialize(self::canonical($pipeline))), 0, self::DIGEST_LENGTH);
 ```
 
-`Receipt` stores it verbatim in `config` (`src/Run/Receipt.php`), and two places compare it by string
-equality:
+Two records store it verbatim, and two pieces of code compare it by string equality — across four
+call sites in total:
 
-- `src/Console/VerifyCommand.php` — `PipelineFingerprint::for($pipeline) === $receipt->config`,
-  refusing the run when they differ.
-- `src/Run/PipelineOverview.php` — `digestMatches()`, feeding `config_matches` on the page,
-  `pipeline:history` and its list rows.
+- `Receipt` stores it as `config` (`src/Run/Receipt.php:115`). `LiveProgress` stores the same value
+  as `config` too (`src/Run/LiveProgress.php:41,57,90`), so a run still in flight carries one.
+- `src/Console/VerifyCommand.php` compares it, refusing the run when it differs. That file reads
+  `$receipt->config` in **two** places, in opposite directions: `:272` refuses an absent digest under
+  `--server-verified`, and `:440` tolerates one on the bare call.
+- `src/Run/PipelineOverview.php::digestMatches()` compares it for three callers — the live record
+  (`:132`), the current receipt (`:244`), and every history list row (`:295`). One helper, so one
+  change reaches all three.
 
 Nothing records which algorithm produced a digest. A digest from a future algorithm is therefore
 indistinguishable from a digest of a different declaration, and both take the mismatch branch.
@@ -105,8 +112,9 @@ exist for an absent digest.
 - [ ] Add a `FORMAT` constant and prefix the digest in `src/Config/PipelineFingerprint.php` — one place produces it, so one place tags it.
 - [ ] Add `PipelineFingerprint::matches(Pipeline $pipeline, string $recorded): ?bool`, returning null for a format this build cannot produce. Put the parsing beside the producing, so a future format's rules live next to the code that made the last one.
 - [ ] Accept an unprefixed recorded digest as v1 content, with the reason in a comment: only v0.14.0 wrote one and the algorithm is unchanged, so treating it as unknown would cause the same false failure this spec prevents.
-- [ ] Use it in `src/Console/VerifyCommand.php`. `null` must take the absent-digest path, NOT the mismatch path — that is the entire point of the change.
-- [ ] Use it in `src/Run/PipelineOverview.php::digestMatches()`, which already returns `?bool` and already means unknown by null.
+- [ ] Use it in `src/Console/VerifyCommand.php` at **both** places that read `$receipt->config`, which pull in opposite directions: `:272` refuses an absent digest under `--server-verified` and must refuse an unknown format too, while `:440` tolerates an absent digest on the bare call and must tolerate an unknown format too. Doing one and not the other is the easy half-failure here — it would leave a format this build cannot read either silently passing the strict flag or failing the bare gate.
+- [ ] `null` must take the absent-digest path at every site, NOT the mismatch path. That is the entire point of the change.
+- [ ] Use it in `src/Run/PipelineOverview.php::digestMatches()`, which already returns `?bool` and already means unknown by null. It serves the live record, the current receipt and the history rows, so all three are covered by the one change — including an unprefixed digest in a live record left by v0.14.0, grandfathered by the same rule.
 - [ ] Tests — a v1 digest round-trips and compares equal; an unprefixed digest compares equal; a `v2:` digest and every malformed shape read as unknown on both call sites; unknown refuses under `--server-verified` and passes the bare call; the page and history read unknown rather than mismatched. Mutation-check by making `matches()` return false instead of null for an unknown format and confirming the tests that pin the distinction go red.
 - [ ] `UPGRADING.md` — the digest gains a `v1:` prefix, receipts written by 0.14.0 keep working, and an unrecognised format is treated as unknown rather than as a mismatch.
 

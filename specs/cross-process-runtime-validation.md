@@ -33,6 +33,10 @@ shape that can catch a digest that is not stable across processes.
 - **These tests are slower than the suite around them and that is acceptable at this count.** Each
   spawns a PHP process. A handful is worth it for the only coverage of this property; dozens would
   not be, which is why the scope below is deliberately small.
+- **It has to be a Feature test.** `tests/Unit` does not boot an application — `app()` there returns
+  a bare container and `storage_path()` throws. Checked while planning, because the natural instinct
+  is to put a test with no Laravel assertions in `tests/Unit`, and it would fail for a reason that
+  says nothing about the code.
 - **`tests/Feature/ConsoleServerProcessTest.php` is not precedent.** Its name suggests process-level
   testing, but it inspects `argv` detection in-process. Nothing in the suite currently spawns one, so
   this establishes the pattern rather than following it.
@@ -78,9 +82,9 @@ more of these than the runtime cost justifies.
 | The subprocess cannot run (no `vendor/bin/testbench`, PHP not on PATH) | Skip with a stated reason, never fail. A missing local toolchain is not a defect in the package, and a test that fails for it teaches people to ignore failures. |
 | The subprocess is slow or hangs | An explicit timeout on every `Process`, well under the suite's patience, so a hang reports as a failed assertion rather than a stalled run. |
 | The test leaves a config file behind | `afterEach` removes it. A stray `.config/pipeline.php` changes what every other test in the suite resolves — the existing `ScopedRunTest` writes one and shows the pattern. |
-| Receipt path differs between the two processes | Both resolve `storage_path()` from the same Testbench app, so they agree. Asserted directly rather than assumed: the test reads the receipt back before it verifies. |
+| Receipt path differs between the two processes | They do not. Verified while planning: both resolve `.../vendor/orchestra/testbench-core/laravel/storage`, from the same base path. The test still reads the receipt back before verifying, so a future divergence fails loudly instead of passing for the wrong reason. |
 | The digest is genuinely unstable across processes | This is the failure the tests exist to produce. It surfaces as a refusal on step 3 with an unchanged config, which no other test can produce. |
-| Running under `pest --parallel` | The config path is per-application and the tests write the same one. They are grouped so they do not run concurrently with each other or with `ScopedRunTest`, which writes the same file. |
+| Running under `pest --parallel` | Not a configured mode here — `composer test` is `vendor/bin/pest` and CI runs `vendor/bin/pest --ci`, both serial. It matters anyway because the config path is a single shared file, `.../testbench-core/laravel/.config/pipeline.php`, which `ScopedRunTest` also writes and deletes. Keep these tests off that file concurrently, so turning parallel on later does not produce a failure that looks like a digest bug. |
 
 ## Implementation
 
@@ -91,7 +95,7 @@ more of these than the runtime cost justifies.
 - [ ] Add `tests/Feature/CrossProcessVerifyTest.php` — write a real config file, resolve a run in-process, then run `pipeline:verify` through `vendor/bin/testbench` as a subprocess and assert exit 0.
 - [ ] Skip rather than fail when the binary or PHP is unavailable, stating why.
 - [ ] Give every subprocess an explicit timeout, so a hang is a failed assertion.
-- [ ] Clean the config file in `afterEach`, and keep these tests off the same file as `ScopedRunTest` when running in parallel.
+- [ ] Clean the config file in `afterEach`, following `ScopedRunTest`'s pattern. Both write the same single path, `.../testbench-core/laravel/.config/pipeline.php`, which is inside `vendor/` — that is Testbench's application, and existing tests already write there.
 - [ ] Tests — the passing case proves the digest computed in the subprocess equals the one recorded in the test process. Confirm it is not vacuous by asserting the receipt actually holds a digest before the subprocess runs.
 
 ### Phase 2: The mismatch, end to end (Priority: HIGH)
@@ -116,9 +120,10 @@ Stop and report — do not improvise — if any of these proves false during imp
 1. **`vendor/bin/testbench pipeline:verify` runs and loads the project's config.** Verified at spec
    time. If it cannot be made to see the test's config file, there is no second process to test with
    and the approach needs rethinking rather than forcing.
-2. **The two processes agree on `storage_path()`.** If the subprocess writes or reads a different
-   receipt path, the test would be comparing nothing and would pass for the wrong reason. Assert it,
-   do not assume it.
+2. **The two processes agree on `storage_path()`.** Verified at spec time — both resolve
+   `.../vendor/orchestra/testbench-core/laravel/storage`. This is a tripwire against that changing,
+   not a known risk. If it ever diverges the test compares nothing and passes for the wrong reason,
+   so assert it rather than trusting this line.
 3. **A cross-process failure appears with an UNCHANGED config.** That is not a test defect to work
    around — it is the digest being unstable across processes, which is a real bug in
    `PipelineFingerprint`. Stop and report it rather than adjusting the test until it passes.
