@@ -1,6 +1,6 @@
 # Upgrading
 
-## Unreleased
+## From 0.12 to 0.13
 
 Additive. Nothing to migrate, but two observable changes for a consumer that reads the MCP payloads
 or their schemas.
