@@ -1,6 +1,6 @@
 # Upgrading
 
-## Unreleased
+## From 0.13 to 0.14
 
 - **`pipeline:verify` now refuses a run that walked a pipeline declaration your config no longer
   produces.** A run records a digest of the whole declaration it walked, and the command compares it
