@@ -10,6 +10,83 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.11.0 - 2026-08-31
+
+The receipt answers one question: does the tree on disk have a pass. It cannot say what the recent
+walks did, because each resolution overwrites it, and it says nothing at all while a step is still
+running. This release records both, and gives them a page and a command. Sourced from production
+dogfood. Additive, with one visible change to log filenames.
+
+### Added
+
+- **Run history.** A run's outcome is written to
+  `storage/logs/pipeline/history/<pipeline>/<run-id>.json` after each resolution, keyed by run so a
+  resolution overwrites rather than appends. The newest 20 runs per pipeline are kept and the rest
+  pruned on write; writes go through a temporary file and a rename, so a crash leaves the previous
+  record intact. The receipt keeps its current path and meaning — history is a second write beside
+  it, not a replacement.
+  
+- **An in-flight record.** The position being worked writes
+  `storage/logs/pipeline/live/<pipeline>.json` while it runs, so a reader watches a 900-second step
+  instead of a frozen page. A `running` record older than the ceiling its runner enforces reads as
+  interrupted, because that runner kills a step at the timeout. An `awaiting` record never expires:
+  the package deliberately does not time out a skill step, so the wait is reported rather than
+  guessed at.
+  
+- **`php artisan pipeline:history`.** Lists a pipeline's recorded runs, newest first, with the run
+  in flight above them, and `--run=<id>` for one run step by step. It reports where
+  `pipeline:verify` gates: exit 0 for every answer it can give — an empty history, a stale run, a
+  failed run — and non-zero only when it cannot answer. Do not wire it into a hook expecting it to
+  block.
+  
+- **A page at `{app}/boost-pipelines`.** Shows every declared pipeline, the run in flight and the
+  runs before it, polling so a walk is watched without reading the agent's transcript. A step's log
+  expands in place, read from the path that run recorded rather than one derived from its ids, and
+  served only when it resolves inside the log directory.
+  
+  Off by default and behind three gates: `ui.enabled`, a local environment, and a loopback-only
+  middleware. The first two describe the application rather than the requester — a local server
+  routinely listens on a LAN address or behind a tunnel — so the third reads `REMOTE_ADDR` rather
+  than `Request::ip()`, which returns the `X-Forwarded-For` value on an application that trusts
+  proxies. An absent or unusable middleware list falls back to the shipped default rather than to
+  none, so a partial published config cannot leave the routes open.
+  
+- **A publishable config file, `config/boost-pipeline.php`.** Its defaults are merged, so a project
+  that never publishes it is unaffected and the page stays off.
+  
+
+### Changed
+
+- **Step log filenames carry a digest on every id, not only a rewritten one.** A log was
+  `<runId>-<stepId>.log`, with a short digest appended only to an id that had to be rewritten to be
+  filename-safe. Suffixing selectively left a collision: a rewritten `a/b` became `a-b-<digest>`,
+  which a caller could also supply as a literal run or step id, and the two then wrote to one file.
+  With the digest always present the encoding is injective, so two ids share a filename only on a
+  hash collision.
+  
+  Existing logs keep their old names and nothing reads them back by name. Anything that rebuilt a
+  log path from a run and step id needs updating — the `logs` map in a history record is the path a
+  run actually wrote, and the way to look one up. See [UPGRADING.md](UPGRADING.md).
+  
+- **`LiveProgressStore::write()` returns `bool`.** A run adopts a new record's token only once the
+  write reaches disk. A silent failure would otherwise leave the previous record in place while the
+  run believed it had been replaced, and an awaiting record never expires on age — so it would
+  outlive the run. Only a consumer implementing that new interface is affected.
+  
+- **`Run::start()` and the `RunManager` constructor take two more optional dependencies**, appended
+  after the existing ones, so positional and named calls keep working unchanged. Both stores are
+  optional, so code that builds a run itself records nothing until it passes them.
+  
+
+### Internal
+
+- The PHPStan job's result cache is keyed with an epoch. It caches PHPStan's DI container alongside
+  the results, and `restore-keys` handed back an older cache on a key miss — so a container built
+  under different conditions was reused indefinitely, and surfaced as an undefined-constant error
+  thrown from a lazily built extension before any analysis.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.8...v0.11.0
+
 ## v0.10.8 - 2026-08-28
 
 0.10.7 told you to call `open_run` after fixing a failing step. It did not say — and could not have,
@@ -134,6 +211,7 @@ consuming applications; no API removed and no verdict changed.
   … 380 lines omitted …
   400
   Full output: storage/logs/pipeline/r-d2634f-noisy-slow.log
+  
   
   
   
@@ -276,6 +354,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -345,6 +424,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -355,6 +435,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -492,6 +573,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -539,10 +621,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -650,9 +734,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -806,6 +892,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -894,6 +981,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1171,6 +1259,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1228,6 +1317,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
