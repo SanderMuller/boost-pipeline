@@ -1,6 +1,6 @@
 # Upgrading
 
-## Unreleased
+## From 0.15 to 0.16
 
 - **A scoped run is no longer held back by a step dropped in a scope it never claimed.**
   `all_verified` and `coverage` used to read the walk's notices, which are not filtered by the
