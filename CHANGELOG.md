@@ -10,6 +10,69 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.14.0 - 2026-08-31
+
+`pipeline:verify` no longer exits 0 when the run walked a pipeline declaration your config no longer
+produces.
+
+### Changed
+
+- **A run records which declaration it walked, and the gate compares it.** The MCP server resolves
+  your config once when its process starts, so a step you redefine after that keeps running its old
+  definition — an old command, an old skill proof, a `->mutating()` flag since added — under the same
+  step id, and records it as a pass.
+  
+  Nothing caught that before. The verdicts are keyed by step id, so the declared-step check added in
+  0.12.0 sees nothing missing, and the tree fingerprint matches because the run ran against the tree
+  that already held your change. 0.12.0 catches a step the server never heard of; this catches a step
+  it heard of differently.
+  
+  **A gate that passed before can now exit 1.** Reconnect the MCP client and open a new run.
+  
+  The refusal does not accuse the server, because two other causes produce the same mismatch and it
+  names all three: a config git cannot see — ignored, symlinked, or composed from a file outside the
+  repository — and a config that computes part of its declaration when it loads. The last one cannot
+  be fixed by reconnecting anything.
+  
+  The digest covers what defines a step: command, scope command, env keys, timeouts, the mutating
+  flag, tags, kind, a skill's invocation, proof and instruction, step order, phase registration,
+  batch grouping and the pipeline timeout. It deliberately excludes anything that could differ
+  between two processes reading the same config — env VALUES, because `withEnv()` resolves its array
+  when the config loads; float precision, because `serialize()` renders floats per an ini setting;
+  and the order of tags and env keys, which changes nothing a run would do. Each of those would be a
+  gate failing with nothing wrong, which is worse than the false green being closed.
+  
+  A custom `Step` implementation is compared on the contract alone: id, kind, tags, mutates.
+  
+- **A receipt written before this version is unknown, not wrong.** The bare `pipeline:verify` ignores
+  an absent digest, so an existing gate keeps working after upgrading. `pipeline:verify --server-verified` refuses it, which is where the command already refuses unknown — that flag
+  exists so a caller can skip work, and skipping on a run that cannot say what it walked is the trade
+  it refuses everywhere else. The next run writes a digest.
+  
+
+### Added
+
+- **`verify.config_fingerprint`**, a new key in the publishable config, defaulting to true. Set it to
+  false only if your config computes part of its declaration when it loads; otherwise no run will
+  ever match and the gate cannot pass. Only an explicit `false` disables it, so a typo cannot switch
+  it off silently.
+  
+- **`pipeline:history` and the page report a declaration mismatch**, for a run still in flight as
+  well as a finished one. A run recorded before the digest existed reads as unknown rather than as
+  mismatched.
+  
+
+### Fixed
+
+- **Static analysis no longer dies before it starts on a clean checkout.** The Laravel static-analysis
+  extension reads a version constant without checking it exists, and defines it from an application
+  boot that is allowed to quietly produce nothing. The constant is now defined at autoload time
+  rather than at analysis bootstrap, which removes the ordering question instead of adjusting it.
+
+See `UPGRADING.md` for the full migration notes.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.13.0...v0.14.0
+
 ## v0.13.0 - 2026-08-31
 
 A run that dropped a declared step now says so from the moment it opens, instead of waiting for its
@@ -320,6 +383,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -462,6 +526,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -534,6 +599,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -544,6 +610,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -687,6 +754,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -737,10 +805,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -854,9 +924,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1016,6 +1088,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1104,6 +1177,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1387,6 +1461,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1444,6 +1519,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
