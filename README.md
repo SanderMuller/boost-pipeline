@@ -250,6 +250,11 @@ phase,
 or move the step. A scoped call refuses a drop inside its own scope and ignores one outside it; an
 untagged step belongs to every scope, so a dropped untagged step fails every call.
 
+The `notices` a run reports are not scope-filtered, and that is deliberate. They name every step the
+config declared into an unregistered phase, because that is what the config got wrong regardless of
+which scope you asked about. So a frontend-scoped run can name a backend step as dropped while the
+gate refuses over only the frontend one.
+
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which Laravel
 gitignores, so it does not travel with a push. Wire it into a pre-push hook or a pre-PR gate. CI
 runs the checks itself.

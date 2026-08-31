@@ -181,6 +181,23 @@ final readonly class Walk
                 continue;
             }
 
+            // UNFILTERED, unlike `$dropped` below, and deliberately so. A reader of
+            // a frontend-scoped run therefore sees a backend step named here that
+            // their scope never selected, which reads as an inconsistency and is
+            // not one to fix by adding the filter.
+            //
+            // Two things break if this is filtered. Every step in an unregistered
+            // phase can be out of scope, which would leave a notice naming no steps
+            // at all — `Steps::declaredPhases()` already records why that is worse
+            // than saying nothing. And suppressing the notice instead would flip
+            // `Run::verifiedGiven()`, which returns false while any notice exists,
+            // so a scoped run whose drops all sit elsewhere would start calling
+            // itself verified. That is a loosening of a false-green guard and needs
+            // deciding on its own, not arriving as a side effect of tidying prose.
+            //
+            // The asymmetry is honest as it stands: the notice reports what the
+            // CONFIG got wrong, which is scope-independent, and `$dropped` reports
+            // what THIS question has to refuse over.
             $ids = implode(', ', array_map(
                 static fn (Step $step): string => '['.$step->id().']',
                 $steps->forPhase($phaseClass),

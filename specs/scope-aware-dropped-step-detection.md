@@ -176,6 +176,12 @@ Stop and report — do not improvise — if any of these proves false during imp
    refusal now names the step and its phase instead of quoting a notice. Both facts are pinned by
    tests so the disagreement is recorded rather than rediscovered.
 
+   **A second reason to answer it, found in use.** The prose `notices` are not scope-filtered either,
+   so a scoped run names dropped steps its own scope never selected. Filtering them is not available
+   as a tidy-up: every drop can be out of scope, which would leave a notice naming nothing, and
+   suppressing the notice instead flips `verifiedGiven()` — the same loosening this question is about,
+   arriving as a side effect. Both surfaces therefore wait on one decision rather than two.
+
    It is left out deliberately. This spec closes a gap and changes no existing verdict; loosening a
    false-green guard is the opposite kind of change and deserves its own decision, not a ride along
    with this one. Worth answering before the next release that touches `Run`, because the two
