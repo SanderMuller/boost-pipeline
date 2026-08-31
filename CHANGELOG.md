@@ -10,6 +10,60 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.16.0 - 2026-08-31
+
+A scoped run now answers for the scope it claimed, rather than for the whole config. This is the
+first release in this line that makes the gate accept more, not less.
+
+### Changed
+
+- **A step dropped in a scope your run never claimed no longer holds that run back.** `all_verified`
+  and `coverage` read the walk's notices, and notices are not filtered by the tag selection. So
+  declaring a step into an unregistered phase anywhere in your config made every scoped run
+  unverifiable, including runs with nothing to do with that step.
+  
+  They now measure the scope the run was about. `pipeline:verify` was already scope-accurate; the
+  run's own verdict was not, and the two disagreed — the tolerance the gate gained in 0.15.0 was
+  unreachable, because the receipt it read already said false.
+  
+  **What has not changed, deliberately.** A tag no step carries still makes a run unverifiable. It
+  drops nothing at all, since the walk becomes every untagged step and those pass, so a mistyped tag
+  would otherwise leave a run reporting itself verified for a scope that was never checked. That
+  condition is measured separately from dropped steps for exactly this reason. A drop inside the
+  scope
+  you asked about still refuses, naming the step and its phase.
+  
+- **The `notices` a run reports stay unfiltered, and are informational rather than load-bearing.**
+  They name every step the config declared into an unregistered phase, because that is the config's
+  problem regardless of which scope you asked about. A scoped run can therefore report a notice
+  about
+  another scope beside `all_verified: true`. That reads oddly the first time and is the accurate
+  answer: the config has a problem elsewhere, and this scope is verified.
+  
+- **`coverage` means what it now measures.** Its documented contract said `complete` meant the walk
+  raised no notice. It means nothing went missing from the scope the run was about: no step it would
+  have walked was dropped, and its tag selection matched at least one step.
+  
+
+### Fixed
+
+- **`Run::start()` refuses a scope that disagrees with the walk it was given.** A run records the
+  scope its verdicts are about, and those verdicts are measured from the walk's own selection, so
+  the
+  two cannot differ. A walk resolved for `backend` with a receipt claiming `frontend` would put a
+  true
+  answer about one scope onto a receipt describing another.
+  
+  It threw nothing before because the scope-blind verdict masked it: any dropped step anywhere made
+  such a run unverifiable, so the mismatch never surfaced. `RunManager` always passed matching
+  values,
+  so this reaches only code that builds a run by hand.
+  
+
+See `UPGRADING.md` for the full migration notes.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.15.0...v0.16.0
+
 ## v0.15.0 - 2026-08-31
 
 Two more ways a run can fail to prove what it claims, and the first tests that check the gate across
@@ -462,6 +516,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -606,6 +661,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -680,6 +736,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -690,6 +747,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -837,6 +895,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -889,10 +948,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -1010,9 +1071,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1176,6 +1239,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1264,6 +1328,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1551,6 +1616,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1608,6 +1674,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
