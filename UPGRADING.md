@@ -8,7 +8,7 @@
   in use.
 
   This is about what happens the next time the digest algorithm changes. Two of its inputs have
-  already had to be corrected once — env values excluded, float precision normalised — and each
+  already had to be corrected once (env values excluded, float precision normalised), and each
   changed what the digest produces. Without a tag, a digest from a newer algorithm is
   indistinguishable from a digest of a different declaration, so `pipeline:verify` would report the
   second: every consumer's gate failing at once, with a message blaming a stale server that was
@@ -25,14 +25,14 @@
 - **`verify.config_fingerprint: false` now also stops `--server-verified` refusing a receipt that
   cannot answer the declaration question.** In 0.14.0 that refusal ignored the toggle. The toggle
   governs the whole question rather than only the comparison: a project that switched it off is not
-  asking, so refusing because a receipt has no digest — or one this version cannot read — would
+  asking, so refusing because a receipt has no digest, or one this version cannot read, would
   reintroduce the check by another door. Only affects projects that have turned it off.
 
 - **A scoped `pipeline:verify` now refuses a config that declares a step no phase registers.**
 Only a
   whole-tree call did before. A step declared into an unregistered phase never reaches the cursor,
   so
-  it cannot fail and cannot be skipped — it simply never runs, and counting recorded step ids finds
+  it cannot fail and cannot be skipped. It simply never runs, and counting recorded step ids finds
   nothing wrong.
 
   A scoped call was exempt because the walk described the drop in prose, and a sentence cannot say

@@ -245,7 +245,7 @@ that calls itself complete. Reconnect the MCP client and open a new run. The com
 the scope the answer is about, and a step you have since removed does not fail anything.
 
 It also fails when your config declares a step into a phase nothing registers. Such a step never
-reaches the cursor, so it cannot fail and cannot be skipped — it just never runs. Register the
+reaches the cursor, so it cannot fail and cannot be skipped. It just never runs. Register the
 phase,
 or move the step. A scoped call refuses a drop inside its own scope and ignores one outside it; an
 untagged step belongs to every scope, so a dropped untagged step fails every call.
@@ -264,6 +264,12 @@ the acknowledged ones reaches `complete` routinely; one that puts a slow or fail
 does not, so the flag goes quiet exactly when you wanted an answer. That is a property of the
 pipeline you built rather than a guarantee, and reordering can take it away without anything saying
 so.
+
+Because this flag exists so a caller can SKIP work, it refuses anything it cannot answer, where the
+bare call would shrug. A receipt that predates a field it needs is refused; so is one whose recorded
+declaration this version cannot reproduce. Both mean the same thing (this run cannot say what it
+walked), and both clear themselves on the next run. Expect one refusal per pipeline the first time
+you call it after upgrading.
 
 ## Reading what the runs did
 
@@ -442,7 +448,8 @@ clear the `*.log` files rather than the directory if you want to keep the answer
 | Notice two pipelines sharing a name             | PHP collapses duplicate array keys, so the later one silently wins      |
 | Notice a walk abandoned while awaiting a skill  | The live record has no timeout to expire against, so it reports the wait |
 | Know which checks your pipeline ought to hold   | Exit 0 reports on the steps that ran, and nothing more                  |
-| Fingerprint a step type you wrote yourself       | A custom `Step` is compared on its contract alone: id, kind, tags, mutates |
+| Fingerprint a step type you wrote yourself       | A custom `Step` is compared on its contract alone      |
+| Ignore a dropped step outside the scope you ask about | The gate does, but a run's own `all_verified` does not |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 
