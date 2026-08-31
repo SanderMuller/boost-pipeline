@@ -553,6 +553,7 @@ final class Run
             timeoutSeconds: $this->runner instanceof ProcessStepRunner
                 ? $this->runner->effectiveTimeout($position[0]->step)
                 : null,
+            configDigest: $this->walk->configDigest,
         ));
 
         // Adopted only on success. A failed replacement leaves the previous
@@ -615,6 +616,7 @@ final class Run
             // would make the receipt a log and invite a consumer to parse it.
             coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
             asserted: array_keys(array_filter($this->asserted)),
+            config: $this->walk->configDigest,
         );
 
         $this->receipts?->write($receipt);

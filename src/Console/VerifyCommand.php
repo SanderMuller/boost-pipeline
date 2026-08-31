@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Config\Repository;
+use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\Verdict;
@@ -97,6 +100,18 @@ final class VerifyCommand extends Command
 
         if ($scopeFailure !== null) {
             $this->components->error($scopeFailure);
+
+            return self::FAILURE;
+        }
+
+        // Ahead of the declared-step guard on purpose. A server that loaded the
+        // config before it changed explains BOTH a changed definition and a
+        // missing step, so naming the missing step first would report a symptom
+        // and leave the cause unmentioned.
+        $declarationFailure = $this->declarationMismatch($pipelines, $name, $receipt);
+
+        if ($declarationFailure !== null) {
+            $this->components->error($declarationFailure);
 
             return self::FAILURE;
         }
@@ -249,6 +264,20 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        // 2b. The run recorded which declaration it walked. The bare call tolerates
+        //     an absent digest, because a receipt written before the field is
+        //     otherwise sound. This flag does not: it exists so a caller can SKIP
+        //     work, and skipping on the strength of a run that cannot say what it
+        //     walked is exactly the trade this command refuses everywhere else.
+        if ($receipt->config === null) {
+            $this->components->error(sprintf(
+                'Run [%s] was recorded before this command could tell which pipeline declaration a run walked, so it cannot answer this. Unknown is not clean. Open a new run.',
+                $receipt->runId,
+            ));
+
+            return self::FAILURE;
+        }
+
         // 3. The cursor finished. `recordReceipt()` writes after every
         //    resolution, deliberately, so a walk abandoned at step one leaves a
         //    readable receipt holding one pass and nothing else.
@@ -370,6 +399,63 @@ final class VerifyCommand extends Command
         $asked = $this->option('only');
 
         return is_string($asked) && trim($asked) !== '' ? $asked : null;
+    }
+
+    /**
+     * Whether the run walked a declaration this config no longer produces.
+     *
+     * The server resolves the config once when its process starts, so a step
+     * redefined after that is invisible to every run until the client reconnects.
+     * It then runs an OLDER DEFINITION of the same step id and records it as a
+     * pass, and nothing else notices: the verdicts are keyed by id, so the
+     * declared-step guard sees nothing missing, and the tree fingerprint matches
+     * because the run ran against the tree that already held the new config.
+     *
+     * Reached only when the tree matches, because the tree check returns before
+     * this one. That is what makes the comparison worth making: the config on disk
+     * at run time is the config on disk now, so a digest that still differs means
+     * the run used a third thing.
+     *
+     * It states that fact and does not blame the server, because two other causes
+     * produce the same mismatch: a config git cannot see (ignored, symlinked, or
+     * composed from outside the repository), and a config that computes part of
+     * its declaration when it loads. The last one cannot be fixed by reconnecting
+     * anything, so a message asserting staleness would send that reader hunting
+     * something that does not exist.
+     */
+    private function declarationMismatch(Pipelines $pipelines, string $name, Receipt $receipt): ?string
+    {
+        // Only an explicit false disables it. An absent or unusable value keeps the
+        // check on, which is the safe direction for a guard: a typo in the config
+        // must not quietly switch off a gate.
+        if ($this->laravel->make(Repository::class)->get(BoostPipelineServiceProvider::CONFIG.'.verify.config_fingerprint') === false) {
+            return null;
+        }
+
+        // Absent means the receipt predates the field. Unknown is not clean, but it
+        // is not refused here: such a receipt is otherwise sound, and failing every
+        // one of them on upgrade day would be a false failure for every consumer to
+        // close a case the next run closes by itself. `--server-verified` refuses
+        // it, which is where this command already refuses unknown.
+        if ($receipt->config === null) {
+            return null;
+        }
+
+        $pipeline = $pipelines->get($name);
+
+        if (! $pipeline instanceof Pipeline) {
+            return null;
+        }
+
+        if (PipelineFingerprint::for($pipeline) === $receipt->config) {
+            return null;
+        }
+
+        return sprintf(
+            'Run [%s] walked a pipeline declaration that is not the declaration this config produces now, so what it recorded describes steps this project no longer declares. Three things cause that. The MCP server resolves the config once when its process starts, so a step changed after that is invisible to every run until the client reconnects — that is the usual one, and reconnecting then opening a new run fixes it. The config may also be one git cannot see, ignored or symlinked or composed from outside the repository, in which case the tree fingerprint could not tell you it moved. Or the config computes part of its declaration when it loads, from the environment or a file outside the repository, in which case two processes disagree about files nobody touched and no run will ever match — set [%s.verify.config_fingerprint] to false if that is deliberate.',
+            $receipt->runId,
+            BoostPipelineServiceProvider::CONFIG,
+        );
     }
 
     /**

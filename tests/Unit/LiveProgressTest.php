@@ -463,3 +463,19 @@ it('keeps the previous token when a replacement write fails', function (): void 
 
     expect($store->read())->toBeNull();
 });
+
+it('reads a live record written before it carried a declaration digest', function (): void {
+    // An upgrade mid-run leaves one of these on disk. Absence must parse as
+    // unknown rather than failing the whole record, or a run in flight would
+    // become unreadable at the moment a reader most wants to see it.
+    $record = LiveProgress::fromArray([
+        'run' => 'r-old',
+        'token' => 't',
+        'state' => 'running',
+        'steps' => ['pint'],
+        'started_at' => '2026-01-01T00:00:00+00:00',
+    ]);
+
+    expect($record)->not->toBeNull()
+        ->and($record?->configDigest)->toBeNull();
+});

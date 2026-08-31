@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\Phase;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
@@ -123,10 +124,31 @@ function treeReporting(?string $digest): void
 }
 
 /**
+ * The digest of whichever pipeline is currently bound.
+ *
+ * `receipt()` defaults to this for the same reason it defaults `coverage` to
+ * 'complete': almost every test here is about some other guard, and a fixture that
+ * looks like a receipt from before the field would trip the declaration guard
+ * before reaching the one under test. Tests about the absent case pass
+ * `omitConfig: true`, and tests about a mismatch pass a digest of their own.
+ */
+function ambientConfigDigest(): ?string
+{
+    $pipelines = resolve(Pipelines::class);
+    $names = $pipelines->names();
+    // The first, not the sole one: a multi-pipeline test has no sole name, and the
+    // pipelines those tests declare are identical empty declarations, so any of
+    // them yields the digest every receipt in that test needs.
+    $pipeline = $names === [] ? null : $pipelines->get($names[0]);
+
+    return $pipeline instanceof Pipeline ? PipelineFingerprint::for($pipeline) : null;
+}
+
+/**
  * @param  array<string, string>|null  $verdicts
  * @param  list<string>|null  $asserted  defaults to every passing step, as a walk of plain checks records
  */
-function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null, ?array $verdicts = null, ?string $coverage = 'complete', ?array $asserted = null, bool $omitAsserted = false): Receipt
+function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $stale = null, string $state = 'complete', ?string $scope = null, ?array $verdicts = null, ?string $coverage = 'complete', ?array $asserted = null, bool $omitAsserted = false, ?string $config = null, bool $omitConfig = false): Receipt
 {
     $verdicts ??= ['pint' => 'passed', 'phpstan' => 'passed'];
 
@@ -144,6 +166,7 @@ function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $st
             $verdicts,
             static fn (string $verdict): bool => $verdict === 'passed',
         ))),
+        config: $omitConfig ? null : ($config ?? ambientConfigDigest()),
     );
 }
 
@@ -287,10 +310,18 @@ it('exits 0 for a receipt a real run actually wrote', function (): void {
     useReceiptStore($store);
     treeReporting('tree-a');
 
+    // Bound as well as run. The command reads the config from the container, and
+    // the run records a digest of the pipeline it walked — a test that ran one
+    // pipeline while the container held another was only ever passing because
+    // nothing compared the two.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
+    });
+
+    app()->instance(Pipelines::class, Pipelines::fromArray(['default' => $pipeline], '.config/pipeline.php'));
+
     $run = Run::start(
-        Pipeline::configure()->withSteps(function (Steps $steps): void {
-            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
-        })->walk(),
+        $pipeline->walk(),
         new class implements StepRunner
         {
             public function run(Step $step, string $runId): Result
@@ -667,10 +698,18 @@ it('refuses a real mutating-only run end to end, receipt and command agreeing', 
     useReceiptStore($store);
     treeReporting('tree-a');
 
+    // Bound as well as run. The command reads the config from the container, and
+    // the run records a digest of the pipeline it walked — a test that ran one
+    // pipeline while the container held another was only ever passing because
+    // nothing compared the two.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->mutating());
+    });
+
+    app()->instance(Pipelines::class, Pipelines::fromArray(['default' => $pipeline], '.config/pipeline.php'));
+
     $run = Run::start(
-        Pipeline::configure()->withSteps(function (Steps $steps): void {
-            $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->mutating());
-        })->walk(),
+        $pipeline->walk(),
         new class implements StepRunner
         {
             public function run(Step $step, string $runId): Result
@@ -1243,6 +1282,147 @@ it('does not fail a scoped question because another scope holds a broken step', 
     treeReporting('tree-a');
 
     expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+/**
+ * A server that loaded the config before it changed runs an older definition of
+ * the same step id and records it as a pass. The verdicts are keyed by id, so the
+ * declared-vs-recorded check sees nothing missing, and the tree fingerprint
+ * matches because the run ran against the tree that already held the new config.
+ * The recorded digest is the only thing that can catch it.
+ */
+function pipelineDeclaring(string $command): Pipeline
+{
+    return Pipeline::configure()->withSteps(function (Steps $collection) use ($command): void {
+        $collection->in(Formatting::class)->append(Shell::run($command, id: 'pint'));
+    });
+}
+
+function projectRunning(Pipeline $pipeline): void
+{
+    app()->instance(Pipelines::class, Pipelines::fromArray(['default' => $pipeline], '.config/pipeline.php'));
+}
+
+it('passes when the run walked the declaration the config still produces', function (): void {
+    $pipeline = pipelineDeclaring('pint');
+    projectRunning($pipeline);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: PipelineFingerprint::for($pipeline)));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('fails when the run walked a different declaration of the same step', function (): void {
+    // The motivating case. `pint` has a verdict, so nothing about the step list is
+    // wrong — only its definition changed under a server that never reloaded.
+    projectRunning(pipelineDeclaring('pint --dirty'));
+    receiptStoreHolding(receipt(
+        verdicts: ['pint' => 'passed'],
+        config: PipelineFingerprint::for(pipelineDeclaring('pint')),
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('not the declaration')
+        // It must not accuse the server: a config git cannot see, or one that
+        // computes part of itself at load time, produces the same mismatch.
+        ->and($output)->toContain('computes');
+});
+
+it('fails a scoped call and --server-verified on the same mismatch', function (): void {
+    projectRunning(pipelineDeclaring('pint --dirty'));
+    $stale = PipelineFingerprint::for(pipelineDeclaring('pint'));
+
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: $stale));
+    treeReporting('tree-a');
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1);
+
+    receiptStoreHolding(receipt(scope: 'backend', verdicts: ['pint' => 'passed'], config: $stale));
+    treeReporting('tree-a');
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(1);
+});
+
+it('reports the stale declaration ahead of a step the config gained', function (): void {
+    // Order of causes. A stale server explains BOTH the changed definition and the
+    // missing step, so naming the missing step first would send the reader hunting
+    // a symptom while the root cause goes unmentioned.
+    projectRunning(Pipeline::configure()->withSteps(function (Steps $collection): void {
+        $collection->in(Formatting::class)->append(Shell::run('pint', id: 'pint'));
+        $collection->in(Formatting::class)->append(Shell::run('phpstan', id: 'phpstan'));
+    }));
+    receiptStoreHolding(receipt(
+        verdicts: ['pint' => 'passed'],
+        config: PipelineFingerprint::for(pipelineDeclaring('pint')),
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('not the declaration')
+        ->and($output)->not->toContain('never held');
+});
+
+it('lets the tree message win when both the tree and the declaration moved', function (): void {
+    // The tree check returns first, deliberately. "Open a new run" is the same
+    // advice, and a receipt describing another tree says nothing about this code
+    // whatever config produced it.
+    projectRunning(pipelineDeclaring('pint --dirty'));
+    receiptStoreHolding(receipt(
+        tree: 'tree-a',
+        verdicts: ['pint' => 'passed'],
+        config: PipelineFingerprint::for(pipelineDeclaring('pint')),
+    ));
+    treeReporting('tree-b');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('different working tree')
+        ->and($output)->not->toContain('not the declaration');
+});
+
+it('ignores an absent digest on the bare call and refuses it under --server-verified', function (): void {
+    // A receipt from before this field is otherwise sound. Failing every one of
+    // them on upgrade day would be a false failure for every consumer, to close a
+    // case the next run closes by itself. The strict flag still refuses unknown,
+    // which is exactly where `coverage` already refuses it.
+    $pipeline = pipelineDeclaring('pint');
+    projectRunning($pipeline);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], omitConfig: true));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], omitConfig: true));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('recorded before');
+});
+
+it('skips the comparison when the consumer turned it off', function (): void {
+    // The escape for a config that computes part of its declaration at load time.
+    // Without it, such a project has a gate that can never pass, and a gate that
+    // cannot pass is one people switch off entirely.
+    config()->set('boost-pipeline.verify.config_fingerprint', false);
+
+    projectRunning(pipelineDeclaring('pint --dirty'));
+    receiptStoreHolding(receipt(
+        verdicts: ['pint' => 'passed'],
+        config: PipelineFingerprint::for(pipelineDeclaring('pint')),
+    ));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
 });
 
 it('counts an acknowledged step as held, leaving that question to all_verified', function (): void {

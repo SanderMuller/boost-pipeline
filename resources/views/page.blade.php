@@ -100,6 +100,10 @@
             row('state', current.state);
             row('verified', current.all_verified ? 'yes' : 'no');
             if (current.scope) row('scope', current.scope);
+            if (current.config_matches === false) {
+                row('config', 'the run walked a different declaration than this config produces now');
+            }
+
             if (current.tree_matches !== null) {
                 row('tree', current.tree_matches ? 'matches the code on disk' : 'moved since the run');
             }

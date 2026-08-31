@@ -98,6 +98,9 @@ final class Pipeline
      */
     public function walk(?string $selection = null): Walk
     {
-        return Walk::resolve($this->phases, $this->steps, $selection);
+        // The digest describes the whole declaration, so every scope of one
+        // pipeline shares it. Computed here because only a Pipeline holds the
+        // pipeline-level settings that are part of that declaration.
+        return Walk::resolve($this->phases, $this->steps, $selection, PipelineFingerprint::for($this));
     }
 }

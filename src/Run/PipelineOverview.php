@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Walk\Walk;
@@ -14,8 +15,8 @@ use SanderMuller\BoostPipeline\Walk\WalkStep;
  * @phpstan-type StepRow array{id: string, phase: string, kind: string, description: string, verdict: string|null, log: string|null}
  * @phpstan-type PositionRow array{phase: string, parallel: bool, steps: non-empty-list<StepRow>}
  * @phpstan-type UndeclaredRow array{id: string, verdict: string, log: string|null}
- * @phpstan-type RunRow array{run: string, state: string, all_verified: bool, stale: string|null, scope: string|null, recorded_at: string, coverage: string|null, tree_matches: bool|null, positions: list<PositionRow>, undeclared: list<UndeclaredRow>}
- * @phpstan-type LiveRow array{run: string, state: string, steps: list<string>, scope: string|null, started_at: string, interrupted: bool}
+ * @phpstan-type RunRow array{run: string, state: string, all_verified: bool, stale: string|null, scope: string|null, recorded_at: string, coverage: string|null, tree_matches: bool|null, config_matches: bool|null, positions: list<PositionRow>, undeclared: list<UndeclaredRow>}
+ * @phpstan-type LiveRow array{run: string, state: string, steps: list<string>, scope: string|null, started_at: string, interrupted: bool, config_matches: bool|null}
  * @phpstan-type HistoryRow array{run: string, state: string, all_verified: bool, scope: string|null, recorded_at: string, tree_matches: bool|null, verdicts: array<string, int>}
  * @phpstan-type PipelineRow array{pipeline: string, current: RunRow|null, live: LiveRow|null, history: list<HistoryRow>}
  *
@@ -126,6 +127,9 @@ final readonly class PipelineOverview
             // A running record past the ceiling its runner enforces means the
             // process died. An awaiting one never expires, by design.
             'interrupted' => $progress->hasExpired(),
+            // Worth knowing before the run finishes: the steps left to walk are
+            // the ones a reader could still stop.
+            'config_matches' => $this->digestMatches($name, $progress->configDigest),
         ];
     }
 
@@ -148,6 +152,7 @@ final readonly class PipelineOverview
             'recorded_at' => $receipt->recordedAt,
             'coverage' => $receipt->coverage,
             'tree_matches' => $this->treeMatches($receipt),
+            'config_matches' => $this->configMatches($name, $receipt),
             'positions' => $this->positions($steps, $receipt, $logs),
             'undeclared' => $this->undeclared($steps, $receipt, $logs),
         ];
@@ -219,6 +224,36 @@ final readonly class PipelineOverview
         }
 
         return $undeclared;
+    }
+
+    /**
+     * Whether the run walked the declaration this config still produces.
+     *
+     * Null when there is nothing to compare — a receipt written before the digest
+     * existed, or a pipeline the config no longer declares. Never false for
+     * unknown: a reader shown "no" for a run that simply predates the field would
+     * go looking for a config change that never happened.
+     *
+     * False is the one thing `tree_matches` cannot tell them. A server holding an
+     * older config runs a different definition of the same step id, and the tree
+     * still matches because the run ran against the tree that already held the new
+     * config.
+     */
+    private function configMatches(string $name, Receipt $receipt): ?bool
+    {
+        return $this->digestMatches($name, $receipt->config);
+    }
+
+    /** @param string|null $digest what the run recorded, or null when it recorded none */
+    private function digestMatches(string $name, ?string $digest): ?bool
+    {
+        if ($digest === null) {
+            return null;
+        }
+
+        $pipeline = $this->pipelines->get($name);
+
+        return $pipeline instanceof Pipeline ? PipelineFingerprint::for($pipeline) === $digest : null;
     }
 
     /**

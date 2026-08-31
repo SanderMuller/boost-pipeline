@@ -78,6 +78,22 @@ final readonly class Receipt
          * @var list<string>|null
          */
         public ?array $asserted = null,
+        /**
+         * Which declaration the run walked.
+         *
+         * The server resolves the config once when its process starts, so a step
+         * declared or redefined after that is invisible to every run until the
+         * client reconnects. It can then run a DIFFERENT DEFINITION of the same
+         * step id and record it as a pass: the verdicts are keyed by id, and the
+         * tree fingerprint matches because the run ran against the tree that
+         * already held the new config. This is the only field that can catch that.
+         *
+         * Absent means unknown, never clean — but unknown is treated as a refusal
+         * only where the command already refuses unknown, because a receipt
+         * written before this existed is otherwise sound and failing every one of
+         * them on upgrade day would be a false failure for every consumer.
+         */
+        public ?string $config = null,
     ) {}
 
     /**
@@ -96,6 +112,7 @@ final readonly class Receipt
             'scope' => $this->scope,
             'coverage' => $this->coverage,
             'asserted' => $this->asserted,
+            'config' => $this->config,
         ], static fn (mixed $value): bool => $value !== null);
     }
 
@@ -128,6 +145,7 @@ final readonly class Receipt
         $recordedAt = $data['recorded_at'] ?? '';
         $scope = $data['scope'] ?? null;
         $coverage = $data['coverage'] ?? null;
+        $config = $data['config'] ?? null;
 
         return new self(
             runId: $runId,
@@ -140,6 +158,7 @@ final readonly class Receipt
             scope: is_string($scope) ? $scope : null,
             coverage: is_string($coverage) ? $coverage : null,
             asserted: self::readAsserted($data['asserted'] ?? null),
+            config: is_string($config) ? $config : null,
         );
     }
 
@@ -159,7 +178,7 @@ final readonly class Receipt
      */
     private static function fieldsAreWellFormed(array $data): bool
     {
-        foreach (['tree', 'stale', 'recorded_at', 'scope', 'coverage'] as $key) {
+        foreach (['tree', 'stale', 'recorded_at', 'scope', 'coverage', 'config'] as $key) {
             $value = $data[$key] ?? null;
 
             if ($value !== null && ! is_string($value)) {

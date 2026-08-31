@@ -1,5 +1,43 @@
 # Upgrading
 
+## Unreleased
+
+- **`pipeline:verify` now refuses a run that walked a pipeline declaration your config no longer
+  produces.** A run records a digest of the whole declaration it walked, and the command compares it
+  against the digest your config produces now.
+
+  This closes a false green nothing else could reach. The MCP server resolves the config once when
+  its process starts, so a step you redefine after that keeps running its old definition — an old
+  command under the same step id, recorded as a pass. The verdicts are keyed by id, so the
+  declared-step check added in 0.12.0 sees nothing missing, and the tree fingerprint matches because
+  the run ran against the tree that already held your change.
+
+  **A gate that passed before can now exit 1.** Reconnect the MCP client and open a new run. Two
+  other causes produce the same mismatch and the message names all three: a config git cannot see
+  (ignored, symlinked, or composed from outside the repository), and a config that computes part of
+  its declaration when it loads.
+
+  The digest covers everything that defines a step — command, scope command, env keys, timeouts, the
+  mutating flag, tags, kind, a skill's invocation, proof and instruction, step order, phase
+  registration, batch grouping and the pipeline timeout. It does NOT cover env VALUES: `withEnv()`
+  resolves its array when the config loads, so hashing a value would make two shells disagree about
+  an identical config. A custom `Step` implementation is compared on the contract alone.
+
+- **A receipt written before this version is treated as unknown, not as wrong.** The bare
+  `pipeline:verify` ignores an absent digest, so your existing gate keeps working on upgrade day.
+  `pipeline:verify --server-verified` refuses it — that flag exists so a caller can SKIP work, and
+  skipping on the strength of a run that cannot say what it walked is the trade it refuses everywhere
+  else. This is where `coverage` already refuses unknown. The next run writes a digest and the
+  refusal goes away.
+
+- **A new `verify.config_fingerprint` config key**, defaulting to true. Set it to false if your
+  config computes part of its declaration when it loads — otherwise no run will ever match and the
+  gate cannot pass. Only an explicit `false` disables it, so a typo cannot switch it off silently.
+  Publish the config with `php artisan vendor:publish --tag=boost-pipeline-config`.
+
+- **`pipeline:history` and the page report a declaration mismatch**, for a finished run and for one
+  still in flight. A run recorded before the digest existed reads as unknown rather than mismatched.
+
 ## From 0.12 to 0.13
 
 Additive. Nothing to migrate, but two observable changes for a consumer that reads the MCP payloads

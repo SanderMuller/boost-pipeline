@@ -31,4 +31,30 @@ return [
         'middleware' => ['web', LoopbackOnly::class],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Comparing the run's config against the config on disk
+    |--------------------------------------------------------------------------
+    |
+    | A run records a digest of the pipeline declaration it walked, and
+    | `pipeline:verify` refuses a run whose digest is not the one the config
+    | produces now. That catches a server which loaded the config before it
+    | changed: it runs an older definition of the same step id and records it as
+    | a pass, and nothing else notices, because the verdicts are keyed by id and
+    | the tree fingerprint matches.
+    |
+    | Turn this off ONLY if your config computes part of its declaration when it
+    | loads — a command built from an environment variable, a step list read from
+    | a file outside the repository. The config file is arbitrary PHP, so that is
+    | allowed, but it means two processes can produce different digests from
+    | files nobody touched, and the gate would then fail with nothing wrong.
+    |
+    | Switching it off gives up a real check. Nothing else compensates for it.
+    |
+    */
+
+    'verify' => [
+        'config_fingerprint' => true,
+    ],
+
 ];

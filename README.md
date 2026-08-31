@@ -216,6 +216,20 @@ receipt describes a different tree, when the run recorded itself stale, and when
 unverified. That first case is the point: a gate that treats a missing answer as "nothing to check"
 passes the run that never happened.
 
+It also fails when the run walked a pipeline declaration your config no longer produces. The server
+resolves the config once when its process starts, so a step you redefine after that keeps running
+its old definition — an old command under the same step id, recorded as a pass. The verdicts are
+keyed by id, so nothing about the step list looks wrong, and the tree fingerprint matches because
+the run ran against
+the tree that already held your change. Reconnect the MCP client and open a new run.
+
+Two other things produce the same mismatch, and the message names all three. A config git cannot
+see — ignored, symlinked, or composed from a file outside the repository — moves without moving the
+tree fingerprint. And a config that computes part of its declaration when it loads, from an
+environment variable or a file outside the repo, cannot be compared across processes at all: two of
+them disagree about files nobody touched. If that is deliberate, set `verify.config_fingerprint` to
+false in the published config; nothing else compensates for it, so do it knowingly.
+
 It also fails when your config declares a step the run never held. The command loads the config in
 its own process, so it sees the steps declared now, not the ones the server loaded when it
 started — and a server started before a step was declared walks right past it, recording a run
@@ -411,6 +425,7 @@ clear the `*.log` files rather than the directory if you want to keep the answer
 | Notice two pipelines sharing a name             | PHP collapses duplicate array keys, so the later one silently wins      |
 | Notice a walk abandoned while awaiting a skill  | The live record has no timeout to expire against, so it reports the wait |
 | Know which checks your pipeline ought to hold   | Exit 0 reports on the steps that ran, and nothing more                  |
+| Fingerprint a step type you wrote yourself       | A custom `Step` is compared on its contract alone: id, kind, tags, mutates |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 

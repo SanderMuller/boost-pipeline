@@ -114,6 +114,16 @@ final class HistoryCommand extends Command
             $this->components->twoColumnDetail('scope', $run['scope']);
         }
 
+        // Above the tree line: a mismatch here means the run ran steps this config
+        // no longer declares, which decides what its verdicts are worth before the
+        // question of whether the code moved.
+        if ($run['config_matches'] === false) {
+            $this->components->twoColumnDetail(
+                '<fg=yellow>config</>',
+                'the run walked a different declaration than this config produces now',
+            );
+        }
+
         if ($run['tree_matches'] !== null) {
             $this->components->twoColumnDetail(
                 'tree',

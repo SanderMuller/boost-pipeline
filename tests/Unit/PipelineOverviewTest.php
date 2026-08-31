@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Config\Pipeline;
+use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
@@ -72,7 +73,7 @@ function overviewFor(string $root, Closure $declare, ?string $fingerprint = null
 }
 
 /** @param array<string, string> $verdicts */
-function overviewReceipt(array $verdicts, ?string $scope = null, ?string $tree = null): Receipt
+function overviewReceipt(array $verdicts, ?string $scope = null, ?string $tree = null, ?string $config = null): Receipt
 {
     return new Receipt(
         runId: 'r-one',
@@ -83,6 +84,7 @@ function overviewReceipt(array $verdicts, ?string $scope = null, ?string $tree =
         verdicts: $verdicts,
         recordedAt: '2026-01-01T00:00:00+00:00',
         scope: $scope,
+        config: $config,
     );
 }
 
@@ -256,4 +258,50 @@ it('links the current run logs, not only a past run', function (): void {
 
     expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'current.positions.0.steps.0.log'))
         ->toBe('/logs/r-one-fmt.log');
+});
+
+it('says whether the run walked the declaration this config still produces', function (): void {
+    // The one thing `tree_matches` cannot say. A server holding an older config
+    // runs a different definition of the same step id, and the tree still matches
+    // because the run ran against the tree that already held the new config.
+    $declared = PipelineFingerprint::for(Pipeline::configure()->withSteps(twoSteps(...)));
+
+    new JsonReceiptStore($this->root.'/receipts/default.json')
+        ->write(overviewReceipt(['fmt' => 'passed'], config: $declared));
+
+    expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'current.config_matches'))->toBeTrue();
+});
+
+it('says so when the run walked a declaration this config no longer produces', function (): void {
+    // Split from the matching case rather than asserted beside it: two `expect()`
+    // calls on a textually identical expression let the analyser carry the first
+    // narrowing into the second, and it then reports the true assertion as
+    // impossible. Separate tests also name the two outcomes.
+    new JsonReceiptStore($this->root.'/receipts/default.json')
+        ->write(overviewReceipt(['fmt' => 'passed'], config: 'a-different-digest'));
+
+    expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'current.config_matches'))->toBeFalse();
+});
+
+it('reads a run recorded before the digest existed as unknown, never as mismatched', function (): void {
+    // False would send a reader looking for a config change that never happened.
+    new JsonReceiptStore($this->root.'/receipts/default.json')
+        ->write(overviewReceipt(['fmt' => 'passed']));
+
+    expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'current.config_matches'))->toBeNull();
+});
+
+it('flags a run still in flight that is walking a stale declaration', function (): void {
+    // Worth knowing before the run ends: the steps it has not reached yet are the
+    // ones a reader could still stop.
+    new JsonLiveProgressStore($this->root.'/live/default.json')->write(new LiveProgress(
+        runId: 'r-flight',
+        token: 't',
+        state: RunState::Running,
+        stepIds: ['fmt'],
+        startedAt: gmdate('c'),
+        configDigest: 'a-different-digest',
+    ));
+
+    expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'live.config_matches'))->toBeFalse();
 });

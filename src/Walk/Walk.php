@@ -21,18 +21,29 @@ final readonly class Walk
      * @param  list<WalkStep>  $steps
      * @param  list<string>  $notices
      * @param  int  $excluded  How many declared steps the selection left out.
+     * @param  string|null  $configDigest  Which declaration this walk came from, or null when the
+     *                                     caller did not supply one.
      */
     private function __construct(
         public array $steps,
         public array $notices,
         public int $excluded = 0,
+        public ?string $configDigest = null,
     ) {}
 
     /**
      * @param  string|null  $selection  Walk only steps carrying this tag, plus every untagged
      *                                  step. Null walks everything.
+     * @param  string|null  $configDigest  A digest of the WHOLE declaration this walk was resolved
+     *                                     from, which only the `Pipeline` can compute — it owns the
+     *                                     pipeline-level settings a walk never sees. Carried, never
+     *                                     computed here: deriving it from `$walk` would fingerprint
+     *                                     the selected scope instead of the declaration, and a scoped
+     *                                     run would then record a digest no unscoped comparison could
+     *                                     match. Null means the caller did not supply one, which a
+     *                                     reader must treat as unknown rather than as clean.
      */
-    public static function resolve(Phases $phases, Steps $steps, ?string $selection = null): self
+    public static function resolve(Phases $phases, Steps $steps, ?string $selection = null, ?string $configDigest = null): self
     {
         $registered = $phases->all();
 
@@ -52,7 +63,7 @@ final readonly class Walk
             );
         }
 
-        return new self($walk, $notices, $excluded);
+        return new self($walk, $notices, $excluded, $configDigest);
     }
 
     /** @param list<string> $tags */

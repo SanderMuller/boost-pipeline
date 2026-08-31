@@ -33,6 +33,12 @@ final readonly class LiveProgress
         public string $startedAt,
         public ?string $scope = null,
         public ?float $timeoutSeconds = null,
+        /**
+         * Which pipeline declaration this run walked, so a run still in flight can
+         * be flagged as walking a config the project no longer declares — not only
+         * one that has already finished and written a receipt.
+         */
+        public ?string $configDigest = null,
     ) {}
 
     /**
@@ -48,6 +54,7 @@ final readonly class LiveProgress
             'started_at' => $this->startedAt,
             'scope' => $this->scope,
             'timeout_seconds' => $this->timeoutSeconds,
+            'config' => $this->configDigest,
         ];
     }
 
@@ -70,6 +77,7 @@ final readonly class LiveProgress
         $scope = $data['scope'] ?? null;
         $timeout = $data['timeout_seconds'] ?? null;
         $startedAt = $data['started_at'] ?? null;
+        $config = $data['config'] ?? null;
 
         return new self(
             runId: $runId,
@@ -79,6 +87,7 @@ final readonly class LiveProgress
             startedAt: is_string($startedAt) ? $startedAt : '',
             scope: is_string($scope) ? $scope : null,
             timeoutSeconds: is_int($timeout) || is_float($timeout) ? (float) $timeout : null,
+            configDigest: is_string($config) ? $config : null,
         );
     }
 
