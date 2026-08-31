@@ -46,7 +46,8 @@ function bootPage(): void
 
     config()->set('boost-pipeline.ui.enabled', true);
     config()->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
-    app()['env'] = 'local';
+
+    app()->instance('env', 'local');
     app()->instance(Registrar::class, new Registrar);
 
     new BoostPipelineServiceProvider(app())->boot();

@@ -33,7 +33,7 @@ final class WatchingRunner implements StepRunner
 {
     public ?LiveProgress $seen = null;
 
-    public function __construct(private LiveProgressStore $live, private bool $fail = false) {}
+    public function __construct(private readonly LiveProgressStore $live, private readonly bool $fail = false) {}
 
     public function run(Step $step, string $runId): Result
     {
@@ -173,6 +173,7 @@ it('clears the record when a proof command throws during acknowledgement', funct
     });
 
     $run->resolveCurrent();
+
     $awaiting = $this->live->read();
 
     try {
@@ -219,6 +220,7 @@ it('replaces the record when a blocked position is entered again', function (): 
     $run = liveRun($this->live, $runner, oneShellStep(...));
 
     $run->resolveCurrent();
+
     $first = $runner->seen?->token;
 
     $run->resolveCurrent();
@@ -295,7 +297,6 @@ it('never expires a record from a runner that declares no timeout', function ():
         state: RunState::Running,
         stepIds: ['fmt'],
         startedAt: gmdate('c', 1_700_000_000),
-        timeoutSeconds: null,
     );
 
     expect($record->hasExpired(margin: 30.0, now: 1_900_000_000))->toBeFalse();
@@ -447,6 +448,7 @@ it('keeps the previous token when a replacement write fails', function (): void 
     });
 
     $run->resolveCurrent();
+
     $landed = $store->stored?->token;
 
     // The next write fails, so the run must not believe it replaced anything.

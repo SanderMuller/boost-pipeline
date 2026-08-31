@@ -29,7 +29,7 @@ server ← { run: "r-4f2a", state: "open", position: "1/8", total_steps: 8,
 agent  → next_step()                       # the server runs the step itself
 server ← { state: "blocked", position: "5/8",
            result: { verdict: "failed", exit_code: 1,
-                     log: "storage/logs/pipeline/r-4f2a-phpstan.log" },
+                     log: "storage/logs/pipeline/r-4f2a-9c1e07-phpstan-4ab8d2.log" },
            step: { id: "phpstan", … } }    # ← the SAME step, until it passes
 
         # agent fixes the errors, walks on, reaches the skill step

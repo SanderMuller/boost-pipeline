@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline;
 
+use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
@@ -332,7 +333,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
      */
     private function registerUiRoutes(): void
     {
-        $config = $this->app->make('config');
+        $config = $this->app->make(Repository::class);
 
         if ($config->get(self::CONFIG.'.ui.enabled') !== true || ! $this->app->environment('local')) {
             return;

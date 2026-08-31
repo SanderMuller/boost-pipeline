@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Console;
 
+use Carbon\CarbonImmutable;
+use DateTimeImmutable;
 use Illuminate\Console\Command;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Run\JsonRunHistoryStore;
 use SanderMuller\BoostPipeline\Run\PipelineOverview;
+use Throwable;
 
 /**
  * @phpstan-import-type LiveRow from PipelineOverview
@@ -236,13 +239,14 @@ final class HistoryCommand extends Command
 
     private function waitedFor(string $startedAt): string
     {
-        $started = strtotime($startedAt);
-
-        if ($started === false) {
+        try {
+            $started = new DateTimeImmutable($startedAt)->getTimestamp();
+        } catch (Throwable) {
+            // The record is a file on disk, so the value can be unreadable.
             return 'started at an unreadable time';
         }
 
-        $seconds = max(0, time() - $started);
+        $seconds = max(0, CarbonImmutable::now()->getTimestamp() - $started);
 
         return $seconds < 60
             ? sprintf('%ds', $seconds)
