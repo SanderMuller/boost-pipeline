@@ -17,7 +17,7 @@ use SanderMuller\BoostPipeline\Walk\WalkStep;
  * @phpstan-type UndeclaredRow array{id: string, verdict: string, log: string|null}
  * @phpstan-type RunRow array{run: string, state: string, all_verified: bool, stale: string|null, scope: string|null, recorded_at: string, coverage: string|null, tree_matches: bool|null, config_matches: bool|null, positions: list<PositionRow>, undeclared: list<UndeclaredRow>}
  * @phpstan-type LiveRow array{run: string, state: string, steps: list<string>, scope: string|null, started_at: string, interrupted: bool, config_matches: bool|null}
- * @phpstan-type HistoryRow array{run: string, state: string, all_verified: bool, scope: string|null, recorded_at: string, tree_matches: bool|null, verdicts: array<string, int>}
+ * @phpstan-type HistoryRow array{run: string, state: string, all_verified: bool, scope: string|null, recorded_at: string, tree_matches: bool|null, config_matches: bool|null, verdicts: array<string, int>}
  * @phpstan-type PipelineRow array{pipeline: string, current: RunRow|null, live: LiveRow|null, history: list<HistoryRow>}
  *
  * What a reader should be told about each declared pipeline.
@@ -289,6 +289,10 @@ final readonly class PipelineOverview
                 'scope' => $record->receipt->scope,
                 'recorded_at' => $record->receipt->recordedAt,
                 'tree_matches' => $this->treeMatches($record->receipt),
+                // A list row without this reads worst for the run that most needs
+                // attention: a stale declaration leaves the tree matching, so the
+                // one run the gate refuses is the only row claiming to be healthy.
+                'config_matches' => $this->digestMatches($name, $record->receipt->config),
                 'verdicts' => array_count_values($record->receipt->verdicts),
             ],
             $this->history->for($name)->all($limit),

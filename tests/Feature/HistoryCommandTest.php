@@ -75,7 +75,7 @@ function runHistory(array $arguments = []): array
  * @param  array<string, string>  $verdicts
  * @param  array<string, string|null>  $logs
  */
-function recordRun(string $runId, array $verdicts, string $state = 'complete', bool $allVerified = true, array $logs = []): void
+function recordRun(string $runId, array $verdicts, string $state = 'complete', bool $allVerified = true, array $logs = [], ?string $config = null): void
 {
     new JsonRunHistoryStore(storage_path('logs/pipeline/history/default'))->write(new HistoryRecord(
         new Receipt(
@@ -86,6 +86,7 @@ function recordRun(string $runId, array $verdicts, string $state = 'complete', b
             stale: null,
             verdicts: $verdicts,
             recordedAt: '2026-01-01T00:00:00+00:00',
+            config: $config,
         ),
         $logs,
     ));
@@ -287,4 +288,26 @@ it('reports with the page disabled and outside a local environment', function ()
 
     expect($result['code'])->toBe(0)
         ->and($result['output'])->toContain('r-headless');
+});
+
+it('says on the list row that a run walked a declaration this config no longer produces', function (): void {
+    // Reported from a real project, and the reason it matters is the ordering of
+    // symptoms. A stale declaration leaves the tree matching, so before this the
+    // refused run was the ONLY row claiming "tree matches" while every stale row
+    // around it said "tree moved" — the one run the gate rejects read as the
+    // healthiest thing in the list.
+    recordRun('r-mismatch', ['pint' => 'passed'], config: 'a-digest-this-config-does-not-produce');
+
+    $result = runHistory();
+
+    expect($result['code'])->toBe(0)
+        ->and($result['output'])->toContain('config moved');
+});
+
+it('says nothing about the config for a run recorded before the digest existed', function (): void {
+    // Unknown is not a mismatch. Labelling every pre-upgrade run as moved would
+    // make the whole list shout, and a list that always shouts is not read.
+    recordRun('r-legacy', ['pint' => 'passed']);
+
+    expect(runHistory()['output'])->not->toContain('config moved');
 });

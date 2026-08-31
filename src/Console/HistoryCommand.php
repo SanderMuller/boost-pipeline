@@ -239,6 +239,10 @@ final class HistoryCommand extends Command
         return implode(' <fg=gray>·</> ', array_filter([
             $counts === [] ? 'no verdicts' : implode(', ', $counts),
             $record['scope'] === null ? null : 'scope '.$record['scope'],
+            // Before the tree state, because it outranks it: a run whose
+            // declaration moved is refused however well its tree matches, and a
+            // row showing only "tree matches" reads as the healthiest one there.
+            $record['config_matches'] === false ? 'config moved' : null,
             $tree,
             $record['recorded_at'],
         ], static fn (?string $part): bool => $part !== null));

@@ -418,6 +418,26 @@ Seven findings, all verified against source before acting on any:
 7. **"Two different pipelines differ" was not a valid invariant.** Two identical declarations SHOULD
    share a digest — it describes a declaration, not an identity, and never receives the pipeline name.
 
+### After release, from runtime use
+
+**The list view did not report the mismatch, only the per-run view.** Phase 4's task said the page and
+`pipeline:history` render it, and only the detail surfaces got it: `config_matches` was added to
+`RunRow` and `LiveRow` but not to `HistoryRow`, so the list had no access to it. An incomplete task
+rather than a missing one.
+
+It matters more than a missing field usually would, because of which run it hides. A stale declaration
+leaves the tree matching, so in a real list the refused run was the only row claiming `tree matches`
+while the ordinary stale rows around it said `tree moved`. The one run the gate rejects read as the
+healthiest thing there. `config moved` now sits before the tree state on the row, because it outranks
+it: a run whose declaration moved is refused however well its tree matches.
+
+Confirmed in a real project rather than a fixture: a semantically inert edit (a step timeout from 900
+to 901, inside the digest) produced `all_verified: true`, `coverage: complete`, 4/4 passed, a matching
+tree, and a digest byte-identical to the pre-edit baseline — the mechanism caught in the act. Both
+calls then exited 1, and reverting the edit restored the digest and exit 0, so the check is symmetric
+rather than sticky. Cross-process stability also held for a config carrying a closure that resolves
+`withEnv()` per checkout, which is what excluding env values buys.
+
 ### During implementation
 
 **The new `--server-verified` guard broke 15 existing tests, and that was informative.** Every one

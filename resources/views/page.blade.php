@@ -204,6 +204,11 @@
                 line.append(el('span', null, run.run));
                 line.append(el('span', 'muted', run.state));
                 line.append(el('span', 'muted', verdicts || 'no verdicts'));
+                // Only when it moved. A row that says nothing about the config is
+                // read as ordinary, and this run is the one the gate refuses.
+                if (run.config_matches === false) {
+                    line.append(el('span', 'muted', 'config moved'));
+                }
                 line.append(el('span', 'muted', run.recorded_at));
                 item.append(line);
                 list.append(item);
