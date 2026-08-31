@@ -10,6 +10,62 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.12.0 - 2026-08-31
+
+`pipeline:verify` no longer exits 0 when your config declares a step the recorded run never held.
+
+### Changed
+
+- **`pipeline:verify` compares what the config declares against what the run recorded.** A declared
+  step with no verdict at all now fails the gate, on the bare call and on `--server-verified`.
+  
+  This closes a false green. The receipt could not report it. `coverage` is written from the walk's
+  own notices, so it covers a step the server loaded and then dropped — a step the server never
+  loaded raises no notice, leaves no verdict, and lands in a receipt that calls itself complete with
+  `coverage: "complete"`. The tree fingerprint does not catch it either, because the run ran against
+  the tree that already held the new step.
+  
+  It is reachable in ordinary use. The MCP server resolves the config once when its process starts,
+  so a step declared after that is invisible to every run until the client reconnects. The page and
+  `pipeline:history` already showed the gap per step; only the exit code was silent.
+  
+  **A gate that passed before can now exit 1.** Reconnect the MCP client, or open a new run after
+  adding a step. In both cases a step the config asks for has no recorded result.
+  
+  The comparison is made in the scope the answer is about — a scoped run against its own scope, an
+  unscoped run against the scope `--only` asked about — so a scoped gate is unaffected by steps
+  outside it. A verdict for a step you have since removed does not fail: declared-now must be a
+  subset of recorded, not equal to it. An acknowledged step counts as held, because it did reach the
+  cursor; whether that is good enough remains `all_verified`'s question.
+  
+  A whole-tree call also refuses a config whose walk drops a declared step, and any config that
+  cannot be resolved at all. The command previously answered exit 0 for a config holding duplicate
+  step ids.
+  
+- **The page's loopback refusal is a plain 403 response rather than `abort()`.** An aborted request
+  renders through the host application's exception handler, which is free to do anything: a handler
+  that queries the database to translate its error page turned this 403 into a 500 with a SQL error.
+  The refusal no longer travels through host rendering, so it stays legible in any application. A
+  consumer that styled this 403 through its own handler no longer can.
+  
+
+### Fixed
+
+- **A step log recorded before 0.11.0 is no longer expected to appear on the page.** Runs from
+  before that version have no history record, so no `logs` map resolves their steps. The page looks
+  empty for them rather than broken. Documented in `UPGRADING.md`.
+
+### Internal
+
+- The PHPStan job no longer sets `restore-keys` on its result cache. PHPStan keeps its DI container
+  there, so a partial-key restore reused a container built under different conditions and saved it
+  forward — surfacing as an undefined-constant fatal from the Laravel extension, on a tree that
+  analysed clean from a cold cache. A key miss now means a cold cache.
+
+See `UPGRADING.md` for the full migration notes.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.11.0...v0.12.0
+
 ## v0.11.0 - 2026-08-31
 
 The receipt answers one question: does the tree on disk have a pass. It cannot say what the recent
@@ -215,6 +271,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -355,6 +412,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -425,6 +483,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -435,6 +494,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -574,6 +634,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -622,10 +683,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -735,9 +798,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -893,6 +958,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -981,6 +1047,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1260,6 +1327,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1317,6 +1385,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
