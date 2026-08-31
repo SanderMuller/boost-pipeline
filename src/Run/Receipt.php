@@ -49,10 +49,17 @@ final readonly class Receipt
          * so a reader willing to accept acknowledgements had no way to still
          * refuse a run that never held a gate its config declared.
          *
-         * `complete` means the walk raised no coverage notice. It is not a claim
-         * that every declared step ran: a scoped run leaves its out-of-scope
-         * steps out deliberately and silently. `scope` answers what the run was
-         * about; this answers whether anything went missing by accident.
+         * `complete` means nothing went missing from the scope this run was about:
+         * no step it would have walked was dropped, and its tag selection matched
+         * at least one step. It is not a claim that every declared step ran — a
+         * scoped run leaves its out-of-scope steps out deliberately and silently,
+         * and a step dropped in another scope does not count against it. `scope`
+         * answers what the run was about; this answers whether anything went
+         * missing by accident inside that.
+         *
+         * It followed the walk's notices until the scope-accurate change, and
+         * those are not filtered by the selection — so a scoped receipt can now
+         * carry `complete` beside a notice about a step in another scope.
          *
          * Absent means unknown, never clean. A receipt written before this
          * existed did record notices in memory and dropped them on the way to

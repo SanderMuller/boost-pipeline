@@ -25,6 +25,7 @@ final readonly class Walk
      *                                     caller did not supply one.
      * @param  list<array{id: string, phase: string}>  $dropped  steps dropped from THIS selection
      * @param  bool  $selectionCarriedNothing  a selection was given and no step carries it
+     * @param  string|null  $selection  the selection this walk was resolved with
      */
     private function __construct(
         public array $steps,
@@ -55,6 +56,15 @@ final readonly class Walk
          * the scope the caller asked about was never checked.
          */
         public bool $selectionCarriedNothing = false,
+        /**
+         * The selection this walk was resolved with, or null for the whole tree.
+         *
+         * Carried so a caller cannot describe the walk as something it is not. A
+         * run records a scope alongside its verdicts, and once the verdict is
+         * measured from THIS walk's selection, a scope that disagrees would put a
+         * true verdict about one scope on a receipt claiming another.
+         */
+        public ?string $selection = null,
     ) {}
 
     /**
@@ -91,7 +101,7 @@ final readonly class Walk
             );
         }
 
-        return new self($walk, $notices, $excluded, $configDigest, $dropped, $selectionCarriedNothing);
+        return new self($walk, $notices, $excluded, $configDigest, $dropped, $selectionCarriedNothing, $selection);
     }
 
     /** @param list<string> $tags */

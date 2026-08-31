@@ -268,3 +268,43 @@ it('records coverage incomplete when the tag no step carries', function (): void
         @rmdir(dirname($path));
     }
 });
+
+it('refuses a run whose scope disagrees with the walk it was given', function (): void {
+    // The false green this closes: a walk filtered for backend, a receipt told to
+    // claim frontend, and a frontend step dropped. `dropped` is measured for the
+    // backend selection and is empty, so the run reported all_verified: true about
+    // a scope it never walked.
+    //
+    // It was masked before the verdict became scope-accurate, because the
+    // unfiltered notice made any run with a drop anywhere unverifiable. Measuring
+    // accurately removed that accident, so the rule is stated instead of restored.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
+        $steps->in(NoPhaseRegistersThis::class)->append(Shell::run('true', id: 'orphan')->tagged('frontend'));
+    });
+
+    expect(fn (): Run => runOne($pipeline->walk('backend'), 'r-mismatch', 'frontend'))
+        ->toThrow(InvalidArgumentException::class, 'scope [frontend] but a walk resolved for [backend]');
+});
+
+it('refuses an unscoped claim over a scoped walk, and the reverse', function (): void {
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
+    });
+
+    // Both directions, because either leaves the receipt describing the wrong set
+    // of steps. The message names the whole tree rather than printing "null".
+    expect(fn (): Run => runOne($pipeline->walk('backend'), 'r-a', null))
+        ->toThrow(InvalidArgumentException::class, 'the whole tree')
+        ->and(fn (): Run => runOne($pipeline->walk(), 'r-b', 'backend'))
+        ->toThrow(InvalidArgumentException::class, 'scope [backend]');
+});
+
+it('carries the selection it was resolved with, so the two can be compared at all', function (): void {
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
+    });
+
+    expect($pipeline->walk('backend')->selection)->toBe('backend')
+        ->and($pipeline->walk()->selection)->toBeNull();
+});

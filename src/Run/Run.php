@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use InvalidArgumentException;
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
@@ -114,6 +115,24 @@ final class Run
         ?RunHistoryStore $history = null,
         ?LiveProgressStore $live = null,
     ): self {
+        // A verdict is measured from THIS walk's selection, so a scope that
+        // disagrees would put a true answer about one scope on a receipt claiming
+        // another. It was previously masked: the verdict read notices, which are
+        // not scope-filtered, so any dropped step anywhere made such a run
+        // unverifiable and the mismatch never surfaced. Measuring accurately
+        // removed that accident, which makes stating the rule the fix rather than
+        // restoring the accident.
+        //
+        // `RunManager` always passes the selection it resolved the walk with. This
+        // guards the direct callers of a public constructor.
+        if ($scope !== $walk->selection) {
+            throw new InvalidArgumentException(sprintf(
+                'This run was given scope [%s] but a walk resolved for [%s]. A run records the scope its verdicts are about, so the two cannot differ: pass the same selection to both, or let RunManager open the run.',
+                $scope ?? 'the whole tree',
+                $walk->selection ?? 'the whole tree',
+            ));
+        }
+
         return new self(
             $id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6),
             $walk,

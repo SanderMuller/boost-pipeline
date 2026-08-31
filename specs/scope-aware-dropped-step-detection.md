@@ -179,6 +179,15 @@ None.
    mistyped tag report a verified run for a scope never checked — the exact false green the notice was
    added for. `Walk::$selectionCarriedNothing` exists so accuracy could not eat it.
 
+   **An independent review then found a second guard the change had removed by accident, and this one
+   was not anticipated.** `Run::start()` takes a walk and a scope separately, so they could disagree —
+   a walk resolved for `backend` with a receipt claiming `frontend`. Measuring the verdict from the
+   walk's own selection made that combination report `all_verified: true` about a scope it never
+   walked. The old scope-blind rule had masked it, because any dropped step anywhere made such a run
+   unverifiable. Reproduced before fixing: the probe returned true. `Walk` now carries the selection it
+   was resolved with, and `Run::start()` refuses a scope that disagrees, so the rule is stated rather
+   than the accident restored.
+
 1. **Structured notices, or a new property beside them?** **Decision:** A new property.
    **Rationale.** `notices` is declared in the shared MCP envelope schema and read by agents as
    prose. Changing its element type would break a consumer reading it, for no gain — the gate needs
