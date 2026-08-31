@@ -1,5 +1,31 @@
 # Upgrading
 
+## Unreleased
+
+- **A scoped run is no longer held back by a step dropped in a scope it never claimed.**
+  `all_verified` and `coverage` used to read the walk's notices, which are not filtered by the
+  selection. Declaring a step into an unregistered phase anywhere in your config therefore made
+  every scoped run unverifiable, including runs that had nothing to do with that step.
+
+  This is a loosening, and the first in this line. A scoped run answers for its own scope, so that
+  is what it now reports on. `pipeline:verify` was already scope-accurate; the run's own verdict was
+  not, and the two disagreed.
+
+  **What has NOT changed, deliberately.** A tag no step carries still makes a run unverifiable. It
+  drops nothing at all, since the walk becomes every untagged step and those pass, so a mistyped tag
+  would otherwise leave a run reporting itself verified while the scope you asked about was never
+  checked. That guard is measured separately from dropped steps precisely so that this change could
+  not delete it.
+
+  A drop inside the scope you asked about still makes the run unverifiable, and still refuses the
+  gate, naming the step and its phase.
+
+- **The `notices` a run reports stay unfiltered, and are informational rather than load-bearing
+  now.** They name every step the config declared into an unregistered phase, because that is the
+  config got wrong regardless of scope. A scoped run can therefore report a notice about another
+  scope while reporting `all_verified: true`. That reads oddly the first time and is the accurate
+  answer: your config has a problem elsewhere, and this scope is verified.
+
 ## From 0.14 to 0.15
 
 - **The config digest is tagged with a format version.** A run records `v1:<digest>` where it

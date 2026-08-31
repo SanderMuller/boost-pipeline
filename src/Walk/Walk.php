@@ -24,6 +24,7 @@ final readonly class Walk
      * @param  string|null  $configDigest  Which declaration this walk came from, or null when the
      *                                     caller did not supply one.
      * @param  list<array{id: string, phase: string}>  $dropped  steps dropped from THIS selection
+     * @param  bool  $selectionCarriedNothing  a selection was given and no step carries it
      */
     private function __construct(
         public array $steps,
@@ -42,6 +43,18 @@ final readonly class Walk
          * @var list<array{id: string, phase: string}>
          */
         public array $dropped = [],
+        /**
+         * Whether a selection was given that no step carries.
+         *
+         * Kept as data for the same reason `dropped` is: a reader that needs to
+         * know whether this run can verify anything cannot get there from prose.
+         *
+         * It blocks verification on its own, separately from `dropped`, because it
+         * drops NOTHING — the walk is every untagged step, which will pass. A
+         * mistyped tag would otherwise leave a run reporting itself verified while
+         * the scope the caller asked about was never checked.
+         */
+        public bool $selectionCarriedNothing = false,
     ) {}
 
     /**
@@ -69,14 +82,16 @@ final readonly class Walk
         // A selection nothing carries is almost always a mistyped tag. Left
         // unreported, the untagged steps would pass and the run would call itself
         // verified while the scope the caller asked about was never checked.
-        if ($selection !== null && ! $matchedSelection) {
+        $selectionCarriedNothing = $selection !== null && ! $matchedSelection;
+
+        if ($selectionCarriedNothing) {
             $notices[] = sprintf(
                 'No step carries the tag [%s], so this run holds only the steps that carry no tag at all. Check the spelling: matching is case-sensitive. A value containing a space, or starting with a dash, is an unquoted shell variable far more often than it is a tag.',
                 $selection,
             );
         }
 
-        return new self($walk, $notices, $excluded, $configDigest, $dropped);
+        return new self($walk, $notices, $excluded, $configDigest, $dropped, $selectionCarriedNothing);
     }
 
     /** @param list<string> $tags */

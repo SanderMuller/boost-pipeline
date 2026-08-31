@@ -9,6 +9,7 @@ use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Walk\Walk;
@@ -33,6 +34,27 @@ final class NoPhaseRegistersThis implements Phase
     {
         return 'Unregistered Here';
     }
+}
+
+/** Resolve a walk to completion with a runner that always passes. */
+function runOne(Walk $walk, string $id, ?string $scope): Run
+{
+    $run = Run::start(
+        $walk,
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        $id,
+        scope: $scope,
+    );
+
+    $run->resolveCurrent();
+
+    return $run;
 }
 
 /** One registered step, and one declared into a phase nothing registers. */
@@ -123,23 +145,76 @@ it('adds the tag notice beside the drop when the selection matches nothing left'
         ->and($walk->notices[1])->toContain('No step carries the tag [backend]');
 });
 
-it('records all_verified false for a real scoped run whose drop is out of scope', function (): void {
-    // The end-to-end truth behind the command-level test that tolerates this. The
-    // walk correctly reports no in-scope drop, and the run still refuses to call
-    // itself verified — because `Run` reads `notices`, which is not scope-filtered.
+it('verifies a real scoped run whose only drop is out of scope', function (): void {
+    // This asserted the opposite one release ago, and the change is deliberate:
+    // accuracy over strictness. `all_verified` used to read the unfiltered
+    // `notices`, so a scoped run was unverifiable while a step was dropped anywhere
+    // in the config — including in a scope it never claimed to check.
     //
-    // Both are defensible on their own and they disagree, which is the substance of
-    // this spec's one open question. Pinned here so the disagreement is a recorded
-    // fact rather than something a future reader rediscovers.
+    // The gate had already been made scope-accurate, so the two disagreed: the
+    // command tolerated an out-of-scope drop and the run's own verdict did not.
+    // Now both answer for the scope asked about.
     $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
         $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
         $steps->in(NoPhaseRegistersThis::class)->append(Shell::run('true', id: 'orphan')->tagged('frontend'));
     });
 
     $walk = $pipeline->walk('backend');
+    $run = runOne($walk, 'r-scoped-drop', 'backend');
+
+    expect($walk->dropped)->toBeEmpty()
+        // The prose notice still names the frontend drop. It reports what the
+        // CONFIG got wrong, which does not depend on the scope asked about, and it
+        // no longer decides whether the run verified.
+        ->and($walk->notices)->not->toBeEmpty()
+        ->and($run->allVerified())->toBeTrue();
+});
+
+it('refuses to verify a real scoped run whose drop IS in scope', function (): void {
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
+        $steps->in(NoPhaseRegistersThis::class)->append(Shell::run('true', id: 'orphan')->tagged('backend'));
+    });
+
+    $walk = $pipeline->walk('backend');
+    $run = runOne($walk, 'r-in-scope-drop', 'backend');
+
+    expect($walk->dropped)->not->toBeEmpty()
+        ->and($run->allVerified())->toBeFalse();
+});
+
+it('still refuses to verify a run whose tag no step carries', function (): void {
+    // The guard that accuracy must NOT eat. A mistyped tag drops nothing: the walk
+    // is every untagged step, and those pass. Reading `dropped` alone would have
+    // deleted this silently and left the run reporting itself verified while the
+    // scope the caller asked about was never checked.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept'));
+    });
+
+    $walk = $pipeline->walk('bakend');
+    $run = runOne($walk, 'r-typo', 'bakend');
+
+    expect($walk->dropped)->toBeEmpty()
+        ->and($walk->selectionCarriedNothing)->toBeTrue()
+        ->and($run->allVerified())->toBeFalse();
+});
+
+it('records coverage complete for a scoped run whose drop is out of scope', function (): void {
+    // `coverage` is measured the same way as `all_verified` and matters separately:
+    // `pipeline:verify --server-verified` refuses anything that is not `complete`.
+    // Left scope-blind it would have kept refusing the run the bare call now
+    // accepts, which is the same disagreement one layer down.
+    $path = sys_get_temp_dir().'/bp-cov-'.bin2hex(random_bytes(4)).'/receipt.json';
+    $store = new JsonReceiptStore($path);
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept')->tagged('backend'));
+        $steps->in(NoPhaseRegistersThis::class)->append(Shell::run('true', id: 'orphan')->tagged('frontend'));
+    });
 
     $run = Run::start(
-        $walk,
+        $pipeline->walk('backend'),
         new class implements StepRunner
         {
             public function run(Step $step, string $runId): Result
@@ -147,13 +222,49 @@ it('records all_verified false for a real scoped run whose drop is out of scope'
                 return Result::passed($step->id(), 'ok');
             }
         },
-        'r-scoped-drop',
+        'r-cov',
+        receipts: $store,
         scope: 'backend',
     );
 
     $run->resolveCurrent();
 
-    expect($walk->dropped)->toBeEmpty()
-        ->and($walk->notices)->not->toBeEmpty()
-        ->and($run->allVerified())->toBeFalse();
+    try {
+        expect($store->read()?->coverage)->toBe('complete');
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
+});
+
+it('records coverage incomplete when the tag no step carries', function (): void {
+    $path = sys_get_temp_dir().'/bp-cov-'.bin2hex(random_bytes(4)).'/receipt.json';
+    $store = new JsonReceiptStore($path);
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'kept'));
+    });
+
+    $run = Run::start(
+        $pipeline->walk('bakend'),
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        'r-cov-typo',
+        receipts: $store,
+        scope: 'bakend',
+    );
+
+    $run->resolveCurrent();
+
+    try {
+        expect($store->read()?->coverage)->toBe('incomplete');
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
 });

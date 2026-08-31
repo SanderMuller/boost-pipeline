@@ -162,35 +162,22 @@ Stop and report — do not improvise — if any of these proves false during imp
 
 ## Open Questions
 
-1. **Should `allVerified` and `coverage` also read the scope-filtered list?** Today a scoped run is
-   unverifiable while ANY notice exists, including one about a step in another scope. Reading
-   `dropped` instead would loosen that: the run only ever claimed its own scope, and a step dropped
-   outside it was never going to run, so arguably the current behaviour is over-strict.
-
-   **Measured during implementation, and it matters more than this question first suggested.** A real
-   scoped run whose only drop is out of scope records `dropped: []` — correctly — and
-   `all_verified: false`, because `Run::verifiedGiven()` reads the unfiltered `notices`. So the bare
-   `pipeline:verify` still refuses it, through a different guard with a different message. The
-   out-of-scope tolerance this spec adds is therefore real in the command and unreachable end to end
-   until this is settled: what actually changed for a real run is the in-scope case, where the
-   refusal now names the step and its phase instead of quoting a notice. Both facts are pinned by
-   tests so the disagreement is recorded rather than rediscovered.
-
-   **A second reason to answer it, found in use.** The prose `notices` are not scope-filtered either,
-   so a scoped run names dropped steps its own scope never selected. Filtering them is not available
-   as a tidy-up: every drop can be out of scope, which would leave a notice naming nothing, and
-   suppressing the notice instead flips `verifiedGiven()` — the same loosening this question is about,
-   arriving as a side effect. Both surfaces therefore wait on one decision rather than two.
-
-   It is left out deliberately. This spec closes a gap and changes no existing verdict; loosening a
-   false-green guard is the opposite kind of change and deserves its own decision, not a ride along
-   with this one. Worth answering before the next release that touches `Run`, because the two
-   behaviours will look inconsistent until it is settled — a scoped gate refusing on
-   `all_verified` for a step the same scoped gate ignores under `dropped`.
+None.
 
 ---
 
 ## Resolved Questions
+
+0. **Should `allVerified` and `coverage` also read the scope-filtered list?** **Decision:** Yes.
+   Accuracy over strictness. **Rationale.** A scoped run answers for its own scope, so that is what it
+   reports on. `pipeline:verify` was already scope-accurate and the run's own verdict was not, which
+   left the two disagreeing — and made the tolerance this spec added unreachable end to end.
+
+   Implemented with one guard preserved deliberately. A tag no step carries still blocks every run,
+   measured separately from dropped steps, because it drops NOTHING: the walk becomes every untagged
+   step and those pass. Reading `dropped` alone would have deleted that guard silently and let a
+   mistyped tag report a verified run for a scope never checked — the exact false green the notice was
+   added for. `Walk::$selectionCarriedNothing` exists so accuracy could not eat it.
 
 1. **Structured notices, or a new property beside them?** **Decision:** A new property.
    **Rationale.** `notices` is declared in the shared MCP envelope schema and read by agents as

@@ -253,7 +253,12 @@ untagged step belongs to every scope, so a dropped untagged step fails every cal
 The `notices` a run reports are not scope-filtered, and that is deliberate. They name every step the
 config declared into an unregistered phase, because that is what the config got wrong regardless of
 which scope you asked about. So a frontend-scoped run can name a backend step as dropped while the
-gate refuses over only the frontend one.
+gate refuses over only the frontend one, and can report `all_verified: true` alongside it — the
+config has a problem elsewhere, and this scope is verified.
+
+A tag no step carries is the one case that still blocks a run whatever its scope. Nothing is dropped
+there: the walk becomes every untagged step and those pass, so a mistyped tag would otherwise report
+a verified run for a scope that was never checked.
 
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which Laravel
 gitignores, so it does not travel with a push. Wire it into a pre-push hook or a pre-PR gate. CI

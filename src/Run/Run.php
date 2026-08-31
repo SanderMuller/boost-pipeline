@@ -374,10 +374,15 @@ final class Run
      * acknowledgements reaches Complete. Any consumer keying on the state alone
      * would count unverified work as success, so this is reported alongside it.
      *
-     * The notices clause is the subtler half. A step declared into a phase nothing
-     * registered is dropped with a notice, and so is a tag selection no step
-     * carries — so every REMAINING step can pass and the run would otherwise claim
-     * full verification while a step the config declared never ran at all.
+     * The coverage clause is the subtler half. A step declared into a phase nothing
+     * registered can never run, and a tag no step carries leaves only untagged
+     * steps to pass — either way every REMAINING step can pass while the run
+     * verified less than it was asked to.
+     *
+     * Both are measured for THIS walk's selection. A step dropped in a scope this
+     * run never claimed does not count against it: the run only ever answered for
+     * its own scope, and holding it to another one made a scoped gate refusable for
+     * a reason outside its question.
      */
     public function allVerified(): bool
     {
@@ -403,7 +408,18 @@ final class Run
 
     private function verifiedGiven(?string $stale): bool
     {
-        if ($this->results === [] || $this->walk->notices !== []) {
+        // Scope-accurate, not scope-blind. This used to read `notices`, which are
+        // not filtered by the selection, so a scoped run was unverifiable while a
+        // step was dropped anywhere in the config — including in a scope it never
+        // claimed to check. It only ever claimed its own.
+        //
+        // Both halves have to stay. `dropped` covers a declared step this walk
+        // cannot reach. `selectionCarriedNothing` covers a mistyped tag, which
+        // drops nothing at all: the walk is every untagged step, those pass, and
+        // the run would otherwise report itself verified while the scope the caller
+        // asked about was never checked. Reading `dropped` alone would have deleted
+        // that guard silently.
+        if ($this->results === [] || $this->walk->dropped !== [] || $this->walk->selectionCarriedNothing) {
             return false;
         }
 
@@ -614,7 +630,12 @@ final class Run
             // Records that coverage broke, never which notice broke it. A reader
             // needing that reads `status` on the live run; copying the text here
             // would make the receipt a log and invite a consumer to parse it.
-            coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
+            //
+            // Measured the same way as `all_verified`, and for the same reason: a
+            // drop in a scope this run never claimed does not make its coverage
+            // incomplete. A mistyped tag does, because then it checked nothing it
+            // was asked to.
+            coverage: $this->walk->dropped === [] && ! $this->walk->selectionCarriedNothing ? 'complete' : 'incomplete',
             asserted: array_keys(array_filter($this->asserted)),
             config: $this->walk->configDigest,
         );
