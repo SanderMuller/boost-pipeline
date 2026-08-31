@@ -63,7 +63,10 @@
         "psr-4": {
             "SanderMuller\\BoostPipeline\\Tests\\": "tests/",
             "Workbench\\App\\": "workbench/app/"
-        }
+        },
+        "files": [
+            "phpstan-bootstrap.php"
+        ]
     },
     "scripts": {
         "post-autoload-dump": [
