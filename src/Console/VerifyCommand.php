@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Console;
 
 use Illuminate\Console\Command;
+use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
-use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\Verdict;
+use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
@@ -37,13 +38,13 @@ final class VerifyCommand extends Command
 
     public function handle(Pipelines $pipelines, ReceiptStoreFactory $receipts, TreeFingerprint $tree): int
     {
-        $store = $this->storeFor($pipelines, $receipts);
+        $name = $this->pipelineName($pipelines);
 
-        if (! $store instanceof ReceiptStore) {
+        if ($name === null) {
             return self::FAILURE;
         }
 
-        $receipt = $store->read();
+        $receipt = $receipts->for($name)->read();
 
         if (! $receipt instanceof Receipt) {
             $this->components->error($this->nothingRecorded());
@@ -100,6 +101,14 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
+        $uncoveredFailure = $this->declaredButNeverRecorded($pipelines, $name, $receipt);
+
+        if ($uncoveredFailure !== null) {
+            $this->components->error($uncoveredFailure);
+
+            return self::FAILURE;
+        }
+
         if ($this->option('server-verified') === true) {
             return $this->answerServerVerified($receipt, $now);
         }
@@ -143,8 +152,8 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * The receipt store for the pipeline the caller meant, or null with the
-     * reason printed.
+     * The name of the pipeline the caller meant, or null with the reason
+     * printed.
      *
      * A project declaring several pipelines has no single answer to "is this tree
      * verified?" — the same rule a scoped receipt already follows, one level up.
@@ -155,7 +164,7 @@ final class VerifyCommand extends Command
      * project that routinely runs only its PR pipeline could never reach exit 0
      * through it, and a gate that cannot pass is one people learn to skip.
      */
-    private function storeFor(Pipelines $pipelines, ReceiptStoreFactory $receipts): ?ReceiptStore
+    private function pipelineName(Pipelines $pipelines): ?string
     {
         $asked = $this->option('pipeline');
         $asked = is_string($asked) && trim($asked) !== '' ? $asked : null;
@@ -176,7 +185,7 @@ final class VerifyCommand extends Command
                 return null;
             }
 
-            return $receipts->for($implied);
+            return $implied;
         }
 
         if (! $pipelines->has($asked)) {
@@ -189,7 +198,7 @@ final class VerifyCommand extends Command
             return null;
         }
 
-        return $receipts->for($asked);
+        return $asked;
     }
 
     /**
@@ -355,6 +364,133 @@ final class VerifyCommand extends Command
         return self::SUCCESS;
     }
 
+    /** The scope the caller asked about, or null for the whole tree. */
+    private function askedScope(): ?string
+    {
+        $asked = $this->option('only');
+
+        return is_string($asked) && trim($asked) !== '' ? $asked : null;
+    }
+
+    /**
+     * Steps the config declares now that the run recorded no verdict for.
+     *
+     * The receipt cannot answer this and never could. `coverage` is written from
+     * the walk's own notices, so it reports a step the server LOADED and then
+     * dropped. A step the server never loaded raises no notice, leaves no
+     * verdict, and lands in a receipt that calls itself complete.
+     *
+     * That is reachable in ordinary use: the MCP server resolves the config once
+     * when its process starts, so a step declared after that is invisible to
+     * every run until the client reconnects. The tree fingerprint does not catch
+     * it either — the run ran against the tree that already held the new step, so
+     * the fingerprints match.
+     *
+     * This command is the one place that can answer it. It runs in its own
+     * process and loads the config as it stands now, so it can compare what is
+     * declared against what was recorded. The page and `pipeline:history` already
+     * show the same gap per step; until this guard, a gate reading the exit code
+     * was the only reader told nothing.
+     *
+     * Declared-now must be a subset of recorded. A verdict for a step no longer
+     * declared does not fail: the question is whether the run covers what the
+     * config asks for today, and a step since removed asks for nothing. A renamed
+     * step still fails, through its new id.
+     *
+     * "Declared" is read in the scope the answer is about — the receipt's own for
+     * a scoped run, otherwise the one the caller asked about.
+     */
+    private function declaredButNeverRecorded(Pipelines $pipelines, string $name, Receipt $receipt): ?string
+    {
+        // Only a finished run. An unfinished one is missing verdicts because the
+        // cursor never reached them, and `all_verified` and the state guard
+        // already say so in the terms that fit it.
+        if ($receipt->state !== RunState::Complete->value) {
+            return null;
+        }
+
+        $pipeline = $pipelines->get($name);
+
+        if (! $pipeline instanceof Pipeline) {
+            return sprintf(
+                'No pipeline named [%s] is configured any more, so there is nothing to check run [%s] against.',
+                $name,
+                $receipt->runId,
+            );
+        }
+
+        // A scoped run leaves its out-of-scope steps out deliberately, so its own
+        // scope decides the comparison — the whole walk would fail every scoped
+        // run. An UNSCOPED run walked everything, so it answers a question about
+        // any single scope, and the question asked is the one to compare against:
+        // measuring it against the whole walk would fail `--only=backend` because
+        // the config gained a frontend step, which says nothing about backend.
+        $scope = $receipt->scope ?? $this->askedScope();
+
+        // Resolving the walk is where a duplicate step id is caught — `Pipelines`
+        // validates names and types, not step ids — so this is the first point in
+        // the command that can fail on a config it could previously ignore. It
+        // refuses rather than throwing, because a gate wants an answer and not a
+        // stack trace, and refusing is the right answer anyway: a config that
+        // cannot be walked is one the server would refuse to run.
+        try {
+            $walk = $pipeline->walk($scope);
+        } catch (InvalidPipelineConfigException $invalidPipelineConfigException) {
+            return sprintf(
+                'Run [%s] cannot be checked against this config, because the config cannot be resolved: %s',
+                $receipt->runId,
+                $invalidPipelineConfigException->getMessage(),
+            );
+        }
+
+        // A step this config DROPS never reaches the comparison below, so counting
+        // step ids finds nothing wrong and passes a config that declares a gate
+        // nothing can reach. A step declared into a phase nothing registers is
+        // dropped that way, and the walk reports it as a notice.
+        //
+        // Only for a whole-tree question, where every declared step is in scope and
+        // a notice therefore always describes one. A scoped question cannot use
+        // this: `noticesForUnregisteredPhases()` ignores the selection, so a broken
+        // step in another scope would fail an answer that has nothing to do with
+        // it — and for a selection, a notice can instead mean the tag matches no
+        // step, which drops nothing at all. That leaves one narrow gap: a scoped
+        // question does not detect a step dropped into an unregistered phase. It
+        // takes a stale server to reach, because a run against this config raises
+        // the same notice and records `coverage: incomplete`, which already fails.
+        if ($scope === null && $walk->notices !== []) {
+            return sprintf(
+                'Run [%s] cannot be checked against this config, because resolving it drops a step the config declares: %s',
+                $receipt->runId,
+                implode(' ', $walk->notices),
+            );
+        }
+
+        $missing = [];
+
+        foreach ($walk->steps as $walkStep) {
+            $stepId = $walkStep->step->id();
+
+            // Presence, not verdict. An acknowledged step did reach the cursor;
+            // whether an acknowledgement is good enough is a different question,
+            // and `all_verified` owns it.
+            if (! array_key_exists($stepId, $receipt->verdicts)) {
+                $missing[] = $stepId;
+            }
+        }
+
+        if ($missing === []) {
+            return null;
+        }
+
+        return sprintf(
+            'Run [%s] never held %d step(s) this pipeline declares%s: [%s]. The run reports itself complete because it walked every step it knew about — these were not among them, so nothing failed and nothing was skipped. The usual cause is a step declared after the MCP server process started, which resolves the config once: reconnect the client, then open a new run.',
+            $receipt->runId,
+            count($missing),
+            $receipt->scope === null ? '' : " in scope [{$receipt->scope}]",
+            implode('], [', $missing),
+        );
+    }
+
     /**
      * Whether the run's coverage falls short of what was asked, and why.
      *
@@ -365,8 +501,7 @@ final class VerifyCommand extends Command
      */
     private function scopeMismatch(Receipt $receipt): ?string
     {
-        $asked = $this->option('only');
-        $asked = is_string($asked) && trim($asked) !== '' ? $asked : null;
+        $asked = $this->askedScope();
 
         if ($receipt->scope === null) {
             return null;

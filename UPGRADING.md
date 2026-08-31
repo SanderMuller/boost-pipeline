@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- **`pipeline:verify` now refuses a run that never held a step the config declares.** It reads the
+  config as it stands now and compares what is declared against what the run recorded. A step with
+  no verdict at all fails the gate, on both the bare call and `--server-verified`.
+
+  A whole-tree call also refuses a config whose walk drops a declared step — one declared into a
+  phase nothing registers — because such a step is missing from the comparison as well as from the
+  run. A scoped call does not make that check: the notice does not say which scope the dropped step
+  belonged to, so applying it there would fail an answer over a step in an unrelated scope.
+
+  This closes a false green. The receipt could not report it: `coverage` is written from the walk's
+  own notices, so it covers a step the server loaded and then dropped, and a step the server never
+  loaded raises no notice. The MCP server resolves the config once when its process starts, so a
+  step declared after that was invisible to every run until the client reconnected — and the run
+  recorded itself complete with `coverage: "complete"`. The tree fingerprint did not catch it
+  either, because the run ran against the tree that already held the new step.
+
+  **A gate that passed before can now exit 1.** Two situations reach it: the stale-server case above
+  (reconnect the MCP client, then open a new run), and a step added to the config after the last
+  run (open a new run). Neither is a false alarm — in both, a step the config asks for has no
+  recorded result. A run is compared only against the scope the answer is about — a scoped run
+  against its own, an unscoped run against the scope `--only` asked about — so a scoped gate is
+  unaffected by steps outside it. A verdict for a step the config has since removed does not fail:
+  declared-now must be a subset of recorded, not equal to it.
+
+  `pipeline:history` already reported this per step, and the page already showed it. Only the exit
+  code was silent.
+
+- **The page's loopback refusal is a plain 403 response, not `abort()`.** An aborted request renders
+  through the host application's exception handler, which is free to do anything: one consumer's
+  handler queries the database to translate its error page, so a refused request from a LAN address
+  surfaced as a 500 with a SQL error rather than a 403. The refusal no longer travels through host
+  rendering, so it stays legible in any application. A consumer that styled this 403 through its own
+  handler no longer can.
+
+## From 0.10.8 to 0.11.0
+
 Additive. A project that only configures steps needs no migration, but three things arrive whether
 or not it opts into any of them.
 
@@ -17,6 +53,11 @@ or not it opts into any of them.
   History keeps the newest 20 runs per pipeline and deletes the rest on write. Step logs are still
   never pruned. Nothing is gated on the page below: enabling it later shows real history at once
   rather than an empty list.
+
+  A run recorded before this version has no history record, so the page and `pipeline:history` can
+  show it no step logs even though the log files are still on disk — the `logs` map in a history
+  record is what resolves a step to its log, and only a run from this version on writes one. A page
+  enabled right after upgrading therefore looks empty rather than broken. The next run fills it.
 
 - **`php artisan pipeline:history` is new.** It reports; `pipeline:verify` still gates. It exits 0
   for every answer it can give, including a failed or stale run, and non-zero only when it cannot

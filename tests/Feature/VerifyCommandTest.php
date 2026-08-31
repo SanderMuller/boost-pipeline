@@ -5,11 +5,13 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Artisan;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
+use SanderMuller\BoostPipeline\Contracts\Phase;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
+use SanderMuller\BoostPipeline\Phases\StepCollection;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
@@ -17,6 +19,24 @@ use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Steps\Shell;
+
+/**
+ * A phase no pipeline registers, so a step declared into it is dropped from the
+ * walk with a notice. Declared here rather than reused from another test file:
+ * this file has to run on its own.
+ */
+final class VerifyOrphanPhase implements Phase
+{
+    public function id(): string
+    {
+        return 'verify-orphan';
+    }
+
+    public function name(): string
+    {
+        return 'Verify Orphan';
+    }
+}
 
 /**
  * The command is the only thing that lets a consumer act on a run, so its exit
@@ -125,6 +145,30 @@ function receipt(bool $allVerified = true, ?string $tree = 'tree-a', ?string $st
             static fn (string $verdict): bool => $verdict === 'passed',
         ))),
     );
+}
+
+/**
+ * Bind a project whose sole pipeline declares these steps, each tagged as given.
+ *
+ * The ambient test config declares one pipeline holding no steps at all, so
+ * every other test in this file is silent on the declared-vs-recorded question.
+ * These are the tests that are about it.
+ *
+ * @param  array<string, string|null>  $steps  step id => tag, or null for untagged
+ */
+function projectDeclaringSteps(array $steps): void
+{
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection) use ($steps): void {
+            $phase = $collection->in(Formatting::class);
+
+            foreach ($steps as $id => $tag) {
+                $step = Shell::run('true', id: $id);
+                $phase->append($tag === null ? $step : $step->tagged($tag));
+            }
+        })],
+        '.config/pipeline.php',
+    ));
 }
 
 it('fails when no run has been recorded, which is the case it exists for', function (): void {
@@ -939,4 +983,315 @@ it('names the moved commit at the gate, not only in the receipt', function (): v
         ->and($output)->toContain('verified a different working tree')
         ->and($output)->toContain('rebase')
         ->and($output)->toContain('nothing to undo');
+});
+
+/**
+ * A step the server never loaded.
+ *
+ * The MCP server resolves the config once when its process starts, so a step
+ * declared after that is invisible to every run until the client reconnects. The
+ * run then walks the steps it knew about, finds nothing wrong, and records itself
+ * complete — and `coverage` cannot contradict it, because coverage is written
+ * from the walk's own notices and an unloaded step raises none.
+ *
+ * The tree fingerprint does not catch it either: the run ran against the tree
+ * that already held the new step, so the fingerprints match. This command runs
+ * in its own process against the config as it stands now, which makes it the only
+ * reader that can answer at all.
+ */
+it('fails when the config declares a step the recorded run never held', function (): void {
+    projectDeclaringSteps(['pint' => null, 'phpstan' => null, 'affected-tests' => null]);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed', 'phpstan' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[affected-tests]')
+        // The reader has to be told why a run calling itself complete is not,
+        // or the only available diagnosis is "the gate is broken".
+        ->and($output)->toContain('reconnect the client');
+});
+
+it('fails the same way with --server-verified, which is the flag a skill reads', function (): void {
+    // The narrower question was equally exposed: every verdict the server
+    // produced can be a pass while a declared gate was never among them.
+    projectDeclaringSteps(['pint' => null, 'phpstan' => null, 'affected-tests' => null]);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed', 'phpstan' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(1)
+        ->and(Artisan::output())->toContain('[affected-tests]');
+});
+
+/**
+ * The false-failure guard, and the most important test here.
+ *
+ * A scoped run leaves its out-of-scope steps out deliberately. Comparing against
+ * the whole walk rather than the walk for the receipt's own scope would fail
+ * every scoped run — turning a fix for a false green into a gate nobody can pass.
+ */
+it('does not fail a scoped run for steps its scope deliberately left out', function (): void {
+    projectDeclaringSteps([
+        'pint' => 'backend',
+        'phpstan' => 'backend',
+        'oxlint' => 'frontend',
+        'tsc' => 'frontend',
+    ]);
+    receiptStoreHolding(receipt(
+        scope: 'backend',
+        verdicts: ['pint' => 'passed', 'phpstan' => 'passed'],
+    ));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+it('still fails a scoped run for a step missing from its own scope', function (): void {
+    projectDeclaringSteps([
+        'pint' => 'backend',
+        'phpstan' => 'backend',
+        'oxlint' => 'frontend',
+    ]);
+    receiptStoreHolding(receipt(scope: 'backend', verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    // One read. `Artisan::output()` drains the buffer, so a second call returns
+    // an empty string and every `not->toContain` after it passes vacuously.
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[phpstan]')
+        ->and($output)->toContain('scope [backend]')
+        // The frontend step is out of scope, not missing. Naming it here would
+        // send the reader hunting for a step this run was never about.
+        ->and($output)->not->toContain('[oxlint]');
+});
+
+it('fails a scoped --server-verified call, the shape a skill actually invokes', function (): void {
+    // Both dimensions at once, because this is the invocation a gate runs: a
+    // scope and the narrower question together. Each is pinned above on its own.
+    projectDeclaringSteps([
+        'pint' => 'backend',
+        'phpstan' => 'backend',
+        'affected-tests' => 'backend',
+        'tsc' => 'frontend',
+    ]);
+    receiptStoreHolding(receipt(
+        scope: 'backend',
+        verdicts: ['pint' => 'passed', 'phpstan' => 'passed'],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend', '--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[affected-tests]')
+        ->and($output)->not->toContain('[tsc]');
+});
+
+it('reports a config too broken to compare against, rather than throwing', function (): void {
+    // Resolving the walk is new work for this command, and the walk is where a
+    // duplicate step id is detected — `Pipelines` validates names and types, not
+    // step ids. Left uncaught, a consumer with a broken config got a stack trace
+    // from their gate instead of an answer.
+    //
+    // It fails rather than passes. The old behaviour here was exit 0, which is
+    // worse than either: the config cannot be walked, so no run can be checked
+    // against it, and the server would refuse to run it at all.
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'dup'));
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'dup'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(verdicts: ['dup' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('Duplicate step id [dup]');
+});
+
+it('does not fail a run whose steps resolved as one parallel position', function (): void {
+    // A real run through the real recorder, not a hand-built receipt: the guard
+    // compares declared step ids against recorded verdict keys, so it breaks
+    // outright if a parallel position records one verdict for the batch instead
+    // of one per step. Every declared step here resolves in a single position.
+    $path = sys_get_temp_dir().'/bp-parallel-verify-'.bin2hex(random_bytes(4)).'/receipt.json';
+    $store = new JsonReceiptStore($path);
+
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $collection): void {
+        $collection->in(Formatting::class)->parallel(function (StepCollection $group): void {
+            $group->append(Shell::run('true', id: 'left'));
+            $group->append(Shell::run('true', id: 'right'));
+        });
+    });
+
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => $pipeline],
+        '.config/pipeline.php',
+    ));
+    useReceiptStore($store);
+    treeReporting('tree-a');
+
+    $run = Run::start(
+        $pipeline->walk(),
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        'r-par',
+        tree: resolve(TreeFingerprint::class),
+        receipts: $store,
+    );
+
+    $run->resolveCurrent();
+
+    try {
+        // Both halves stated: the recorder keys a batched step by its own id, and
+        // the gate accepts the result. Asserting only the exit code would still
+        // pass if the guard stopped comparing anything at all.
+        expect($store->read()?->verdicts)->toBe(['left' => 'passed', 'right' => 'passed'])
+            ->and(Artisan::call('pipeline:verify'))->toBe(0);
+    } finally {
+        @unlink($path);
+        @rmdir(dirname($path));
+    }
+});
+
+it('fails when the config declares a step into a phase nothing registered', function (): void {
+    // A step dropped before the walk is missing from the comparison as well as
+    // from the run, so counting step ids finds nothing wrong. Without this the
+    // gate passes a config that declares a gate nothing can reach — the same
+    // false green one layer down.
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'pint'));
+            $collection->in(VerifyOrphanPhase::class)->append(Shell::run('true', id: 'orphan'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('drops a step the config declares');
+});
+
+it('answers a scoped question from a full run even when another scope gained a step', function (): void {
+    // An unscoped run walked everything, so it answers a question about any one
+    // scope. Comparing it against the WHOLE current walk would fail this on the
+    // strength of a frontend step, which says nothing about backend — a false
+    // failure introduced by the guard rather than caught by it.
+    projectDeclaringSteps([
+        'pint' => 'backend',
+        'phpstan' => 'backend',
+        'tsc' => 'frontend',
+    ]);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed', 'phpstan' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+it('still fails a full run asked about a scope it left a step out of', function (): void {
+    // The other half: reading the asked scope must not stop the guard working
+    // inside it.
+    projectDeclaringSteps([
+        'pint' => 'backend',
+        'phpstan' => 'backend',
+        'tsc' => 'frontend',
+    ]);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[phpstan]')
+        ->and($output)->not->toContain('[tsc]');
+});
+
+it('does not fail a scoped question because another scope holds a broken step', function (): void {
+    // The dropped-step check reads the walk for the question being answered, and
+    // `noticesForUnregisteredPhases()` ignores the selection — so reading it for a
+    // scoped question would fail a backend answer over a frontend step declared
+    // into a phase nothing registers. The frontend step is not part of the backend
+    // question, and a gate that fails on it is a gate nobody can pass.
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'pint')->tagged('backend'));
+            $collection->in(VerifyOrphanPhase::class)->append(Shell::run('true', id: 'orphan')->tagged('frontend'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+it('counts an acknowledged step as held, leaving that question to all_verified', function (): void {
+    // Presence, not verdict. An acknowledged step did reach the cursor, and
+    // whether an acknowledgement is good enough is a separate question the
+    // acknowledgement guards already own — with a message written for it.
+    projectDeclaringSteps(['pint' => null, 'review' => null]);
+    receiptStoreHolding(receipt(
+        allVerified: false,
+        verdicts: ['pint' => 'passed', 'review' => 'acknowledged'],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('cannot exit 0')
+        ->and($output)->not->toContain('reconnect the client');
+});
+
+it('passes a run holding a verdict for a step the config has since removed', function (): void {
+    // Declared-now must be a subset of recorded, not equal to it. The question is
+    // whether the run covers what the config asks for today; a step since removed
+    // asks for nothing. The page shows it under `undeclared` rather than dropping
+    // it, and that is the right place for it — it is not a reason to fail a gate.
+    projectDeclaringSteps(['pint' => null]);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed', 'retired' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('does not blame a stale server for a run that simply never finished', function (): void {
+    // An unfinished run is missing verdicts because the cursor never reached
+    // them. Reporting that as a config-loading problem would send the reader to
+    // reconnect a client over a run they stopped themselves.
+    projectDeclaringSteps(['pint' => null, 'phpstan' => null]);
+    receiptStoreHolding(receipt(
+        allVerified: false,
+        state: 'blocked',
+        verdicts: ['pint' => 'failed'],
+    ));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('[pint] failed')
+        ->and($output)->not->toContain('reconnect the client');
 });

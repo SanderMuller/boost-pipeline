@@ -38,7 +38,17 @@ final class LoopbackOnly
         $remoteAddress = $request->server->get('REMOTE_ADDR');
 
         if (! is_string($remoteAddress) || ! $this->isLoopback($remoteAddress)) {
-            abort(403, 'The pipeline page is reachable from this machine only.');
+            // A plain response, not `abort()`. An aborted request renders through
+            // the host application's exception handler, which is free to do
+            // anything — one consumer's handler queries the database to translate
+            // its error page, so a refusal from a LAN address surfaced as a 500
+            // with a SQL error instead of this. The refusal has to be legible in
+            // any host, so it does not travel through the host's rendering.
+            return new Response(
+                'The pipeline page is reachable from this machine only.',
+                Response::HTTP_FORBIDDEN,
+                ['Content-Type' => 'text/plain'],
+            );
         }
 
         return $next($request);

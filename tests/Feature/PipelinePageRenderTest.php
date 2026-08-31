@@ -270,8 +270,14 @@ it('cannot address a step id containing a separator at all', function (): void {
 });
 
 it('refuses a log request from another machine', function (): void {
-    $this->call('GET', '/boost-pipelines/log/default/r-page/fmt', server: ['REMOTE_ADDR' => '10.0.0.5'])
-        ->assertForbidden();
+    $response = $this->call('GET', '/boost-pipelines/log/default/r-page/fmt', server: ['REMOTE_ADDR' => '10.0.0.5']);
+
+    $response->assertForbidden();
+
+    // Serves the most sensitive content of the three routes, so its refusal is
+    // the one that most needs to be legible in any host. See the page test for
+    // why the body is asserted rather than the status alone.
+    $response->assertContent('The pipeline page is reachable from this machine only.');
 });
 
 it('answers 404 for a pipeline the config never declared', function (): void {

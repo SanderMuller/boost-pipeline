@@ -216,6 +216,12 @@ receipt describes a different tree, when the run recorded itself stale, and when
 unverified. That first case is the point: a gate that treats a missing answer as "nothing to check"
 passes the run that never happened.
 
+It also fails when your config declares a step the run never held. The command loads the config in
+its own process, so it sees the steps declared now, not the ones the server loaded when it
+started — and a server started before a step was declared walks right past it, recording a run
+that calls itself complete. Reconnect the MCP client and open a new run. The comparison is made in
+the scope the answer is about, and a step you have since removed does not fail anything.
+
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which Laravel
 gitignores, so it does not travel with a push. Wire it into a pre-push hook or a pre-PR gate. CI
 runs the checks itself.

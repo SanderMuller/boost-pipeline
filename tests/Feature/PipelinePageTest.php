@@ -102,8 +102,18 @@ it('refuses a request from another machine on both routes', function (): void {
     // routinely listens on a LAN address or behind a tunnel.
     bootUi(enabled: true, environment: 'local');
 
-    $this->call('GET', '/boost-pipelines', server: ['REMOTE_ADDR' => '10.0.0.5'])->assertForbidden();
-    $this->call('GET', '/boost-pipelines/data', server: ['REMOTE_ADDR' => '10.0.0.5'])->assertForbidden();
+    $page = $this->call('GET', '/boost-pipelines', server: ['REMOTE_ADDR' => '10.0.0.5']);
+    $data = $this->call('GET', '/boost-pipelines/data', server: ['REMOTE_ADDR' => '10.0.0.5']);
+
+    $page->assertForbidden();
+    $data->assertForbidden();
+
+    // The body, not just the status. The middleware returns a plain response
+    // rather than calling `abort()`, so the refusal never travels through the
+    // host application's exception handler — one consumer's handler queries the
+    // database to translate its error page, which turned this 403 into a 500
+    // with a SQL error. Asserting the text proves the handler is out of the loop.
+    $page->assertContent('The pipeline page is reachable from this machine only.');
 });
 
 it('renders a config error rather than failing the request', function (): void {
