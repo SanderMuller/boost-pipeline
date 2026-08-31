@@ -35,6 +35,9 @@ tests/ export-ignore
 workbench/ export-ignore
 # <<< package-boost (managed) <<<
 
+# PHPStan's bootstrap is dev tooling, like its config and baseline.
+phpstan-bootstrap.php export-ignore
+
 # Design specs are working documents for this repo, not part of the package.
 specs/ export-ignore
 

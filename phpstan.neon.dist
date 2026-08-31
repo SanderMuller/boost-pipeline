@@ -6,6 +6,11 @@ includes:
     - vendor/spaze/phpstan-disallowed-calls/disallowed-insecure-calls.neon
 
 parameters:
+    # Runs before the Laravel extension's own bootstrap, and defines the
+    # version constant that extension reads without a guard. See the file.
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+
     tmpDir: .cache/phpstan
 
     # Pinned to the range composer.json declares, because PHPStan otherwise

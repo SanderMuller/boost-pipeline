@@ -56,8 +56,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/phpstan/
-          key: phpstan-v2-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
-          restore-keys: phpstan-v2-
+          key: phpstan-result-cache-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
+          restore-keys: phpstan-result-cache-
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan --error-format=github --no-interaction --memory-limit=2G
