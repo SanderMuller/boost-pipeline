@@ -44,20 +44,24 @@ jobs:
       - name: Install composer dependencies
         uses: ramsey/composer-install@v4
 
-      # The epoch is what makes a stale cache droppable. PHPStan keeps its DI
-      # container cache in this directory, and `restore-keys` will hand back an
-      # older cache on a key miss — so a container built under different
-      # conditions was reused indefinitely. It surfaced as
-      # `Undefined constant Larastan\Larastan\LARAVEL_VERSION`, thrown from a
-      # lazily built extension before any analysis, on a tree that analysed
-      # clean from a cold cache. Bump the epoch to invalidate every cache below
-      # it.
+      # There is deliberately NO `restore-keys` here. PHPStan keeps its DI
+      # container cache in this directory, so a partial-key restore hands back a
+      # container built under different conditions and reuses it indefinitely.
+      # That surfaced as `Undefined constant Larastan\Larastan\LARAVEL_VERSION`,
+      # thrown from an extension before any analysis, on a tree that analysed
+      # clean from a cold cache — and it survived every push whose key did not
+      # change, because the poisoned cache kept being restored onto itself.
+      #
+      # A key miss must therefore mean a COLD cache, never an older one: a cold
+      # result cache only costs time, while a foreign container costs a red
+      # build nobody can reproduce locally. The epoch invalidates every cache
+      # saved before this rule existed; bump it if the container is ever
+      # poisoned again.
       - name: Cache PHPStan results
         uses: actions/cache@v6
         with:
           path: .cache/phpstan/
-          key: phpstan-result-cache-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
-          restore-keys: phpstan-result-cache-
+          key: phpstan-v2-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan --error-format=github --no-interaction --memory-limit=2G
