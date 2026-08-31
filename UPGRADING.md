@@ -1,6 +1,6 @@
 # Upgrading
 
-## Unreleased
+## From 0.14 to 0.15
 
 - **The config digest is tagged with a format version.** A run records `v1:<digest>` where it
   recorded a bare digest before. Receipts and live records written by 0.14.0 keep working: an
