@@ -1,6 +1,6 @@
 # Upgrading
 
-## Unreleased
+## From 0.11 to 0.12
 
 - **`pipeline:verify` now refuses a run that never held a step the config declares.** It reads the
   config as it stands now and compares what is declared against what the run recorded. A step with
