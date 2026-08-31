@@ -54,7 +54,6 @@ final class OpenRun extends Tool
                 'How many steps the walk holds. Included deliberately: the agent can count them in .config/pipeline.php anyway, and a denominator makes the walk legible. What is never included is the identity of a step past the cursor.'
             ),
             ...$this->stepSchema($schema),
-            'notices' => $schema->array()->description('Config problems found while resolving the walk, such as a dropped transition step.'),
             'warnings' => $schema->array()->description('Problems that will bite later in this walk, such as a step whose binary is missing. Not a reason to stop, but install it before you pay for the earlier steps.'),
         ];
     }
@@ -75,10 +74,6 @@ final class OpenRun extends Tool
         }
 
         $payload = StepPayload::opened($run);
-
-        if ($run->walk->notices !== []) {
-            $payload['notices'] = $run->walk->notices;
-        }
 
         // Not a notice: a notice means a declared gate will never run, so the run
         // cannot be fully verified. This only says where the walk will stop.

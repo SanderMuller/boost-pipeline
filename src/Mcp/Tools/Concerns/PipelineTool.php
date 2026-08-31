@@ -97,6 +97,12 @@ trait PipelineTool
             'acknowledged' => $schema->integer()->description(
                 'How many steps were agent-acknowledged rather than server-verified.'
             ),
+            'stale' => $schema->string()->description(
+                'Present when a step measured a working tree other than the one on disk now, which makes its verdict unproven for this code. Result-derived, so it is absent until the run holds a result: there is no measurement to compare against before that. Names the step and what could have moved the tree.'
+            ),
+            'notices' => $schema->array()->description(
+                'Problems found while resolving the walk: a step declared into a phase nothing registered, or a tag selection no step carries. Present from the moment a run opens, because it is a property of the walk rather than of any result. A notice means a declared step will never run, so the run can never report all_verified: true however many of the remaining steps pass.'
+            ),
         ];
     }
 

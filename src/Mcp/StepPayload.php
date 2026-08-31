@@ -132,6 +132,16 @@ final readonly class StepPayload
         //
         // Before any receipt exists there is genuinely nothing to answer, so the
         // key stays absent rather than claiming a verified-nothing run is false.
+        // Keyed on the walk, not on results. A notice says a declared step was
+        // dropped before the walk began, which is known the moment the run opens
+        // and decided regardless of how any step later resolves. Gating it behind
+        // the first result withheld it from `status` on a fresh run and from an
+        // agent about to do skill work on a walk that can never fully verify —
+        // and forced `OpenRun` to assemble a second copy to work around that.
+        if ($run->walk->notices !== []) {
+            $envelope['notices'] = $run->walk->notices;
+        }
+
         if ($run->results() !== []) {
             // Never true before the walk finishes: `complete` means it finished,
             // not that everything passed, and this is what stops a consumer
@@ -147,12 +157,6 @@ final readonly class StepPayload
             // than a stale run, and those need opposite responses.
             if ($verification['stale'] !== null) {
                 $envelope['stale'] = $verification['stale'];
-            }
-
-            // Without this, a run that dropped a declared step reports
-            // all_verified: false with no way to see why.
-            if ($run->walk->notices !== []) {
-                $envelope['notices'] = $run->walk->notices;
             }
         }
 

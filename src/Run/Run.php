@@ -374,10 +374,10 @@ final class Run
      * acknowledgements reaches Complete. Any consumer keying on the state alone
      * would count unverified work as success, so this is reported alongside it.
      *
-     * The notices clause is the subtler half. A step declared into an unregistered
-     * phase, or a transition whose anchors are not adjacent, is dropped with a
-     * notice — so every REMAINING step can pass and the run would otherwise claim
-     * full verification while a gate the config declared never ran at all.
+     * The notices clause is the subtler half. A step declared into a phase nothing
+     * registered is dropped with a notice, and so is a tag selection no step
+     * carries — so every REMAINING step can pass and the run would otherwise claim
+     * full verification while a step the config declared never ran at all.
      */
     public function allVerified(): bool
     {

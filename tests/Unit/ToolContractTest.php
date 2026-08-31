@@ -75,6 +75,41 @@ it('declares every key a payload can actually contain', function (): void {
         ->and(schemaFor('status'))->toHaveKey('excluded_by_scope');
 });
 
+it('declares notices, because every tool can report a dropped gate', function (string $name): void {
+    // A notice means a declared step will never run, so the run can never report
+    // itself fully verified. Emitting that without declaring it is the same drift
+    // the case above exists to catch — and it shipped on three tools.
+    expect(schemaFor($name))->toHaveKey('notices');
+})->with(['open_run', 'next_step', 'report_step', 'status']);
+
+it('describes what a notice actually is, on the schema the tools share', function (string $name): void {
+    // The wording this replaced said "a dropped transition step". No such step
+    // exists — `StepKind` holds Shell and Skill, and `Walk` has no transition
+    // concept — so the one key that explains why a run cannot verify named
+    // something a reader could not go and find.
+    //
+    // `open_run` included: its own literal is gone, so all four now read the one
+    // description. That is the drift this schema exists to prevent.
+    expect(schemaTextFor($name, 'notices'))->toContain('registered')
+        ->and(schemaTextFor($name, 'notices'))->toContain('tag selection')
+        ->and(schemaTextFor($name, 'notices'))->not->toContain('transition');
+})->with(['open_run', 'next_step', 'report_step', 'status']);
+
+it('declares stale on every tool, including the one that rarely emits it', function (string $name): void {
+    // `open_run` included, after going back and forth on it. RunManager discards a
+    // stale run and starts a fresh one, so at open time there is normally nothing
+    // to report — but it reads the tree once to decide that and the payload reads
+    // it again, and a tree that moves between the two captures produces a stale
+    // `open_run` payload. Sharing one capture is not the answer: RunManager
+    // deliberately does not thread its digest onward, because that would baseline
+    // a replaced run against a moment already past.
+    //
+    // So the key is reachable, and a key a tool can emit but never declares is the
+    // exact defect this file exists to catch. `all_verified` already sets the
+    // pattern: declared on the shared envelope, present only once a result exists.
+    expect(schemaFor($name))->toHaveKey('stale');
+})->with(['open_run', 'next_step', 'report_step', 'status']);
+
 /**
  * One schema entry rendered, so its declared properties can be asserted.
  *

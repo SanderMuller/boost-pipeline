@@ -1,5 +1,40 @@
 # Upgrading
 
+## Unreleased
+
+Additive. Nothing to migrate, but two observable changes for a consumer that reads the MCP payloads
+or their schemas.
+
+- **`notices` now appears from the moment a run opens, not only once the run holds a result.** It is
+  a property of the walk: it says a declared step was dropped before the walk began, which is known
+  at open time and settled regardless of how any later step resolves. It was assembled inside the
+  block gated on results — the gate for `all_verified` and `stale`, which are properties of
+  results — so `status` on a freshly opened run said nothing about a dropped step, and an agent
+  sent to do a skill step first was handed the work with no way to learn the run could never
+  fully verify.
+
+  The key appears in strictly more responses than before, never fewer, and its values and presence
+  condition are unchanged: absent when the walk raised no notice, never an empty array. A consumer
+  that read it only from `open_run` is unaffected.
+
+  One thing does shift. `open_run` assembled `notices` itself, appending it after the envelope; that
+  duplicate is gone, so the key now sits earlier in the payload. Compare payloads as sets rather
+  than in order if you assert on them.
+
+- **`notices` and `stale` are now declared in the tool output schemas.** Both were emitted
+  undeclared by three tools each. Both are now declared once on the shared envelope, beside
+  `all_verified`, so all four tools carry the same description. Like `all_verified`, each is present
+  only under its own condition rather than on every response: `notices` when the walk dropped a
+  declared step, `stale` once a result exists and a step measured a tree other than the one on disk.
+
+  `open_run` declares `stale` too, though it reports it only rarely: a stale run is normally
+  discarded and replaced before the payload is built, but the check and the payload read the tree
+  separately, so a tree that moves between the two can produce it.
+
+  The description of `notices` also changed. It said "such as a dropped transition step"; there is
+  no transition step in this package. It now names the two real causes: a step declared into a phase
+  nothing registered, and a tag selection no step carries.
+
 ## From 0.11 to 0.12
 
 - **`pipeline:verify` now refuses a run that never held a step the config declares.** It reads the
