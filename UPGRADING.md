@@ -20,15 +20,15 @@
   A drop inside the scope you asked about still makes the run unverifiable, and still refuses the
   gate, naming the step and its phase.
 
-- **`Run::start()` now refuses a scope that disagrees with the walk it was given.** A run records the
-  scope its verdicts are about, and those verdicts are measured from the walk's own selection, so the
-  two cannot differ: a walk resolved for `backend` with a receipt claiming `frontend` would put a true
-  answer about one scope on a receipt describing another.
+- **`Run::start()` refuses a scope that disagrees with the walk it was given.** A run records the
+  scope its verdicts are about, and those verdicts are measured from the walk's own selection, so
+  the two cannot differ. A walk resolved for `backend` with a receipt claiming `frontend` would put
+  a true answer about one scope on a receipt describing another.
 
-  It threw nothing before because the old scope-blind verdict masked it — any dropped step anywhere
+  It threw nothing before because the old scope-blind verdict masked it: any dropped step anywhere
   made such a run unverifiable, so the mismatch never surfaced. Measuring accurately removed that
-  accident, so the rule is now stated. `RunManager` always passed matching values; this affects only
-  code that builds a run by hand, which is not a documented seam.
+  accident, so the rule is now stated. `RunManager` always passed matching values, so this affects
+  only code that builds a run by hand, which is not a documented seam.
 
 - **The `notices` a run reports stay unfiltered, and are informational rather than load-bearing
   now.** They name every step the config declared into an unregistered phase, because that is the

@@ -184,8 +184,8 @@ cannot verify that `/evaluate` really ran, so
 | `status`      | Position, per-step verdicts, verified versus acknowledged.              |
 
 `position` counts steps rather than handovers, so a parallel group reports the range it covers
-(`2-3/7`). `open_run` warns when a step's binary is not on disk, and a step you declared that never
-runs forces `all_verified: false`.
+(`2-3/7`). `open_run` warns when a step's binary is not on disk, and a step you declared that this
+run would have walked but cannot run forces `all_verified: false`.
 
 ## A receipt is about the code that was there
 
@@ -253,7 +253,7 @@ untagged step belongs to every scope, so a dropped untagged step fails every cal
 The `notices` a run reports are not scope-filtered, and that is deliberate. They name every step the
 config declared into an unregistered phase, because that is what the config got wrong regardless of
 which scope you asked about. So a frontend-scoped run can name a backend step as dropped while the
-gate refuses over only the frontend one, and can report `all_verified: true` alongside it — the
+gate refuses over only the frontend one, and can report `all_verified: true` alongside it: the
 config has a problem elsewhere, and this scope is verified.
 
 A tag no step carries is the one case that still blocks a run whatever its scope. Nothing is dropped
@@ -459,7 +459,6 @@ clear the `*.log` files rather than the directory if you want to keep the answer
 | Notice a walk abandoned while awaiting a skill  | The live record has no timeout to expire against, so it reports the wait |
 | Know which checks your pipeline ought to hold   | Exit 0 reports on the steps that ran, and nothing more                  |
 | Fingerprint a step type you wrote yourself       | A custom `Step` is compared on its contract alone      |
-| Ignore a dropped step outside the scope you ask about | The gate does, but a run's own `all_verified` does not |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.
 
