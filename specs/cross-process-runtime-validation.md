@@ -92,11 +92,11 @@ more of these than the runtime cost justifies.
 
 **ID:** crossing · **Depends:** none
 
-- [ ] Add `tests/Feature/CrossProcessVerifyTest.php` — write a real config file, resolve a run in-process, then run `pipeline:verify` through `vendor/bin/testbench` as a subprocess and assert exit 0.
-- [ ] Skip rather than fail when the binary or PHP is unavailable, stating why.
-- [ ] Give every subprocess an explicit timeout, so a hang is a failed assertion.
-- [ ] Clean the config file in `afterEach`, following `ScopedRunTest`'s pattern. Both write the same single path, `.../testbench-core/laravel/.config/pipeline.php`, which is inside `vendor/` — that is Testbench's application, and existing tests already write there.
-- [ ] Tests — the passing case proves the digest computed in the subprocess equals the one recorded in the test process. Confirm it is not vacuous by asserting the receipt actually holds a digest before the subprocess runs.
+- [x] Add `tests/Feature/CrossProcessVerifyTest.php` — write a real config file, resolve a run in-process, then run `pipeline:verify` through `vendor/bin/testbench` as a subprocess and assert exit 0.
+- [x] Skip rather than fail when the binary or PHP is unavailable, stating why.
+- [x] Give every subprocess an explicit timeout, so a hang is a failed assertion.
+- [x] Clean the config file in `afterEach`, following `ScopedRunTest`'s pattern. Both write the same single path, `.../testbench-core/laravel/.config/pipeline.php`, which is inside `vendor/` — that is Testbench's application, and existing tests already write there.
+- [x] Tests — the passing case proves the digest computed in the subprocess equals the one recorded in the test process. Confirm it is not vacuous by asserting the receipt actually holds a digest before the subprocess runs.
 
 ### Phase 2: The mismatch, end to end (Priority: HIGH)
 
@@ -105,11 +105,11 @@ more of these than the runtime cost justifies.
 Depends on `crossing` because it reuses its harness, and because a mismatch assertion means nothing
 until the matching case is known to pass.
 
-- [ ] Edit the config file so one step's declaration differs without changing its id — the shape a stale server produces — and assert the subprocess exits 1.
-- [ ] Assert the message names the declaration rather than accusing the server, matching what the command promises.
-- [ ] Revert the edit and assert exit 0 again, proving the check is symmetric rather than sticky.
-- [ ] Assert an inert edit still counts: a change inside the digest that alters no behaviour must refuse, because the gate answers "is this the declaration you ran" and not "does it matter".
-- [ ] Tests — mutation-check by reverting the digest comparison in `VerifyCommand` and confirming the mismatch case goes green, which proves these tests exercise the gate and not just the harness.
+- [x] Edit the config file so one step's declaration differs without changing its id — the shape a stale server produces — and assert the subprocess exits 1.
+- [x] Assert the message names the declaration rather than accusing the server, matching what the command promises.
+- [x] Revert the edit and assert exit 0 again, proving the check is symmetric rather than sticky.
+- [x] Assert an inert edit still counts: a change inside the digest that alters no behaviour must refuse, because the gate answers "is this the declaration you ran" and not "does it matter".
+- [x] Tests — mutation-check by reverting the digest comparison in `VerifyCommand` and confirming the mismatch case goes green, which proves these tests exercise the gate and not just the harness.
 
 ---
 
@@ -156,3 +156,47 @@ None.
 ## Findings
 
 <!-- Notes added during implementation. Do not remove this section. -->
+
+**The premise is now demonstrated rather than argued.** Injecting a per-process value into the digest
+— `getmypid()`, standing in for the class of bug that already removed env VALUES and float precision —
+fails 3 tests. Running the whole suite under that same mutation fails **the same 3, and nothing else**.
+So a digest that is non-deterministic across processes passes all 583 other tests, and this file is
+the only thing that can see it. That is exactly the gap the spec claimed, measured instead of
+reasoned.
+
+**The pipeline is loaded from the file rather than declared in the test.** `recordRunFromConfigFile()`
+does `require` on the same path the subprocess reads, so the two processes are demonstrably hashing
+one declaration. Building an equivalent pipeline in PHP would have tested that two literals agree,
+which is what the in-process tests already do.
+
+**These runs deliberately record no tree fingerprint.** A receipt with no tree skips the staleness
+check in the subprocess, which removes the one variable this file is not about: the package's own
+working tree, which any other test is free to move underneath it. It costs one thing —
+`--server-verified` refuses a receipt that records no tree (guard 1), so it cannot be used here.
+
+That cost looked like a coverage gap and is not. `--server-verified` would have named the step ids it
+counted, pinning WHICH config the subprocess read. Exit 0 already carries that proof: it requires the
+digest the subprocess computed from the file to equal the digest the test process computed from the
+same file, and two different declarations do not produce one digest. The test asserts the success
+wording as well, so a zero cannot come from some other path.
+
+**PHPStan found 11 errors in the first draft, all from one habit.** Plain helper functions reaching
+into `test()` for shared state cannot be typed — the Pest plugin types `test()` as
+`TestCall|HigherOrderTapProxy`, so every `test()->configPath` and `test()->markTestSkipped()` was an
+error. The fix improved the code rather than silencing the analyser: helpers now take their paths as
+explicit parameters, which says what each one needs, and the skip moved to Pest's declarative
+`->skip()` modifier, which removed the guard from all five bodies.
+
+One of those 11 was dead code rather than style. A `PHP_BINARY === ''` guard can never be true, which
+PHPStan proved; it was defensive noise pretending to be a check.
+
+**The skip was verified to engage, not just to compile.** Forcing the predicate true skips all five
+and leaves the suite passing, which is the behaviour the spec asked for — a missing local toolchain
+must not read as a defect.
+
+**`Run::$state` is private.** A first draft asserted the run's state directly; the receipt's `state` is
+the observable equivalent and is what a reader of the file would check anyway.
+
+**Cost measured, since the spec accepted slowness on trust:** five subprocess tests run in about 1.2
+seconds together. Cheap enough that the spec's "a handful is worth it, dozens would not be" holds with
+room to spare.
