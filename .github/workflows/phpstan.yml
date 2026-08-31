@@ -44,12 +44,20 @@ jobs:
       - name: Install composer dependencies
         uses: ramsey/composer-install@v4
 
+      # The epoch is what makes a stale cache droppable. PHPStan keeps its DI
+      # container cache in this directory, and `restore-keys` will hand back an
+      # older cache on a key miss — so a container built under different
+      # conditions was reused indefinitely. It surfaced as
+      # `Undefined constant Larastan\Larastan\LARAVEL_VERSION`, thrown from a
+      # lazily built extension before any analysis, on a tree that analysed
+      # clean from a cold cache. Bump the epoch to invalidate every cache below
+      # it.
       - name: Cache PHPStan results
         uses: actions/cache@v6
         with:
           path: .cache/phpstan/
-          key: phpstan-result-cache-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
-          restore-keys: phpstan-result-cache-
+          key: phpstan-v2-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
+          restore-keys: phpstan-v2-
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan --error-format=github --no-interaction --memory-limit=2G

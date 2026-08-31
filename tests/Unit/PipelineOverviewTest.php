@@ -59,7 +59,7 @@ function overviewFor(string $root, Closure $declare, ?string $fingerprint = null
         new ReceiptStoreFactory(static fn (string $name): ReceiptStore => new JsonReceiptStore($root."/receipts/{$name}.json")),
         new History(static fn (string $name): RunHistoryStore => new JsonRunHistoryStore($root."/history/{$name}")),
         new LiveProgressStoreFactory(static fn (string $name): LiveProgressStore => new JsonLiveProgressStore($root."/live/{$name}.json")),
-        $fingerprint === null ? null : new class($fingerprint) implements TreeFingerprint
+        $fingerprint === null ? null : new readonly class($fingerprint) implements TreeFingerprint
         {
             public function __construct(private string $digest) {}
 
