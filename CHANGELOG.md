@@ -10,6 +10,53 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.13.0 - 2026-08-31
+
+A run that dropped a declared step now says so from the moment it opens, instead of waiting for its
+first verdict.
+
+### Changed
+
+- **`notices` is reported from `open_run` onward, not only once the run holds a result.** It belongs
+  to the walk: it says a declared step was dropped before the walk began, which is known at open
+  time and settled regardless of how any later step resolves. It was assembled inside the block
+  gated on results — the gate for `all_verified` and `stale`, which are properties of results.
+  
+  Two things came of that. `status` on a freshly opened run reported nothing about a dropped step.
+  And an agent sent to a skill step first was handed the work with no way to learn the run could
+  never report `all_verified: true`, which is decided the moment notices exist. Telling the agent
+  after it has acted is the defect being fixed.
+  
+  The key now appears in strictly more responses than before, never fewer, and its values and
+  presence condition are unchanged: absent when the walk raised no notice, never an empty array. A
+  consumer that read it only from `open_run` is unaffected.
+  
+  One thing shifts. `open_run` assembled `notices` itself, appending it after the envelope; that
+  duplicate is gone, so the key now sits earlier in the payload. Compare payloads as sets rather
+  than in order if you assert on them.
+  
+- **The `notices` description names what a notice actually is.** It said "such as a dropped
+  transition step". There is no transition step in this package — a step is `shell` or `skill` — so
+  the one key that explains why a run cannot verify pointed at something a reader could not find. It
+  now names the two real causes: a step declared into a phase nothing registered, and a tag selection
+  no step carries.
+  
+
+### Fixed
+
+- **`notices` and `stale` are declared in the tool output schemas.** Both were emitted by three tools
+  each and declared by none of them. A client reads the schema to know what it may receive, so an
+  undeclared key is the same drift as documentation disagreeing with behaviour. Both now sit on the
+  shared envelope beside `all_verified`, which already establishes a key declared once and present
+  only under its own condition.
+
+### Internal
+
+- `notices` has one assembly site again. `OpenRun` carried a second copy to work around the gate,
+  inside the surface whose whole purpose is that the payload rules cannot drift per tool.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.12.0...v0.13.0
+
 ## v0.12.0 - 2026-08-31
 
 `pipeline:verify` no longer exits 0 when your config declares a step the recorded run never held.
@@ -272,6 +319,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -413,6 +461,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -484,6 +533,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -494,6 +544,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -635,6 +686,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -684,10 +736,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -799,9 +853,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -959,6 +1015,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1047,6 +1104,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1328,6 +1386,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1385,6 +1444,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
