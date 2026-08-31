@@ -101,6 +101,9 @@ final readonly class LiveProgress
 
         $startedAt = strtotime($this->startedAt);
 
+        // False rather than an exception: a record is a file on disk, so the value
+        // can be truncated or hand-edited, and unreadable reads as not expired —
+        // the posture the stores take for a file they cannot parse.
         if ($startedAt === false) {
             return false;
         }
@@ -117,6 +120,6 @@ final readonly class LiveProgress
             return [];
         }
 
-        return array_values(array_filter($steps, static fn (mixed $id): bool => is_string($id)));
+        return array_values(array_filter($steps, is_string(...)));
     }
 }

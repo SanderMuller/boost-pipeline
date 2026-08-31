@@ -7,6 +7,7 @@ namespace SanderMuller\BoostPipeline\Run;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
 
 /**
@@ -136,7 +137,7 @@ final readonly class PipelineOverview
     {
         $pipeline = $this->pipelines->get($name);
         $walk = $pipeline instanceof Pipeline ? $pipeline->walk($receipt->scope) : null;
-        $steps = $walk === null ? [] : $walk->steps;
+        $steps = $walk instanceof Walk ? $walk->steps : [];
 
         return [
             'run' => $receipt->runId,
