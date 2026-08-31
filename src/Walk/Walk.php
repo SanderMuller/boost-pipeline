@@ -23,12 +23,25 @@ final readonly class Walk
      * @param  int  $excluded  How many declared steps the selection left out.
      * @param  string|null  $configDigest  Which declaration this walk came from, or null when the
      *                                     caller did not supply one.
+     * @param  list<array{id: string, phase: string}>  $dropped  steps dropped from THIS selection
      */
     private function __construct(
         public array $steps,
         public array $notices,
         public int $excluded = 0,
         public ?string $configDigest = null,
+        /**
+         * The steps this walk dropped that belong to its selection.
+         *
+         * `notices` describes the same event in prose, for an agent. This is the
+         * same event as data, for a gate: it names the ids and it is already
+         * filtered to the scope the walk was resolved for, which a sentence cannot
+         * be. Empty for a walk that dropped nothing, and for one whose drops all
+         * sit outside its scope.
+         *
+         * @var list<array{id: string, phase: string}>
+         */
+        public array $dropped = [],
     ) {}
 
     /**
@@ -51,7 +64,7 @@ final readonly class Walk
 
         self::assertUniqueStepIds($walk);
 
-        $notices = self::noticesForUnregisteredPhases($steps, $registered);
+        [$notices, $dropped] = self::dropsForUnregisteredPhases($steps, $registered, $selection);
 
         // A selection nothing carries is almost always a mistyped tag. Left
         // unreported, the untagged steps would pass and the run would call itself
@@ -63,7 +76,7 @@ final readonly class Walk
             );
         }
 
-        return new self($walk, $notices, $excluded, $configDigest);
+        return new self($walk, $notices, $excluded, $configDigest, $dropped);
     }
 
     /** @param list<string> $tags */
@@ -148,12 +161,20 @@ final readonly class Walk
      * not registered never reaches the cursor, so a gate would go missing without
      * a word. The run reports the drop and refuses to call itself verified.
      *
+     * Returns the same prose it always did, plus the same event as data.
+     *
+     * Two shapes for two readers, one traversal so they cannot drift. An agent
+     * needs a sentence; a gate needs step ids it can name and a scope it can
+     * filter by — and a sentence cannot say which scope a dropped step belonged
+     * to, which is why a scoped call could not refuse one.
+     *
      * @param  list<class-string<Phase>>  $registered
-     * @return list<string>
+     * @return array{0: list<string>, 1: list<array{id: string, phase: string}>}
      */
-    private static function noticesForUnregisteredPhases(Steps $steps, array $registered): array
+    private static function dropsForUnregisteredPhases(Steps $steps, array $registered, ?string $selection): array
     {
         $notices = [];
+        $dropped = [];
 
         foreach ($steps->declaredPhases() as $phaseClass) {
             if (in_array($phaseClass, $registered, true)) {
@@ -170,9 +191,22 @@ final readonly class Walk
                 $ids,
                 class_basename($phaseClass),
             );
+
+            foreach ($steps->forPhase($phaseClass) as $step) {
+                // Filtered by the SAME predicate the walk itself uses. A step is
+                // dropped whatever the selection, but whether it belongs to this
+                // scope depends on its tags — and a second copy of that rule would
+                // eventually disagree with the walk, which is a false failure in a
+                // gate.
+                if (! self::selected($step->tags(), $selection)) {
+                    continue;
+                }
+
+                $dropped[] = ['id' => $step->id(), 'phase' => class_basename($phaseClass)];
+            }
         }
 
-        return $notices;
+        return [$notices, $dropped];
     }
 
     public function count(): int

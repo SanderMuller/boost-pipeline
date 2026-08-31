@@ -591,22 +591,23 @@ final class VerifyCommand extends Command
         // A step this config DROPS never reaches the comparison below, so counting
         // step ids finds nothing wrong and passes a config that declares a gate
         // nothing can reach. A step declared into a phase nothing registers is
-        // dropped that way, and the walk reports it as a notice.
+        // dropped that way.
         //
-        // Only for a whole-tree question, where every declared step is in scope and
-        // a notice therefore always describes one. A scoped question cannot use
-        // this: `noticesForUnregisteredPhases()` ignores the selection, so a broken
-        // step in another scope would fail an answer that has nothing to do with
-        // it — and for a selection, a notice can instead mean the tag matches no
-        // step, which drops nothing at all. That leaves one narrow gap: a scoped
-        // question does not detect a step dropped into an unregistered phase. It
-        // takes a stale server to reach, because a run against this config raises
-        // the same notice and records `coverage: incomplete`, which already fails.
-        if ($scope === null && $walk->notices !== []) {
+        // Every scope, not only the whole tree. `$walk->dropped` is filtered during
+        // resolution by the same predicate the walk uses, so it already holds only
+        // the drops that belong to THIS question — which is what the prose notice
+        // could never say, and why a scoped call used to be exempted from this
+        // check entirely. A drop in another scope leaves this empty, and a selection
+        // that merely matches no step drops nothing at all.
+        if ($walk->dropped !== []) {
             return sprintf(
-                'Run [%s] cannot be checked against this config, because resolving it drops a step the config declares: %s',
+                'Run [%s] cannot be checked against this config, because it declares %d step(s) that no phase registers, so nothing can ever run them: %s. Register the phase, or move the step to one that is registered.',
                 $receipt->runId,
-                implode(' ', $walk->notices),
+                count($walk->dropped),
+                implode(', ', array_map(
+                    static fn (array $drop): string => '['.$drop['id'].'] in phase ['.$drop['phase'].']',
+                    $walk->dropped,
+                )),
             );
         }
 

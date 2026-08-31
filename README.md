@@ -1,11 +1,17 @@
 # boost-pipeline
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/sandermuller/boost-pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
-[![Tests](https://img.shields.io/github/actions/workflow/status/SanderMuller/boost-pipeline/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/SanderMuller/boost-pipeline/actions/workflows/run-tests.yml)
-[![Total Downloads](https://img.shields.io/packagist/dt/sandermuller/boost-pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
-[![License](https://img.shields.io/packagist/l/sandermuller/boost-pipeline.svg?style=flat-square)](LICENSE)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/sandermuller/boost-
+pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
+[![Tests](https://img.shields.io/github/actions/workflow/status/SanderMuller/boost-pipeline/run-
+tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/SanderMuller/boost-
+pipeline/actions/workflows/run-tests.yml)
+[![Total Downloads](https://img.shields.io/packagist/dt/sandermuller/boost-
+pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
+[![License](https://img.shields.io/packagist/l/sandermuller/boost-pipeline.svg?style=flat-
+square)](LICENSE)
 
-**An MCP server that hands an agent one step at a time: phases, steps, and a cursor it cannot move.**
+**An MCP server that hands an agent one step at a time: phases, steps, and a cursor it cannot
+move.**
 
 You already have the checks. Ask an agent in prose to run them and you get most of the work, most
 of the time, then a report that says *"I ran the tests"* rather than *"the tests ran"*.
@@ -160,7 +166,8 @@ An `error` travels on MCP's error channel; a `failed` verdict does not, because 
 call `open_run` rather than deciding whether your fix moved the tree. It hands back the same run
 when nothing moved and a fresh one when anything did, including a commit; `next_step` re-runs only
 that step and never re-checks. It also replaces a run that has gone stale — so if you did continue
-with `next_step` and stranded the walk, reopening is the way out rather than a no-op. The server cannot verify that `/evaluate` really ran, so
+with `next_step` and stranded the walk, reopening is the way out rather than a no-op. The server
+cannot verify that `/evaluate` really ran, so
 `state: complete` means the walk finished, never "everything passed". A *failed* step is still
 `server_run: true`: that key answers who produced the verdict, not whether it passed.
 
@@ -208,7 +215,8 @@ explained away. Only a pass records a tree, so fixing a blocked step and retryin
 
 ## Letting something else read the run
 
-Run state lives in the server process. A receipt goes to `storage/logs/pipeline/receipts/<pipeline>.json`
+Run state lives in the server process. A receipt goes to
+`storage/logs/pipeline/receipts/<pipeline>.json`
 after each resolution, and `php artisan pipeline:verify` turns it into an exit code.
 
 Exit 0 only when a run verified the code now on disk. It fails when no run was recorded, when the
@@ -235,6 +243,12 @@ its own process, so it sees the steps declared now, not the ones the server load
 started — and a server started before a step was declared walks right past it, recording a run
 that calls itself complete. Reconnect the MCP client and open a new run. The comparison is made in
 the scope the answer is about, and a step you have since removed does not fail anything.
+
+It also fails when your config declares a step into a phase nothing registers. Such a step never
+reaches the cursor, so it cannot fail and cannot be skipped — it just never runs. Register the
+phase,
+or move the step. A scoped call refuses a drop inside its own scope and ignores one outside it; an
+untagged step belongs to every scope, so a dropped untagged step fails every call.
 
 **This is a local gate, not a CI one.** The receipt lives under `storage/logs/`, which Laravel
 gitignores, so it does not travel with a push. Wire it into a pre-push hook or a pre-PR gate. CI
@@ -275,7 +289,8 @@ A run opened through the MCP tools is recorded to
 `storage/logs/pipeline/live/<pipeline>.json` while it runs. Both are written whether or not you
 serve the page below, and both stores are optional dependencies of a run — so code that builds a
 `Run` by hand records nothing unless it passes them. A run id reaches that filename through the
-same encoding a step log uses, which appends a short digest, so the name is not the id verbatim. History keeps the newest 20 runs per pipeline and
+same encoding a step log uses, which appends a short digest, so the name is not the id verbatim.
+History keeps the newest 20 runs per pipeline and
 prunes the rest on write; step logs are not pruned.
 
 **The steps come from the config as it stands now, not from the record.** Nothing stores the step
@@ -370,7 +385,8 @@ slow suite you deliberately narrow — rather than as the default answer to the 
 ## Extending
 
 A phase is a name and a position, so a custom one costs no machinery. Implement `Phase`, then place
-it with `->withPhases(fn (Phases $phases) => $phases->append(BlastRadius::class)->after(Tests::class))`.
+it with `->withPhases(fn (Phases $phases) =>
+$phases->append(BlastRadius::class)->after(Tests::class))`.
 `append()`, `prepend()`, `->after()` and `remove()` are the whole vocabulary.
 
 `StepRunner` is the other seam. Bind your own over the container's
@@ -388,7 +404,8 @@ need pinning is also the one a literal gets wrong — several checkouts on one d
 on a committed name — so derive it:
 
 ```php
-$database = substr('myapp_phpunit_'.preg_replace('/[^A-Za-z0-9_]/', '_', basename(base_path())), 0, 64);
+$database = substr('myapp_phpunit_'.preg_replace('/[^A-Za-z0-9_]/', '_', basename(base_path())),
+0, 64);
 
 $steps->in(Tests::class)->append(
     Shell::run('php artisan test', id: 'phpunit')->withEnv(['DB_DATABASE' => $database]),

@@ -28,6 +28,28 @@
   asking, so refusing because a receipt has no digest — or one this version cannot read — would
   reintroduce the check by another door. Only affects projects that have turned it off.
 
+- **A scoped `pipeline:verify` now refuses a config that declares a step no phase registers.**
+Only a
+  whole-tree call did before. A step declared into an unregistered phase never reaches the cursor,
+  so
+  it cannot fail and cannot be skipped — it simply never runs, and counting recorded step ids finds
+  nothing wrong.
+
+  A scoped call was exempt because the walk described the drop in prose, and a sentence cannot say
+  which scope the dropped step belonged to. Applying it anyway would have failed a backend answer
+  over
+  a frontend step. The walk now reports its drops as data, filtered while it resolves by the same
+  rule
+  it selects steps with, so a scoped call refuses a drop inside its own scope and still ignores one
+  outside it.
+
+  **A scoped gate that passed before can now exit 1.** Register the phase, or move the step to one
+  that is registered. An untagged dropped step belongs to every scope, so it fails every scoped
+  call —
+  matching how an untagged step is part of every walk.
+
+  The refusal also names the step ids and their phase now, rather than quoting the notice whole.
+
 ## From 0.13 to 0.14
 
 - **`pipeline:verify` now refuses a run that walked a pipeline declaration your config no longer
@@ -54,7 +76,8 @@
 - **A receipt written before this version is treated as unknown, not as wrong.** The bare
   `pipeline:verify` ignores an absent digest, so your existing gate keeps working on upgrade day.
   `pipeline:verify --server-verified` refuses it — that flag exists so a caller can SKIP work, and
-  skipping on the strength of a run that cannot say what it walked is the trade it refuses everywhere
+  skipping on the strength of a run that cannot say what it walked is the trade it refuses
+  everywhere
   else. This is where `coverage` already refuses unknown. The next run writes a digest and the
   refusal goes away.
 
@@ -398,7 +421,8 @@ Additive. No migration needed.
 
   `Step::description()` is unchanged on the contract, and `Shell` still uses it as a description.
 
-- The `note` on a skill step's payload is reworded. It used to say only that the step is "recorded as
+- The `note` on a skill step's payload is reworded. It used to say only that the step is "recorded
+as
   acknowledged, not verified"; it now leads with the guarantee that exists — the step arrived on its
   own, in order, and nothing follows until it resolves. If you assert on that string, update the
   expectation.
@@ -465,12 +489,15 @@ changes.
   ```php
   // before
   Pipeline::configure()
-      ->withPhases(fn (Phases $phases) => $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class))
-      ->withSteps(fn (Steps $steps) => $steps->in(ImpactAnalysis::class)->append(Shell::run('...')));
+    ->withPhases(fn (Phases $phases) =>
+    $phases->append(ImpactAnalysis::class)->after(StaticAnalysis::class))
+    ->withSteps(fn (Steps $steps) =>
+    $steps->in(ImpactAnalysis::class)->append(Shell::run('...')));
 
   // after — put the step in the phase that runs at the right point
   Pipeline::configure()
-      ->withSteps(fn (Steps $steps) => $steps->in(StaticAnalysis::class)->append(Shell::run('...')));
+    ->withSteps(fn (Steps $steps) =>
+    $steps->in(StaticAnalysis::class)->append(Shell::run('...')));
   ```
 
   A phase is only a named, ordered group, so the step runs at the same point either way. What you

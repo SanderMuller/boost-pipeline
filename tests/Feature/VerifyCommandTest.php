@@ -1227,7 +1227,8 @@ it('fails when the config declares a step into a phase nothing registered', func
     $output = Artisan::output();
 
     expect($exit)->toBe(1)
-        ->and($output)->toContain('drops a step the config declares');
+        ->and($output)->toContain('no phase registers')
+        ->and($output)->toContain('[orphan]');
 });
 
 it('answers a scoped question from a full run even when another scope gained a step', function (): void {
@@ -1534,6 +1535,69 @@ it('does not refuse an unreadable declaration when the comparison is switched of
     treeReporting('tree-a');
 
     expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(0);
+});
+
+it('refuses a scoped call when the config drops a step inside that scope', function (): void {
+    // The gap this closes. The notice was prose and could not say which scope the
+    // dropped step belonged to, so a scoped call was exempted from the check
+    // entirely — and a declared gate that can never run went unmentioned.
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'pint')->tagged('backend'));
+            $collection->in(VerifyOrphanPhase::class)->append(Shell::run('true', id: 'orphan')->tagged('backend'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(scope: 'backend', verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('no phase registers')
+        // Named, which the prose notice could only manage by being quoted whole —
+        // and the phase too, since that is what has to be registered to fix it.
+        ->and($output)->toContain('[orphan] in phase [VerifyOrphanPhase]');
+});
+
+it('still passes a scoped call when the dropped step belongs to another scope', function (): void {
+    // The false failure the exemption existed to avoid, and it has to survive: a
+    // frontend step declared into an unregistered phase says nothing about a
+    // backend answer.
+    //
+    // This pins the new guard IN ISOLATION, on a receipt built by hand. A real
+    // scoped run in this situation records `all_verified: false`, because
+    // `Run::verifiedGiven()` reads the unfiltered `notices` and a drop anywhere
+    // makes them non-empty — so the bare call still refuses it, through a different
+    // guard with a different message. Measured, not assumed. Until that is settled
+    // (the spec's one open question), this guard's out-of-scope tolerance is real in
+    // the command and unreachable end to end.
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'pint')->tagged('backend'));
+            $collection->in(VerifyOrphanPhase::class)->append(Shell::run('true', id: 'orphan')->tagged('frontend'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(scope: 'backend', verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(0);
+});
+
+it('refuses a scoped call for an untagged dropped step, which is in every scope', function (): void {
+    app()->instance(Pipelines::class, Pipelines::fromArray(
+        ['default' => Pipeline::configure()->withSteps(function (Steps $collection): void {
+            $collection->in(Formatting::class)->append(Shell::run('true', id: 'pint')->tagged('backend'));
+            $collection->in(VerifyOrphanPhase::class)->append(Shell::run('true', id: 'orphan'));
+        })],
+        '.config/pipeline.php',
+    ));
+    receiptStoreHolding(receipt(scope: 'backend', verdicts: ['pint' => 'passed']));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--only' => 'backend']))->toBe(1);
 });
 
 it('counts an acknowledged step as held, leaving that question to all_verified', function (): void {
