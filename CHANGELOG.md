@@ -251,6 +251,25 @@ dogfood. Additive, with one visible change to log filenames.
   under different conditions was reused indefinitely, and surfaced as an undefined-constant error
   thrown from a lazily built extension before any analysis.
 
+### Correction
+
+The Internal note above is wrong about the cause, and the change it describes did not fix the
+problem.
+
+Keying the cache with an epoch only discarded a cache that had gone bad. The failure came back as
+soon as analysis had real work to do again, and removing `restore-keys` did not stop it either.
+Nothing about the cache was responsible: a valid result cache only hid the fault, because analysis
+that re-checks nothing never builds the extension that fails.
+
+The actual cause is that the Laravel static-analysis extension reads a version constant without
+checking that it exists, while the constant is defined from an application boot that is allowed to
+quietly produce nothing. It never reproduced on a developer machine, because that boot usually
+succeeds there.
+
+Fixed in v0.14.0 by defining the constant at autoload time, which removes the ordering question
+instead of adjusting it. If you copied the cache-key approach from the note above, it will not help
+you.
+
 **Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.10.8...v0.11.0
 
 ## v0.10.8 - 2026-08-28
