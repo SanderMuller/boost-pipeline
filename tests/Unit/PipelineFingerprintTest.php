@@ -344,3 +344,72 @@ it('still notices a tag added or removed', function (): void {
 
     expect($both)->not->toBe($one);
 });
+
+it('tags the digest with a format', function (): void {
+    // The digest is a persisted format, not only a return value. Without a tag a
+    // future algorithm's output is indistinguishable from a different declaration,
+    // and the gate reports the second — failing every consumer with a message
+    // blaming a stale server that was never stale.
+    expect(fingerprintOf(baselineDeclaration()))->toStartWith('v1:');
+});
+
+it('answers three ways, and the third is the point', function (string $case, string $recorded, ?bool $expected): void {
+    // True and false are a comparison. Null means the recorded value came from
+    // something this build cannot reproduce, so it says nothing either way — and a
+    // caller must route it where it routes a missing digest.
+    $pipeline = Pipeline::configure()->withSteps(baselineDeclaration());
+    $tagged = PipelineFingerprint::for($pipeline);
+    $content = substr($tagged, strlen('v1:'));
+
+    $value = match ($recorded) {
+        'TAGGED' => $tagged,
+        'UNTAGGED' => $content,
+        'FUTURE' => 'v2:'.$content,
+        'DOUBLED' => 'v1:'.$tagged,
+        default => $recorded,
+    };
+
+    expect(PipelineFingerprint::matches($pipeline, $value))->toBe($expected);
+})->with([
+    // Same format, same declaration.
+    ['this format', 'TAGGED', true],
+    // Written before tagging existed, by the algorithm still in use: legacy in
+    // shape, current in content. Reading these as unknown would refuse every
+    // receipt already on disk — the false failure the tag exists to prevent.
+    ['an untagged digest from the release before this one', 'UNTAGGED', true],
+    // Same format, different declaration. The only case that may gate.
+    ['this format, another declaration', 'v1:0123456789abcdef', false],
+    // A format this build cannot produce.
+    ['a future format', 'FUTURE', null],
+    // Malformed, every way the table lists. None of these says anything about the
+    // declaration, so none of them is a mismatch.
+    ['a tag with no content', 'v1:', null],
+    ['content with no tag', ':0123456789abcdef', null],
+    ['a doubled tag', 'DOUBLED', null],
+    ['content of the wrong length', 'v1:0123', null],
+    ['content outside the hash alphabet', 'v1:zzzzzzzzzzzzzzzz', null],
+    ['nothing recognisable at all', 'not-a-digest', null],
+    ['an empty string', '', null],
+]);
+
+it('compares content and not the whole recorded string', function (): void {
+    // A tagged and an untagged record of the SAME declaration must both match,
+    // which is only true if the tag is stripped before comparing rather than
+    // compared along with it.
+    $pipeline = Pipeline::configure()->withSteps(baselineDeclaration());
+    $tagged = PipelineFingerprint::for($pipeline);
+
+    expect(PipelineFingerprint::matches($pipeline, $tagged))->toBeTrue()
+        ->and(PipelineFingerprint::matches($pipeline, substr($tagged, strlen('v1:'))))->toBeTrue();
+});
+
+it('still separates one declaration from another once tagged', function (): void {
+    // The guard against a tag that swallows the comparison: every case above could
+    // pass while `matches()` ignored the declaration entirely.
+    $pipeline = Pipeline::configure()->withSteps(baselineDeclaration());
+    $other = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('pint --dirty', id: 'pint')->mutating());
+    });
+
+    expect(PipelineFingerprint::matches($pipeline, PipelineFingerprint::for($other)))->toBeFalse();
+});

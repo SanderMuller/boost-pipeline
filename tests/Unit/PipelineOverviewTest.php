@@ -273,12 +273,16 @@ it('says whether the run walked the declaration this config still produces', fun
 });
 
 it('says so when the run walked a declaration this config no longer produces', function (): void {
+    // A well-formed digest of a declaration this config does not produce, not a
+    // friendly string. A value this build could not have written reads as UNKNOWN
+    // rather than as a mismatch, so a readable placeholder would test the wrong
+    // branch and pass for the wrong reason.
     // Split from the matching case rather than asserted beside it: two `expect()`
     // calls on a textually identical expression let the analyser carry the first
     // narrowing into the second, and it then reports the true assertion as
     // impossible. Separate tests also name the two outcomes.
     new JsonReceiptStore($this->root.'/receipts/default.json')
-        ->write(overviewReceipt(['fmt' => 'passed'], config: 'a-different-digest'));
+        ->write(overviewReceipt(['fmt' => 'passed'], config: 'v1:0123456789abcdef'));
 
     expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'current.config_matches'))->toBeFalse();
 });
@@ -300,7 +304,7 @@ it('flags a run still in flight that is walking a stale declaration', function (
         state: RunState::Running,
         stepIds: ['fmt'],
         startedAt: gmdate('c'),
-        configDigest: 'a-different-digest',
+        configDigest: 'v1:0123456789abcdef',
     ));
 
     expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'live.config_matches'))->toBeFalse();

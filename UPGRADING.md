@@ -1,5 +1,33 @@
 # Upgrading
 
+## Unreleased
+
+- **The config digest is tagged with a format version.** A run records `v1:<digest>` where it
+  recorded a bare digest before. Receipts and live records written by 0.14.0 keep working: an
+  untagged value is read as this format's content, because 0.14.0 wrote it with the algorithm still
+  in use.
+
+  This is about what happens the next time the digest algorithm changes. Two of its inputs have
+  already had to be corrected once — env values excluded, float precision normalised — and each
+  changed what the digest produces. Without a tag, a digest from a newer algorithm is
+  indistinguishable from a digest of a different declaration, so `pipeline:verify` would report the
+  second: every consumer's gate failing at once, with a message blaming a stale server that was
+  never stale.
+
+  With a tag, a digest this version cannot reproduce is treated as **unknown** instead. The bare
+  call ignores it and `--server-verified` refuses it, which is exactly where an absent digest
+  already sits. Nothing about your setup changes today; this is what stops a future release from
+  breaking your gate.
+
+  A malformed value is also unknown rather than a mismatch. A value this build could not have
+  written says nothing about your declaration however it is wrong.
+
+- **`verify.config_fingerprint: false` now also stops `--server-verified` refusing a receipt that
+  cannot answer the declaration question.** In 0.14.0 that refusal ignored the toggle. The toggle
+  governs the whole question rather than only the comparison: a project that switched it off is not
+  asking, so refusing because a receipt has no digest — or one this version cannot read — would
+  reintroduce the check by another door. Only affects projects that have turned it off.
+
 ## From 0.13 to 0.14
 
 - **`pipeline:verify` now refuses a run that walked a pipeline declaration your config no longer

@@ -253,7 +253,12 @@ final readonly class PipelineOverview
 
         $pipeline = $this->pipelines->get($name);
 
-        return $pipeline instanceof Pipeline ? PipelineFingerprint::for($pipeline) === $digest : null;
+        // Three answers collapse into the two this projection already had: null
+        // covers both "recorded nothing" and "recorded a format this build cannot
+        // reproduce", because a reader shown false for either would go looking for
+        // a config change that never happened. Every surface here already renders
+        // null as unknown rather than as mismatched.
+        return $pipeline instanceof Pipeline ? PipelineFingerprint::matches($pipeline, $digest) : null;
     }
 
     /**

@@ -296,7 +296,7 @@ it('says on the list row that a run walked a declaration this config no longer p
     // refused run was the ONLY row claiming "tree matches" while every stale row
     // around it said "tree moved" — the one run the gate rejects read as the
     // healthiest thing in the list.
-    recordRun('r-mismatch', ['pint' => 'passed'], config: 'a-digest-this-config-does-not-produce');
+    recordRun('r-mismatch', ['pint' => 'passed'], config: 'v1:0123456789abcdef');
 
     $result = runHistory();
 

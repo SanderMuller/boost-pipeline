@@ -1425,6 +1425,117 @@ it('skips the comparison when the consumer turned it off', function (): void {
     expect(Artisan::call('pipeline:verify'))->toBe(0);
 });
 
+it('ignores a declaration it cannot read on the bare call, and refuses it under --server-verified', function (): void {
+    // A format this build cannot reproduce says nothing about the declaration, so
+    // it must travel the absent-digest path and never the mismatch path. Turning
+    // "I cannot tell" into "you changed it" is the failure the format tag exists to
+    // prevent, and it would arrive the day the algorithm next changes.
+    $pipeline = pipelineDeclaring('pint');
+    projectRunning($pipeline);
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: 'v2:0123456789abcdef'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: 'v2:0123456789abcdef'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        // Its own sentence. One receipt predates the field, this one was written by
+        // a version whose digests this build cannot reproduce — telling a reader
+        // the second is the first sends them to redo an upgrade they already did.
+        ->and($output)->toContain('cannot reproduce')
+        ->and($output)->not->toContain('recorded before');
+});
+
+it('bounds the unreadable value it echoes back', function (): void {
+    // The only message that prints a value BECAUSE it failed validation. A real
+    // digest is short; anything reaching here is by definition not one, so a
+    // receipt holding a megabyte would flood the terminal it is trying to inform.
+    projectRunning(pipelineDeclaring('pint'));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: str_repeat('z', 5000)));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and(mb_strlen($output))->toBeLessThan(1000)
+        ->and($output)->toContain('cannot reproduce');
+});
+
+it('keeps the recorded-before message for a receipt that predates the field', function (): void {
+    projectRunning(pipelineDeclaring('pint'));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], omitConfig: true));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--server-verified' => true]);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('recorded before')
+        ->and($output)->not->toContain('cannot reproduce');
+});
+
+it('accepts an untagged digest written by the release before tagging', function (): void {
+    // Every receipt on disk today is untagged and was written by the algorithm
+    // still in use. Reading those as unreadable would refuse all of them at once,
+    // which is the false failure this change exists to avoid.
+    $pipeline = pipelineDeclaring('pint');
+    projectRunning($pipeline);
+
+    $untagged = substr(PipelineFingerprint::for($pipeline), strlen('v1:'));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: $untagged));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0)
+        ->and(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(0);
+});
+
+it('still refuses a real declaration change once digests are tagged', function (): void {
+    // The tag must not swallow the comparison it was added to protect.
+    projectRunning(pipelineDeclaring('pint --dirty'));
+    receiptStoreHolding(receipt(
+        verdicts: ['pint' => 'passed'],
+        config: PipelineFingerprint::for(pipelineDeclaring('pint')),
+    ));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(1)
+        ->and(Artisan::output())->toContain('not the declaration');
+});
+
+it('does not refuse an absent declaration when the comparison is switched off', function (): void {
+    // A behaviour change from the release that added the digest, where this refusal
+    // was unconditional. The toggle governs the whole declaration question, not
+    // only the comparison: a consumer who switched it off is not asking, so
+    // refusing because the receipt cannot answer would reintroduce the check by
+    // another door. One switch, one concept.
+    config()->set('boost-pipeline.verify.config_fingerprint', false);
+
+    projectRunning(pipelineDeclaring('pint'));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], omitConfig: true));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(0);
+});
+
+it('does not refuse an unreadable declaration when the comparison is switched off', function (): void {
+    // The opt-out covers the strict flag too. A consumer who turned the comparison
+    // off has said this gate is not for them, and refusing on a format question
+    // would reintroduce it by another door.
+    config()->set('boost-pipeline.verify.config_fingerprint', false);
+
+    projectRunning(pipelineDeclaring('pint'));
+    receiptStoreHolding(receipt(verdicts: ['pint' => 'passed'], config: 'v2:0123456789abcdef'));
+    treeReporting('tree-a');
+
+    expect(Artisan::call('pipeline:verify', ['--server-verified' => true]))->toBe(0);
+});
+
 it('counts an acknowledged step as held, leaving that question to all_verified', function (): void {
     // Presence, not verdict. An acknowledged step did reach the cursor, and
     // whether an acknowledgement is good enough is a separate question the

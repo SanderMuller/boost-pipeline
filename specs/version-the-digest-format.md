@@ -109,14 +109,14 @@ exist for an absent digest.
 
 ## Implementation
 
-- [ ] Add a `FORMAT` constant and prefix the digest in `src/Config/PipelineFingerprint.php` — one place produces it, so one place tags it.
-- [ ] Add `PipelineFingerprint::matches(Pipeline $pipeline, string $recorded): ?bool`, returning null for a format this build cannot produce. Put the parsing beside the producing, so a future format's rules live next to the code that made the last one.
-- [ ] Accept an unprefixed recorded digest as v1 content, with the reason in a comment: only v0.14.0 wrote one and the algorithm is unchanged, so treating it as unknown would cause the same false failure this spec prevents.
-- [ ] Use it in `src/Console/VerifyCommand.php` at **both** places that read `$receipt->config`, which pull in opposite directions: `:272` refuses an absent digest under `--server-verified` and must refuse an unknown format too, while `:440` tolerates an absent digest on the bare call and must tolerate an unknown format too. Doing one and not the other is the easy half-failure here — it would leave a format this build cannot read either silently passing the strict flag or failing the bare gate.
-- [ ] `null` must take the absent-digest path at every site, NOT the mismatch path. That is the entire point of the change.
-- [ ] Use it in `src/Run/PipelineOverview.php::digestMatches()`, which already returns `?bool` and already means unknown by null. It serves the live record, the current receipt and the history rows, so all three are covered by the one change — including an unprefixed digest in a live record left by v0.14.0, grandfathered by the same rule.
-- [ ] Tests — a v1 digest round-trips and compares equal; an unprefixed digest compares equal; a `v2:` digest and every malformed shape read as unknown on both call sites; unknown refuses under `--server-verified` and passes the bare call; the page and history read unknown rather than mismatched. Mutation-check by making `matches()` return false instead of null for an unknown format and confirming the tests that pin the distinction go red.
-- [ ] `UPGRADING.md` — the digest gains a `v1:` prefix, receipts written by 0.14.0 keep working, and an unrecognised format is treated as unknown rather than as a mismatch.
+- [x] Add a `FORMAT` constant and prefix the digest in `src/Config/PipelineFingerprint.php` — one place produces it, so one place tags it.
+- [x] Add `PipelineFingerprint::matches(Pipeline $pipeline, string $recorded): ?bool`, returning null for a format this build cannot produce. Put the parsing beside the producing, so a future format's rules live next to the code that made the last one.
+- [x] Accept an unprefixed recorded digest as v1 content, with the reason in a comment: only v0.14.0 wrote one and the algorithm is unchanged, so treating it as unknown would cause the same false failure this spec prevents.
+- [x] Use it in `src/Console/VerifyCommand.php` at **both** places that read `$receipt->config`, which pull in opposite directions: `:272` refuses an absent digest under `--server-verified` and must refuse an unknown format too, while `:440` tolerates an absent digest on the bare call and must tolerate an unknown format too. Doing one and not the other is the easy half-failure here — it would leave a format this build cannot read either silently passing the strict flag or failing the bare gate.
+- [x] `null` must take the absent-digest path at every site, NOT the mismatch path. That is the entire point of the change.
+- [x] Use it in `src/Run/PipelineOverview.php::digestMatches()`, which already returns `?bool` and already means unknown by null. It serves the live record, the current receipt and the history rows, so all three are covered by the one change — including an unprefixed digest in a live record left by v0.14.0, grandfathered by the same rule.
+- [x] Tests — a v1 digest round-trips and compares equal; an unprefixed digest compares equal; a `v2:` digest and every malformed shape read as unknown on both call sites; unknown refuses under `--server-verified` and passes the bare call; the page and history read unknown rather than mismatched. Mutation-check by making `matches()` return false instead of null for an unknown format and confirming the tests that pin the distinction go red.
+- [x] `UPGRADING.md` — the digest gains a `v1:` prefix, receipts written by 0.14.0 keep working, and an unrecognised format is treated as unknown rather than as a mismatch.
 
 ---
 
@@ -165,3 +165,57 @@ None.
 ## Findings
 
 <!-- Notes added during implementation. Do not remove this section. -->
+
+**Shape, not just the tag, decides whether a value is comparable.** The spec's edge-case table asked
+for `v1:` with nothing, a bare `:abc`, and a doubled `v1:v1:abc` to read as unknown. Splitting on the
+first colon alone does not deliver that — a doubled tag yields content of `v1:abc`, which compares
+unequal and would have returned a MISMATCH. Requiring the content to be 16 lowercase hex characters
+covers all three cases from one rule, and it is derived from `DIGEST_LENGTH` so the two cannot drift.
+
+**Three existing tests were asserting a mismatch with a value that cannot occur.** They used readable
+placeholders — `a-different-digest`, `a-digest-this-config-does-not-produce` — which the shape check
+correctly reads as unknown rather than as a mismatch, so they failed. The tests were wrong, not the
+implementation: a value no build could write does not describe a changed declaration. Replaced with
+well-formed digests, and a comment says why a friendly string tests the wrong branch.
+
+**The strict flag needed its own sentence.** `--server-verified` already refused an absent digest
+with "recorded before this command could tell…". An unreadable FORMAT is a different situation — the
+receipt was written by a version whose digests this build cannot reproduce, not by one that predates
+the field — and reusing the message would send a reader to redo an upgrade they had already done. Two
+guards, two sentences, both tested for the absence of the other's wording.
+
+**`answerServerVerified()` had to receive the pipeline.** It previously took only the receipt and the
+tree digest, which was enough to ask about an absent digest but not about an unreadable one. Both
+`VerifyCommand` sites now share one `declarationAnswer()` helper, so the two cannot disagree about
+what "cannot say" means — which was the specific half-failure the spec's evaluation pass warned about.
+
+**From the evaluate and code-review passes, after the spec was already satisfied.**
+
+Two guards sharing one precondition read as two unrelated guards. `fingerprintEnabled()` was tested
+twice in adjacent conditions, and the second carried a redundant `config !== null` that the first had
+already proven. Nested into one block with two messages, which is what they are.
+
+That nesting exposed an untested behaviour CHANGE I had made without noticing. Gating the
+absent-digest refusal on the toggle means a project that switched the comparison off no longer sees
+it, where 0.14.0 refused unconditionally. It is the right rule — the toggle governs the whole
+declaration question, so refusing because a receipt cannot answer a question nobody is asking would
+reintroduce the check by another door — but it was a loosening with no test and no upgrade note. Both
+added, and mutation-checked by ungating it.
+
+One comment removed for narrating its own line. `// Untagged: the whole value is the content, if it
+looks like one.` sat above the branch that says exactly that, and the reason untagged values are
+accepted at all is already stated at length in the docblock above.
+
+**One finding from the security dimension.** The unreadable-format message echoes `$receipt->config`,
+and that value reaches the message BECAUSE it failed validation — the one place an unvalidated string
+from disk is printed. A receipt holding a megabyte would flood the terminal it is trying to inform.
+Bounded to 64 characters, with a test that pins the bound and a mutation check that removes it.
+
+**The external review could not run for this change**, having reached a usage limit with a stated
+reset later in the day, so it was left unrun rather than retried. The in-house code review was the
+second opinion instead. Worth knowing that this change had one fewer independent pass than the two
+before it.
+
+**Three mutation checks, each failing only what it should.** Collapsing unknown into a mismatch fails
+9 tests, including the gate-level one. Removing the untagged grandfathering fails 3. Removing the
+shape check fails 6. The first of those is the regression this whole change exists to prevent.

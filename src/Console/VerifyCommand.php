@@ -6,6 +6,7 @@ namespace SanderMuller\BoostPipeline\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Support\Str;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
@@ -125,7 +126,7 @@ final class VerifyCommand extends Command
         }
 
         if ($this->option('server-verified') === true) {
-            return $this->answerServerVerified($receipt, $now);
+            return $this->answerServerVerified($pipelines, $name, $receipt, $now);
         }
 
         if (! $receipt->allVerified) {
@@ -228,7 +229,7 @@ final class VerifyCommand extends Command
      * `all_verified` was carrying several questions at once and this predicate
      * drops only the one about acknowledgements.
      */
-    private function answerServerVerified(Receipt $receipt, ?string $now): int
+    private function answerServerVerified(Pipelines $pipelines, string $name, Receipt $receipt, ?string $now): int
     {
         // 1. The tree is identifiable. The bare call tolerates a missing
         //    fingerprint and answers from the receipt alone, which is defensible
@@ -269,13 +270,39 @@ final class VerifyCommand extends Command
         //     otherwise sound. This flag does not: it exists so a caller can SKIP
         //     work, and skipping on the strength of a run that cannot say what it
         //     walked is exactly the trade this command refuses everywhere else.
-        if ($receipt->config === null) {
-            $this->components->error(sprintf(
-                'Run [%s] was recorded before this command could tell which pipeline declaration a run walked, so it cannot answer this. Unknown is not clean. Open a new run.',
-                $receipt->runId,
-            ));
+        //     An unreadable FORMAT counts the same as an absent digest, and gets its
+        //     own sentence: one receipt predates the field, the other was written by
+        //     a version whose digests this build cannot reproduce. Telling a reader
+        //     the second is the first sends them looking for an upgrade they already
+        //     did.
+        //     One guard, two sentences. The toggle covers both: a consumer who
+        //     switched the comparison off is not asking this question, so refusing
+        //     because the receipt cannot answer it would reintroduce the check by
+        //     another door.
+        if ($this->fingerprintEnabled()) {
+            if ($receipt->config === null) {
+                $this->components->error(sprintf(
+                    'Run [%s] was recorded before this command could tell which pipeline declaration a run walked, so it cannot answer this. Unknown is not clean. Open a new run.',
+                    $receipt->runId,
+                ));
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+
+            if ($this->declarationAnswer($pipelines, $name, $receipt) === null) {
+                $this->components->error(sprintf(
+                    'Run [%s] recorded its pipeline declaration as [%s], which this version cannot reproduce — so it cannot tell whether that declaration is the one on disk. Unknown is not clean. Open a new run.',
+                    $receipt->runId,
+                    // Bounded, because this is the one message that echoes a value
+                    // BECAUSE it failed validation. A real digest is short; anything
+                    // reaching here is by definition not one, and a receipt holding
+                    // a megabyte would otherwise flood the terminal it is trying to
+                    // inform.
+                    Str::limit($receipt->config, 64),
+                ));
+
+                return self::FAILURE;
+            }
         }
 
         // 3. The cursor finished. `recordReceipt()` writes after every
@@ -393,6 +420,34 @@ final class VerifyCommand extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Whether the consumer left the declaration comparison switched on.
+     *
+     * Only an explicit false disables it. An absent or unusable value keeps the
+     * check on, which is the safe direction for a guard: a typo in the config must
+     * not quietly switch off a gate.
+     */
+    private function fingerprintEnabled(): bool
+    {
+        return $this->laravel->make(Repository::class)->get(BoostPipelineServiceProvider::CONFIG.'.verify.config_fingerprint') !== false;
+    }
+
+    /**
+     * Whether the run walked the declaration this config produces, or cannot say.
+     *
+     * Null is the answer that matters: the recorded value came from a format this
+     * build cannot reproduce, so no comparison is possible. Every caller must send
+     * null where it sends a missing digest.
+     */
+    private function declarationAnswer(Pipelines $pipelines, string $name, Receipt $receipt): ?bool
+    {
+        $pipeline = $pipelines->get($name);
+
+        return $pipeline instanceof Pipeline && $receipt->config !== null
+            ? PipelineFingerprint::matches($pipeline, $receipt->config)
+            : null;
+    }
+
     /** The scope the caller asked about, or null for the whole tree. */
     private function askedScope(): ?string
     {
@@ -428,7 +483,7 @@ final class VerifyCommand extends Command
         // Only an explicit false disables it. An absent or unusable value keeps the
         // check on, which is the safe direction for a guard: a typo in the config
         // must not quietly switch off a gate.
-        if ($this->laravel->make(Repository::class)->get(BoostPipelineServiceProvider::CONFIG.'.verify.config_fingerprint') === false) {
+        if (! $this->fingerprintEnabled()) {
             return null;
         }
 
@@ -447,7 +502,11 @@ final class VerifyCommand extends Command
             return null;
         }
 
-        if (PipelineFingerprint::for($pipeline) === $receipt->config) {
+        // Only a definite FALSE refuses here. Null means the recorded value was
+        // produced by something this build cannot reproduce, which says nothing
+        // about the declaration — routing it here would turn "I cannot tell" into
+        // "you changed it", which is the failure the format tag exists to prevent.
+        if (PipelineFingerprint::matches($pipeline, $receipt->config) !== false) {
             return null;
         }
 

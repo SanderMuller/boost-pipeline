@@ -40,7 +40,83 @@ final readonly class PipelineFingerprint
     /** Long enough that a collision is not a practical concern, short enough to log. */
     private const int DIGEST_LENGTH = 16;
 
+    /**
+     * What this build's digests are tagged with.
+     *
+     * The digest is a persisted format, not only a return value: it is written
+     * into receipts and live records and read back later. Without a tag, a digest
+     * produced by a future algorithm would be indistinguishable from a digest of a
+     * different declaration, and `pipeline:verify` would report the second — so
+     * changing an input would fail every consumer's gate with a message blaming a
+     * stale server that was never stale.
+     *
+     * Bump this whenever `canonical()` changes what it hashes. A reader that
+     * cannot produce a tag treats the digest as UNKNOWN, which is a state the
+     * command already degrades gracefully on.
+     */
+    private const string FORMAT = 'v1';
+
     public static function for(Pipeline $pipeline): string
+    {
+        return self::FORMAT.':'.self::digest($pipeline);
+    }
+
+    /**
+     * Whether a recorded digest describes this pipeline, or cannot say.
+     *
+     * Three answers, and the third is the reason this method exists. True and
+     * false are a comparison; null means the recorded value was produced by
+     * something this build cannot reproduce, so it says nothing either way. A
+     * caller must route null wherever it routes a missing digest, never into the
+     * mismatch branch.
+     *
+     * An untagged value is read as this format's content. Only the release before
+     * tagging wrote one, and it wrote it with the algorithm still in use, so those
+     * digests are legacy in shape and current in content. Treating them as unknown
+     * instead would refuse every receipt already on disk — the exact false failure
+     * the tag exists to prevent, self-inflicted on the way to preventing it.
+     */
+    public static function matches(Pipeline $pipeline, string $recorded): ?bool
+    {
+        $value = self::contentOf($recorded);
+
+        return $value === null ? null : $value === self::digest($pipeline);
+    }
+
+    /**
+     * The comparable content of a recorded value, or null when there is none.
+     *
+     * Shape is the test, not just the tag. A value this build could not have
+     * written says nothing about the declaration however it is malformed, so
+     * `v1:` with nothing after it, a bare `:abc`, and a doubled `v1:v1:abc` all
+     * land on null rather than on a mismatch.
+     */
+    private static function contentOf(string $recorded): ?string
+    {
+        $separator = strpos($recorded, ':');
+
+        if ($separator === false) {
+            return self::wellFormed($recorded) ? $recorded : null;
+        }
+
+        // First colon only, so the tag cannot be confused by content that
+        // contains one — content never does today, and this keeps that a
+        // property of the parser rather than of the hash alphabet.
+        if (substr($recorded, 0, $separator) !== self::FORMAT) {
+            return null;
+        }
+
+        $content = substr($recorded, $separator + 1);
+
+        return self::wellFormed($content) ? $content : null;
+    }
+
+    private static function wellFormed(string $content): bool
+    {
+        return preg_match('/^[0-9a-f]{'.self::DIGEST_LENGTH.'}$/', $content) === 1;
+    }
+
+    private static function digest(Pipeline $pipeline): string
     {
         return substr(hash('xxh3', serialize(self::canonical($pipeline))), 0, self::DIGEST_LENGTH);
     }
