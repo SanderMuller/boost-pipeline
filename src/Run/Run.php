@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
+use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
+use SanderMuller\BoostPipeline\Contracts\RunHistoryStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\Walk;
@@ -69,6 +72,9 @@ final class Run
     /** The tree after the last resolution, which is what a fresh run compares to. */
     private ?string $lastSeen;
 
+    /** Owns the live record this run wrote last, so a clear can prove it is ours. */
+    private ?string $liveToken = null;
+
     private function __construct(
         public readonly string $id,
         public readonly Walk $walk,
@@ -76,6 +82,8 @@ final class Run
         private readonly ?TreeFingerprint $tree = null,
         private readonly ?ReceiptStore $receipts = null,
         public readonly ?string $scope = null,
+        private readonly ?RunHistoryStore $history = null,
+        private readonly ?LiveProgressStore $live = null,
         /**
          * Which pipeline this run walks, when the project declares more than one.
          *
@@ -103,8 +111,20 @@ final class Run
         ?ReceiptStore $receipts = null,
         ?string $scope = null,
         ?string $pipeline = null,
+        ?RunHistoryStore $history = null,
+        ?LiveProgressStore $live = null,
     ): self {
-        return new self($id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6), $walk, $runner, $tree, $receipts, $scope, $pipeline);
+        return new self(
+            $id ?? 'r-'.substr(bin2hex(random_bytes(4)), 0, 6),
+            $walk,
+            $runner,
+            $tree,
+            $receipts,
+            $scope,
+            $history,
+            $live,
+            $pipeline,
+        );
     }
 
     public function state(): RunState
@@ -171,14 +191,31 @@ final class Run
         // a lone step can be one, because a batch refuses them at config time.
         if ($position[0]->step->kind() === StepKind::Skill) {
             $this->state = RunState::Awaiting;
+            $this->writeLive(RunState::Awaiting, $position);
 
             return [];
         }
 
         $measuredAt = $this->tree?->capture();
         $steps = array_map(static fn (WalkStep $walkStep): Step => $walkStep->step, $position);
+        $token = $this->writeLive(RunState::Running, $position);
 
-        return $this->record($this->resolveSteps($steps), $steps, $measuredAt);
+        try {
+            $results = $this->record($this->resolveSteps($steps), $steps, $measuredAt);
+
+            // The ordinary handover: a shell step whose successor is a skill step
+            // settles to Awaiting inside record(), never through the branch above.
+            if ($this->state === RunState::Awaiting) {
+                $this->writeLive(RunState::Awaiting, $this->walk->positionAt($this->cursor));
+            }
+
+            return $results;
+        } finally {
+            // Unconditional by design: the handover above wrote a newer token, so
+            // this compare-and-delete is a no-op there. That is what lets one
+            // finally cover the ordinary exit and a throwing runner alike.
+            $this->clearLive($token);
+        }
     }
 
     /**
@@ -224,10 +261,24 @@ final class Run
         // what the skill measured — or produced, where it declared as much.
         $measuredAt = $this->tree?->capture();
 
-        $result = $this->proveOrAcknowledge($current->step, $summary);
-        $this->record([$result->stepId => $result], [$current->step], $measuredAt);
+        // Captured before the try: writeLive() below replaces liveToken, and a
+        // finally reading the field would then delete the record it just wrote.
+        $token = $this->liveToken;
 
-        return $result;
+        try {
+            $result = $this->proveOrAcknowledge($current->step, $summary);
+            $this->record([$result->stepId => $result], [$current->step], $measuredAt);
+
+            if ($this->state === RunState::Awaiting) {
+                $this->writeLive(RunState::Awaiting, $this->walk->positionAt($this->cursor));
+            }
+
+            return $result;
+        } finally {
+            // The only boundary that ends an awaiting state, so the only one that
+            // can clear its record — including when a declared proof throws.
+            $this->clearLive($token);
+        }
     }
 
     /**
@@ -467,18 +518,87 @@ final class Run
     }
 
     /**
+     * Write what this position is doing, and return the token that owns it.
+     *
+     * A blocked position holds the cursor and is entered again, so this replaces
+     * rather than accumulates. The fresh token per entry is what lets a later
+     * clear tell its own record from one written since.
+     *
+     * The state is passed, not read: a position that is still executing has not
+     * transitioned yet — the first one still reads `open`.
+     *
+     * @param  list<WalkStep>  $position
+     */
+    private function writeLive(RunState $state, array $position): string
+    {
+        $token = bin2hex(random_bytes(8));
+
+        if (! $this->live instanceof LiveProgressStore || $position === []) {
+            $this->liveToken = $token;
+
+            return $token;
+        }
+
+        $written = $this->live->write(new LiveProgress(
+            runId: $this->id,
+            token: $token,
+            state: $state,
+            stepIds: array_map(static fn (WalkStep $walkStep): string => $walkStep->step->id(), $position),
+            startedAt: gmdate('c'),
+            scope: $this->scope,
+            // Only the shipped runner enforces a ceiling, so only it can name one.
+            // A custom runner records none, and its record then never expires on
+            // age — an honest absence rather than this runner's default applied to
+            // a runner that does not use it.
+            timeoutSeconds: $this->runner instanceof ProcessStepRunner
+                ? $this->runner->effectiveTimeout($position[0]->step)
+                : null,
+        ));
+
+        // Adopted only on success. A failed replacement leaves the previous
+        // record on disk, and clearing the token that never landed would strand
+        // it — an awaiting record never expires on age, so it would outlive the
+        // run entirely.
+        if ($written) {
+            $this->liveToken = $token;
+        }
+
+        return $this->liveToken ?? $token;
+    }
+
+    private function clearLive(?string $token): void
+    {
+        if ($token !== null) {
+            $this->live?->clear($this->id, $token);
+        }
+    }
+
+    /**
+     * Drop this run's in-flight record because the run itself is being discarded.
+     *
+     * `RunManager` replaces a run whose scope changed, whose tree moved, or that
+     * went stale. An awaiting record never expires on age, so without this an
+     * abandoned one would describe a run nobody can reach for as long as the
+     * server lives.
+     */
+    public function releaseLive(): void
+    {
+        $this->clearLive($this->liveToken);
+    }
+
+    /**
      * Written after every resolution, not only at the end: a walk abandoned
      * midway still leaves a readable answer, and that answer is "not verified".
      */
     private function recordReceipt(): void
     {
-        if (! $this->receipts instanceof ReceiptStore) {
+        if (! $this->receipts instanceof ReceiptStore && ! $this->history instanceof RunHistoryStore) {
             return;
         }
 
         $verification = $this->verification();
 
-        $this->receipts->write(new Receipt(
+        $receipt = new Receipt(
             runId: $this->id,
             state: $this->state->value,
             allVerified: $verification['all_verified'],
@@ -495,7 +615,17 @@ final class Run
             // would make the receipt a log and invite a consumer to parse it.
             coverage: $this->walk->notices === [] ? 'complete' : 'incomplete',
             asserted: array_keys(array_filter($this->asserted)),
-        ));
+        );
+
+        $this->receipts?->write($receipt);
+
+        // History keeps what the receipt discards: where each step's output went.
+        // A consumer may bind its own runner and write logs anywhere, or nowhere,
+        // so the path a step actually produced is the only one worth recording.
+        $this->history?->write(new HistoryRecord($receipt, array_map(
+            static fn (Result $result): ?string => $result->logPath,
+            $this->results,
+        )));
     }
 
     public function acknowledgedCount(): int

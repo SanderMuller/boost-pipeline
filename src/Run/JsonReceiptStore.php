@@ -11,9 +11,12 @@ use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
  *
  * Under `storage/logs/` on purpose: that is already ignored by a Laravel app's
  * own nested .gitignore, so using the pipeline never leaves untracked files
- * behind. One file rather than a history — the question a reader asks is "does
- * the current tree have a pass", and a directory of past answers only makes that
- * harder.
+ * behind.
+ *
+ * One file, and it answers one question: does the current tree have a pass. Past
+ * runs live beside it under `history/`, written by {@see JsonRunHistoryStore} —
+ * a separate store rather than a widened one, so this file keeps the single
+ * meaning `pipeline:verify` reads it for.
  */
 final readonly class JsonReceiptStore implements ReceiptStore
 {

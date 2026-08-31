@@ -4,24 +4,36 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline;
 
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Config\Pipelines;
+use SanderMuller\BoostPipeline\Console\HistoryCommand;
 use SanderMuller\BoostPipeline\Console\VerifyCommand;
+use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
+use SanderMuller\BoostPipeline\Contracts\RunHistoryStore;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
+use SanderMuller\BoostPipeline\Http\LoopbackOnly;
+use SanderMuller\BoostPipeline\Http\PipelineController;
 use SanderMuller\BoostPipeline\Mcp\InvalidConfigServer;
 use SanderMuller\BoostPipeline\Mcp\McpSurface;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
+use SanderMuller\BoostPipeline\Run\JsonLiveProgressStore;
 use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
+use SanderMuller\BoostPipeline\Run\JsonRunHistoryStore;
+use SanderMuller\BoostPipeline\Run\LiveProgressStoreFactory;
+use SanderMuller\BoostPipeline\Run\PipelineOverview;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
+use SanderMuller\BoostPipeline\Run\RunHistoryStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunManager;
+use SanderMuller\BoostPipeline\Run\StepLogReader;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
@@ -35,8 +47,25 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 {
     public const string HANDLE = 'pipeline';
 
+    public const string CONFIG = 'boost-pipeline';
+
+    /**
+     * The middleware the page gets when the config does not say.
+     *
+     * A fallback rather than a duplicate of the shipped config: these routes serve
+     * raw command output, and the loopback gate is the only one of the three that
+     * answers who is asking. A partial published config, or a value of the wrong
+     * type, must not silently leave them open — so an absent or unusable list
+     * takes this, and only a list the consumer actually wrote replaces it.
+     *
+     * @var list<string>
+     */
+    public const array DEFAULT_UI_MIDDLEWARE = ['web', LoopbackOnly::class];
+
     public function register(): void
     {
+        $this->mergeConfigFrom(__DIR__.'/../config/boost-pipeline.php', self::CONFIG);
+
         $this->app->singleton(PipelineLoader::class, fn (): PipelineLoader => new PipelineLoader($this->app->basePath()));
 
         $this->app->singleton(Pipelines::class, function (): Pipelines {
@@ -117,6 +146,38 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             },
         ));
 
+        // Ungated on purpose: every run records history and in-flight state
+        // whether or not a consumer ever serves the page. Enabling the page then
+        // shows real history at once rather than an empty list.
+        $this->app->singleton(RunHistoryStoreFactory::class, fn (): RunHistoryStoreFactory => new RunHistoryStoreFactory(
+            fn (string $pipeline): RunHistoryStore => new JsonRunHistoryStore(
+                $this->app->storagePath("logs/pipeline/history/{$this->declaredName($pipeline)}"),
+            ),
+        ));
+
+        $this->app->singleton(LiveProgressStoreFactory::class, fn (): LiveProgressStoreFactory => new LiveProgressStoreFactory(
+            fn (string $pipeline): LiveProgressStore => new JsonLiveProgressStore(
+                $this->app->storagePath("logs/pipeline/live/{$this->declaredName($pipeline)}.json"),
+            ),
+        ));
+
+        // Bound whatever the UI is set to. Only route registration is gated: a
+        // console command reads the same projection, and it has to work with the
+        // page disabled and outside a local environment.
+        $this->app->singleton(PipelineOverview::class, fn (): PipelineOverview => new PipelineOverview(
+            $this->app->make(Pipelines::class),
+            $this->app->make(ReceiptStoreFactory::class),
+            $this->app->make(RunHistoryStoreFactory::class),
+            $this->app->make(LiveProgressStoreFactory::class),
+            $this->app->make(TreeFingerprint::class),
+        ));
+
+        $this->app->singleton(StepLogReader::class, fn (): StepLogReader => new StepLogReader(
+            $this->app->make(RunHistoryStoreFactory::class),
+            new OutputSummariser,
+            $this->app->storagePath('logs/pipeline'),
+        ));
+
         $this->registerSolePipelineAliases();
 
         $this->app->singleton(RunManager::class, fn (): RunManager => new RunManager(
@@ -124,6 +185,8 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             $this->app->make(StepRunnerFactory::class),
             $this->app->make(TreeFingerprint::class),
             $this->app->make(ReceiptStoreFactory::class),
+            $this->app->make(RunHistoryStoreFactory::class),
+            $this->app->make(LiveProgressStoreFactory::class),
         ));
     }
 
@@ -167,6 +230,26 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         );
     }
 
+    /**
+     * A pipeline name that is safe to use as a path component.
+     *
+     * Same check, and the same reason, as the receipt factory below: a name
+     * reaches a directory these stores create, and only a declared name is a real
+     * pipeline.
+     *
+     * @throws InvalidPipelineConfigException
+     */
+    private function declaredName(string $pipeline): string
+    {
+        $pipelines = $this->app->make(Pipelines::class);
+
+        if (! $pipelines->has($pipeline)) {
+            throw InvalidPipelineConfigException::unknownPipeline($pipeline, $pipelines->names());
+        }
+
+        return $pipeline;
+    }
+
     private function jsonReceiptStore(string $pipeline): JsonReceiptStore
     {
         return new JsonReceiptStore($this->app->storagePath("logs/pipeline/receipts/{$pipeline}.json"));
@@ -187,7 +270,13 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         // project with no pipeline should get a clear "nothing has been verified",
         // not "command not found".
         if ($this->app->runningInConsole()) {
-            $this->commands([VerifyCommand::class]);
+            $this->commands([VerifyCommand::class, HistoryCommand::class]);
+        }
+
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__.'/../config/boost-pipeline.php' => $this->app->configPath('boost-pipeline.php'),
+            ], 'boost-pipeline-config');
         }
 
         // Registered in the package's own provider rather than a published
@@ -195,6 +284,8 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         if (! $this->app->make(PipelineLoader::class)->exists()) {
             return;
         }
+
+        $this->registerUiRoutes();
 
         // Narrower than runningInConsole() on purpose: validating on every artisan
         // command would execute the consumer's config during unrelated work,
@@ -230,6 +321,45 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         }
 
         Mcp::local(self::HANDLE, PipelineServer::class);
+    }
+
+    /**
+     * The page, when a consumer asked for it and the environment allows it.
+     *
+     * Both conditions, never either: a flag committed by mistake must not open a
+     * page that serves raw command output in production. Neither is access
+     * control — `LoopbackOnly` in the default middleware answers who is asking.
+     */
+    private function registerUiRoutes(): void
+    {
+        $config = $this->app->make('config');
+
+        if ($config->get(self::CONFIG.'.ui.enabled') !== true || ! $this->app->environment('local')) {
+            return;
+        }
+
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'boost-pipeline');
+
+        // Published config is consumer-owned, so neither value is assumed to be
+        // the shape this package shipped.
+        $configuredPath = $config->get(self::CONFIG.'.ui.path');
+        $path = is_string($configuredPath) && trim($configuredPath, '/') !== ''
+            ? trim($configuredPath, '/')
+            : 'boost-pipelines';
+
+        $middleware = $config->get(self::CONFIG.'.ui.middleware');
+
+        Route::middleware(is_array($middleware) && $middleware !== [] ? $middleware : self::DEFAULT_UI_MIDDLEWARE)
+            ->prefix($path)
+            ->group(function (): void {
+                Route::get('/', [PipelineController::class, 'page'])->name('boost-pipeline.page');
+                Route::get('/data', [PipelineController::class, 'data'])->name('boost-pipeline.data');
+
+                // The route that serves untrusted output, so it takes the same
+                // gates and the same middleware as the two above.
+                Route::get('/log/{pipeline}/{run}/{step}', [PipelineController::class, 'log'])
+                    ->name('boost-pipeline.log');
+            });
     }
 
     /**

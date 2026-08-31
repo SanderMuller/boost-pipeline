@@ -65,7 +65,9 @@ it('names a log file after the run id it reports, so the two can be correlated',
     $result = $run->resolveCurrent()[0];
 
     expect($result->logPath)->not->toBeNull()
-        ->and(basename((string) $result->logPath))->toBe("{$run->id}-echo.log");
+        // Both halves carry a digest now, so the name is matched rather than
+        // rebuilt: selective suffixing let a rewritten id collide with a literal.
+        ->and(basename((string) $result->logPath))->toMatch("/^{$run->id}-[0-9a-f]{6}-echo-[0-9a-f]{6}\.log$/");
 });
 
 it('scopes logs per run, so a second run cannot overwrite the first one', function (): void {

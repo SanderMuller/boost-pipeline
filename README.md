@@ -231,6 +231,82 @@ does not, so the flag goes quiet exactly when you wanted an answer. That is a pr
 pipeline you built rather than a guarantee, and reordering can take it away without anything saying
 so.
 
+## Reading what the runs did
+
+`pipeline:verify` gates. `php artisan pipeline:history` reports, and the two read different
+records to answer different questions — verify reads the current receipt and answers whether the
+tree on disk is verified; history reads the recorded runs and the in-flight record and answers
+what the recent walks did.
+
+```bash
+php artisan pipeline:history                    # the recent runs, newest first
+php artisan pipeline:history --run=r-4f2a       # one run, step by step
+php artisan pipeline:history --pipeline=release --limit=5
+```
+
+It exits 0 for every answer it can give — an empty history, a stale run, a failed run. Only a
+question it cannot answer exits non-zero: an unknown pipeline, a missing `--pipeline` where
+several are declared, an unknown run id, a `--limit` that is not a positive integer. Keeping that
+apart from `pipeline:verify` is deliberate: a reporting command with gate-like exit codes gets
+wired into a hook where it blocks on a question it never asked.
+
+A run opened through the MCP tools is recorded to
+`storage/logs/pipeline/history/<pipeline>/<run-id>.json`, and the position being worked writes
+`storage/logs/pipeline/live/<pipeline>.json` while it runs. Both are written whether or not you
+serve the page below, and both stores are optional dependencies of a run — so code that builds a
+`Run` by hand records nothing unless it passes them. A run id reaches that filename through the
+same encoding a step log uses, which appends a short digest, so the name is not the id verbatim. History keeps the newest 20 runs per pipeline and
+prunes the rest on write; step logs are not pruned.
+
+**The steps come from the config as it stands now, not from the record.** Nothing stores the step
+list a past run walked. So a run recorded before you edited the pipeline shows a step you added
+since as never run, and reports a verdict whose step you removed as no longer declared. That is
+the honest rendering of two facts, not a fault.
+
+## The page
+
+A page at `{app}/boost-pipelines` showing every declared pipeline, the run in flight and the runs
+before it. It polls, so you watch a walk progress without reading the agent's transcript.
+
+Off by default, and behind three gates:
+
+```php
+// config/boost-pipeline.php
+use SanderMuller\BoostPipeline\Http\LoopbackOnly;
+
+return [
+    'ui' => [
+        'enabled' => env('BOOST_PIPELINE_UI', false),
+        'path' => 'boost-pipelines',
+        'middleware' => ['web', LoopbackOnly::class],
+    ],
+];
+```
+
+Its defaults are merged, so the page stays off until you say otherwise. Publish it with
+`php artisan vendor:publish --tag=boost-pipeline-config` when you want to change one.
+
+The routes register only when `enabled` is true **and** the environment is local. Neither of those
+is access control — `APP_ENV=local` describes the application, not the requester, and a local
+server routinely listens on a LAN address or behind a tunnel. So `LoopbackOnly` ships in the
+default middleware and refuses a request from anywhere but this machine. It reads `REMOTE_ADDR`
+rather than `Request::ip()`, because the latter returns the `X-Forwarded-For` value on an app that
+trusts proxies, and a header must not decide whether the page is open. Replace it deliberately if
+you need the page reachable from another machine.
+
+**What polling can and cannot show.** The receipt only lands when a position resolves, so a page
+reading it alone would freeze for the length of a 900-second step. The live record fills that gap:
+it names the steps at the current position and when they started. A `running` record older than
+the ceiling its runner enforces reads as interrupted, because that runner kills a step at the
+timeout. An `awaiting` record never expires — the package does not time out a skill step, so the
+page reports how long it has waited rather than inventing a limit. An awaiting record left behind
+by a killed server is the one case nothing can detect.
+
+A step's log expands in place, read from the path that run recorded rather than one derived from
+its ids — a consumer that binds its own `StepRunner` may write logs anywhere, or nowhere. A
+recorded path is served only when it resolves inside the log directory. Command output is
+untrusted, so the page writes it with `textContent` and never as markup.
+
 ## Proving an agent step
 
 Where an agent step leaves a side effect, the server can check for it instead of trusting the
@@ -306,7 +382,9 @@ There is no step-output mechanism, deliberately. Use command substitution inside
 one step write a file (`--json`) that a later step reads. Never parse another step's stdout — that
 is the pattern GitHub Actions deprecated as a security vulnerability.
 
-Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`. Nothing prunes that
+Every step writes its full output to `storage/logs/pipeline/<run>-<step>.log`, with a short digest
+after each id — `r-4f2a-a1b2c3-pint-d4e5f6.log` — so that two ids differing only in characters the
+filename cannot hold never write to one file. Nothing prunes that
 directory, and deleting it is safe.
 
 **The receipts under it are not logs.** `storage/logs/pipeline/receipts/` sits inside a directory
@@ -325,6 +403,7 @@ clear the `*.log` files rather than the directory if you want to keep the answer
 | Coordinate concurrent callers                   | No lock; two agents on one server share a cursor                        |
 | Accumulate scopes across runs                   | A second scoped run replaces the first. Run unscoped for the whole tree |
 | Notice two pipelines sharing a name             | PHP collapses duplicate array keys, so the later one silently wins      |
+| Notice a walk abandoned while awaiting a skill  | The live record has no timeout to expire against, so it reports the wait |
 | Know which checks your pipeline ought to hold   | Exit 0 reports on the steps that ran, and nothing more                  |
 
 None of these are quietly handled somewhere. If a row matters to you, budget real work for it.

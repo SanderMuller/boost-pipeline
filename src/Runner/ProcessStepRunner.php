@@ -43,6 +43,20 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         private float $timeoutSeconds = self::DEFAULT_TIMEOUT_SECONDS,
     ) {}
 
+    /**
+     * The ceiling this runner would enforce for a step, or null when it enforces none.
+     *
+     * Only this runner can answer: the `StepRunner` contract declares no timeout,
+     * and a step's own value lives on `Shell` rather than the `Step` interface. So
+     * a custom runner records no ceiling, and {@see LiveProgress::hasExpired()}
+     * then never ages its record out — the honest answer rather than a guess made
+     * with this runner's default.
+     */
+    public function effectiveTimeout(Step $step): ?float
+    {
+        return $step instanceof Shell ? ($step->timeoutSeconds() ?? $this->timeoutSeconds) : null;
+    }
+
     public function run(Step $step, string $runId): Result
     {
         if ($step->kind() !== StepKind::Shell || ! $step instanceof Shell) {

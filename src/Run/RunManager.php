@@ -44,6 +44,8 @@ final class RunManager
         private readonly StepRunnerFactory $runners,
         private readonly ?TreeFingerprint $tree = null,
         private readonly ?ReceiptStoreFactory $receipts = null,
+        private readonly ?RunHistoryStoreFactory $history = null,
+        private readonly ?LiveProgressStoreFactory $live = null,
     ) {}
 
     /**
@@ -61,6 +63,7 @@ final class RunManager
         // open answers the wrong one. Same reasoning as a tree that moved, and it
         // touches only this pipeline's entry.
         if ($run instanceof Run && $run->scope !== $selection) {
+            $run->releaseLive();
             $run = null;
         }
 
@@ -80,6 +83,7 @@ final class RunManager
                 // and keeps its id instead of being thrown away.
                 $run->rebaseline();
             } elseif ($moved) {
+                $run->releaseLive();
                 $run = null;
             } elseif ($stale) {
                 // A stale run can never verify: an earlier step measured a tree
@@ -87,6 +91,7 @@ final class RunManager
                 // Reopening is the documented way out of a fix applied with
                 // next_step, so it has to be a real one — and by then the tree has
                 // stopped moving, because resolving that step absorbed it.
+                $run->releaseLive();
                 $run = null;
             }
         }
@@ -99,6 +104,8 @@ final class RunManager
                 receipts: $this->receipts?->for($name),
                 scope: $selection,
                 pipeline: $this->pipelines->requiresName() ? $name : null,
+                history: $this->history?->for($name),
+                live: $this->live?->for($name),
             );
         }
 

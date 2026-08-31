@@ -22,10 +22,22 @@ afterEach(function (): void {
     rmdir($this->dir);
 });
 
-it('names the log after the run and step, leaving ordinary ids untouched', function (): void {
+it('names the log after the run and step, each carrying its own digest', function (): void {
+    // Every id is suffixed, not only a rewritten one: suffixing selectively let a
+    // rewritten id collide with a literal that matched its encoded form.
     $path = new LogWriter($this->dir)->write('r-4f2a', 'pint', 'output');
 
-    expect(basename((string) $path))->toBe('r-4f2a-pint.log');
+    expect(basename((string) $path))->toMatch('/^r-4f2a-[0-9a-f]{6}-pint-[0-9a-f]{6}\.log$/');
+});
+
+it('cannot be made to share a filename by supplying an encoded id literally', function (): void {
+    $writer = new LogWriter($this->dir);
+
+    $rewritten = (string) $writer->write('r-4f2a', 'a/b', 'from the slash');
+    $literal = (string) $writer->write('r-4f2a', basename($rewritten, '.log'), 'from the literal');
+
+    expect($rewritten)->not->toBe($literal)
+        ->and(file_get_contents($rewritten))->toBe('from the slash');
 });
 
 it('keeps a step id that carries path separators inside the log directory', function (): void {
@@ -35,7 +47,7 @@ it('keeps a step id that carries path separators inside the log directory', func
 
     expect(realpath(dirname((string) $path)))->toBe(realpath($this->dir))
         ->and(basename((string) $path))->not->toContain('/')
-        ->and(basename((string) $path))->toStartWith('r-4f2a-..-..-escape-');
+        ->and(basename((string) $path))->toContain('-..-..-escape-');
 });
 
 it('keeps two ids that reduce to the same safe text in separate files', function (): void {

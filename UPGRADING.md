@@ -1,5 +1,52 @@
 # Upgrading
 
+## Unreleased
+
+Additive. A project that only configures steps needs no migration, but three things arrive whether
+or not it opts into any of them.
+
+- **A run opened through the MCP tools now writes two more records.** Its outcome goes to
+  `storage/logs/pipeline/history/<pipeline>/<run-id>.json` after each resolution, and the position
+  being worked writes `storage/logs/pipeline/live/<pipeline>.json` while it runs. Both sit beside
+  the receipt, under the directory a Laravel app already gitignores, and neither changes what
+  `receipts/<pipeline>.json` holds or means.
+
+  Both stores are optional dependencies of a run, so a caller that builds one itself records
+  nothing until it passes them.
+
+  History keeps the newest 20 runs per pipeline and deletes the rest on write. Step logs are still
+  never pruned. Nothing is gated on the page below: enabling it later shows real history at once
+  rather than an empty list.
+
+- **`php artisan pipeline:history` is new.** It reports; `pipeline:verify` still gates. It exits 0
+  for every answer it can give, including a failed or stale run, and non-zero only when it cannot
+  answer. Do not wire it into a hook expecting it to block.
+
+- **Step log filenames change, once.** A log was named `<runId>-<stepId>.log`, with a short digest
+  appended only to an id that had to be rewritten to be filename-safe. Every id now carries its
+  digest: `r-4f2a-a1b2c3-pint-d4e5f6.log`. Selective suffixing left a collision — a rewritten id
+  such as `a/b` became `a-b-<digest>`, which a caller could also supply as a literal id, and the
+  two then wrote to one file. With the digest always present the encoding is injective, so two ids
+  share a filename only on a hash collision.
+
+  Existing logs keep their old names; nothing reads them back by name. Anything that reconstructed
+  a log path from a run and step id needs updating — the `logs` map in a history record is the
+  path a run actually wrote, and the way to look one up.
+
+- **A publishable config file, `config/boost-pipeline.php`.** Its defaults are merged, so a project
+  that never publishes it is unaffected and the page stays off. Publish with
+  `php artisan vendor:publish --tag=boost-pipeline-config` to serve the page, which registers only
+  when `ui.enabled` is true and the environment is local, behind a loopback-only middleware.
+
+- `PipelineOverview` is new and bound unconditionally. `Run::start()` and the `RunManager`
+  constructor take two more optional dependencies, appended after the existing ones, so positional
+  and named calls keep working unchanged. (`Run`'s own constructor is private; `start()` is the way
+  in.) A consumer that builds either by hand — neither is documented as a seam — passes nothing new
+  unless it wants the records.
+
+- `LiveProgressStore::write()` returns `bool` rather than `void`, so a run can tell whether a
+  record reached disk. Only a consumer implementing that brand-new interface is affected.
+
 ## From 0.10.5 to 0.10.6
 
 Additive. No migration needed for a project that only configures steps.
