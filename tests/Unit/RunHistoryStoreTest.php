@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Support\Facades\Date;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
@@ -290,9 +289,7 @@ it('clears temporary files a crashed write left behind', function (): void {
     // never see it and the directory would grow for the life of the checkout.
     $abandoned = $this->directory.'/r-gone.json.deadbeef.tmp';
     file_put_contents($abandoned, '{"partial":');
-    touch($abandoned, Date::now()
-        ->subHours(1)
-        ->getTimestamp());
+    touch($abandoned, time() - 3600);
 
     $inFlight = $this->directory.'/r-busy.json.cafebabe.tmp';
     file_put_contents($inFlight, '{"partial":');

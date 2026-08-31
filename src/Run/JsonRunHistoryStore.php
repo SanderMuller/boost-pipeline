@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
-use Carbon\CarbonImmutable;
 use SanderMuller\BoostPipeline\Contracts\RunHistoryStore;
 use SanderMuller\BoostPipeline\Runner\SafeFilename;
 
@@ -218,7 +217,7 @@ final readonly class JsonRunHistoryStore implements RunHistoryStore
     {
         $directory = rtrim($this->directory, '/');
         $entries = @scandir($directory);
-        $cutoff = CarbonImmutable::now()->getTimestamp() - 60;
+        $cutoff = time() - 60;
 
         foreach ($entries === false ? [] : $entries as $entry) {
             $path = $directory.'/'.$entry;

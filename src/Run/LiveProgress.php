@@ -4,10 +4,6 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
-use Carbon\CarbonImmutable;
-use DateTimeImmutable;
-use Throwable;
-
 /**
  * What a run is doing right now, between two resolutions.
  *
@@ -103,35 +99,16 @@ final readonly class LiveProgress
             return false;
         }
 
-        $startedAt = $this->startedAtTimestamp();
+        $startedAt = strtotime($this->startedAt);
 
-        if ($startedAt === null) {
+        // False rather than an exception: a record is a file on disk, so the value
+        // can be truncated or hand-edited, and unreadable reads as not expired —
+        // the posture the stores take for a file they cannot parse.
+        if ($startedAt === false) {
             return false;
         }
 
-        return ($now ?? $this->currentTimestamp()) - $startedAt > $this->timeoutSeconds + $margin;
-    }
-
-    /**
-     * Null when the recorded timestamp cannot be read.
-     *
-     * A record is a file on disk, so the value can be truncated or hand-edited.
-     * Unreadable reads as not expired — the same posture the stores take for a
-     * file they cannot parse, and the reason this does not go through a parser
-     * that throws on bad input.
-     */
-    private function startedAtTimestamp(): ?int
-    {
-        try {
-            return new DateTimeImmutable($this->startedAt)->getTimestamp();
-        } catch (Throwable) {
-            return null;
-        }
-    }
-
-    private function currentTimestamp(): int
-    {
-        return CarbonImmutable::now()->getTimestamp();
+        return ($now ?? time()) - $startedAt > $this->timeoutSeconds + $margin;
     }
 
     /**
