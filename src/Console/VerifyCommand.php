@@ -125,10 +125,9 @@ final class VerifyCommand extends Command
             return self::FAILURE;
         }
 
-        // Before the verdict, for the same reason the scope is: a walk that
-        // dropped a gate, or that a mistyped tag narrowed to the untagged steps,
-        // can hold nothing but passes. "Has not verified every step" then names
-        // no step at all, and the reader hunts for one that does not exist.
+        // Before the verdict: a walk that dropped a gate, or that a mistyped tag
+        // narrowed to the untagged steps, can hold nothing but passes, and the
+        // verdict guard would then name no step at all.
         $coverageFailure = $this->coverageFailure($pipelines, $name, $receipt);
 
         if ($coverageFailure !== null) {
@@ -263,23 +262,14 @@ final class VerifyCommand extends Command
         // 2. The walk covered the config that declared it. `all_verified` is
         //    false both for an acknowledgement and for a declared step dropped
         //    before the walk began, and nothing else on disk tells those apart.
-        //    Absent means the receipt predates the field, which the bare call
-        //    tolerates and this flag does not: unknown is not clean.
+        //    A recorded `incomplete` was refused before this method. Absent means
+        //    the receipt predates the field, which the bare call tolerates and
+        //    this flag does not: unknown is not clean.
         if ($receipt->coverage === null) {
             $this->components->error(sprintf(
                 'Run [%s] was recorded before this command could tell a dropped gate from an acknowledged step, so it cannot answer this. Unknown coverage is not clean coverage. Open a new run.',
                 $receipt->runId,
             ));
-
-            return self::FAILURE;
-        }
-
-        // The bare path asks the same question ahead of this method; asked again
-        // here so the numbered guards stay complete on their own.
-        $coverageFailure = $this->coverageFailure($pipelines, $name, $receipt);
-
-        if ($coverageFailure !== null) {
-            $this->components->error($coverageFailure);
 
             return self::FAILURE;
         }
@@ -659,18 +649,17 @@ final class VerifyCommand extends Command
     /**
      * Why the walk did not cover the config that declared it, or null.
      *
-     * Only a recorded `incomplete` answers here. The receipt records THAT coverage broke, never which notice broke it, so
-     * the message can only be specific where the config on disk can be asked. A
-     * scoped receipt whose tag no declared step carries is the one case it can
-     * settle: the walk was every untagged step, those passed, and the scope the
-     * caller asked about was never checked at all. Everything else gets the
-     * generic sentence, which names both causes.
+     * Only a recorded `incomplete` answers here. Absent is unknown, which the bare
+     * call tolerates as it tolerates an absent config digest; `--server-verified`
+     * refuses it itself.
+     *
+     * The receipt records THAT coverage broke, never which notice broke it, so the
+     * message can only be specific where the config on disk can be asked. A scoped
+     * receipt whose tag no declared step carries is the one case it can settle.
+     * Everything else gets the generic sentence, which names both causes.
      */
     private function coverageFailure(Pipelines $pipelines, string $name, Receipt $receipt): ?string
     {
-        // Absent is unknown, not incomplete. The bare call tolerates a receipt
-        // written before the field, as it tolerates an absent config digest: it
-        // is otherwise sound, and `--server-verified` is where unknown is refused.
         if ($receipt->coverage !== 'incomplete') {
             return null;
         }

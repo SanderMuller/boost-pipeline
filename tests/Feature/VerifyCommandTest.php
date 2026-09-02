@@ -395,11 +395,8 @@ it('refuses a scoped question the run did not answer', function (): void {
 });
 
 it('names the scope as covering nothing when the tag no step carries', function (): void {
-    // A mistyped tag opens a run of only the untagged steps, which pass. The
-    // receipt then holds every step the run knew about, all verified, and the
-    // only thing wrong is that the scope asked about was never checked.
-    // "Has not verified every step" names no step and sends the reader hunting
-    // for one that does not exist.
+    // A mistyped tag walks only the untagged steps, which pass, so the verdict
+    // guard would name no step: the scope asked about was never checked at all.
     projectDeclaringSteps(['pint' => null]);
     receiptStoreHolding(receipt(allVerified: false, scope: 'bakend', verdicts: ['pint' => 'passed'], coverage: 'incomplete'));
     treeReporting('tree-a');
@@ -423,9 +420,23 @@ it('gives --server-verified the same answer for a tag no step carries', function
         ->and(Artisan::output())->toContain('no step carries the tag [bakend]');
 });
 
+it('keeps the generic coverage answer when the scope tag is real', function (): void {
+    // The tag exists, so coverage broke for another reason, and claiming the
+    // scope covered nothing would send the reader to fix a spelling that is right.
+    projectDeclaringSteps(['pint' => 'backend']);
+    receiptStoreHolding(receipt(allVerified: false, scope: 'backend', verdicts: ['pint' => 'passed'], coverage: 'incomplete'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'backend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('did not cover the config')
+        ->and($output)->not->toContain('covered nothing');
+});
+
 it('refuses incomplete coverage on the bare call before blaming a step', function (): void {
-    // Every recorded step passed, so the verdict map explains nothing. Coverage
-    // does: the walk dropped a gate the config declared.
+    // Every recorded step passed, so only coverage can explain the refusal.
     receiptStoreHolding(receipt(allVerified: false, verdicts: ['fmt' => 'passed'], coverage: 'incomplete'));
     treeReporting('tree-a');
 
