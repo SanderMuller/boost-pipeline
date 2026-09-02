@@ -394,6 +394,49 @@ it('refuses a scoped question the run did not answer', function (): void {
         ->and($output)->toContain('[frontend]');
 });
 
+it('names the scope as covering nothing when the tag no step carries', function (): void {
+    // A mistyped tag opens a run of only the untagged steps, which pass. The
+    // receipt then holds every step the run knew about, all verified, and the
+    // only thing wrong is that the scope asked about was never checked.
+    // "Has not verified every step" names no step and sends the reader hunting
+    // for one that does not exist.
+    projectDeclaringSteps(['pint' => null]);
+    receiptStoreHolding(receipt(allVerified: false, scope: 'bakend', verdicts: ['pint' => 'passed'], coverage: 'incomplete'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'bakend']);
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('no step carries the tag [bakend]')
+        ->and($output)->not->toContain('has not verified every step');
+});
+
+it('gives --server-verified the same answer for a tag no step carries', function (): void {
+    projectDeclaringSteps(['pint' => null]);
+    receiptStoreHolding(receipt(allVerified: false, scope: 'bakend', verdicts: ['pint' => 'passed'], coverage: 'incomplete'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify', ['--only' => 'bakend', '--server-verified' => true]);
+
+    expect($exit)->toBe(1)
+        ->and(Artisan::output())->toContain('no step carries the tag [bakend]');
+});
+
+it('refuses incomplete coverage on the bare call before blaming a step', function (): void {
+    // Every recorded step passed, so the verdict map explains nothing. Coverage
+    // does: the walk dropped a gate the config declared.
+    receiptStoreHolding(receipt(allVerified: false, verdicts: ['fmt' => 'passed'], coverage: 'incomplete'));
+    treeReporting('tree-a');
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('did not cover the config')
+        ->and($output)->not->toContain('has not verified every step');
+});
+
 it('treats a blank --only as no question about scope at all', function (): void {
     receiptStoreHolding(receipt(scope: 'backend'));
     treeReporting('tree-a');

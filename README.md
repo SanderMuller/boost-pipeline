@@ -101,6 +101,10 @@ Five phases ship, in this order, empty until you add steps: `Refactoring`, `Form
 formatter formats the result, analysis reads it, tests exercise it. Steps run in phase order, then
 in declaration order within a phase, so the order of your `in()` calls changes nothing.
 
+A step whose command is scoped to a diff, such as a linter over `git diff --name-only`, exits 0
+having checked nothing when the diff is empty. Declare that scope with `->inspecting(...)` so the
+verdict says how many files it looked at; see "The trap worth knowing" below.
+
 Give a step an explicit `id` when several invoke the same skill or command. Ids name the log files,
 and a duplicate throws when the run opens. `.config/` sits outside most analysed paths, so add it to
 your PHPStan `paths` and pass it to Pint explicitly (`vendor/bin/pint --test . .config`).
@@ -143,9 +147,12 @@ $steps->in(Formatting::class)
     );
 ```
 
-Then `open_run(only: "backend")`. An untagged step runs in every scope, matching is case-sensitive,
-and a tag no step carries blocks the run rather than quietly narrowing. `pipeline:verify` exits 1
-after a scoped run unless you pass the same `--only=`.
+Then `open_run(only: "backend")`. An untagged step runs in every scope, and matching is
+case-sensitive. A tag no step carries does not refuse: the run opens, walks only the untagged
+steps, and writes a receipt. `open_run` returns a notice naming the tag, `all_verified` stays
+false, and the receipt records `coverage: "incomplete"`, so `pipeline:verify` exits 1 for it.
+The guard is the coverage record, not a refusal. `pipeline:verify` exits 1 after a scoped run
+unless you pass the same `--only=`.
 
 ### Per-step timeouts
 
@@ -215,7 +222,10 @@ explained away. Only a pass records a tree, so fixing a blocked step and retryin
 
 ## Letting something else read the run
 
-Run state lives in the server process. A receipt goes to
+Run state lives in the server process. Anything that restarts that process, such as a client
+reconnect after an edit to `.config/pipeline.php`, forgets every open run: `status` then answers
+`No run is open`, and only the receipt and `pipeline:history` still describe the walk that just
+finished. A receipt goes to
 `storage/logs/pipeline/receipts/<pipeline>.json`
 after each resolution, and `php artisan pipeline:verify` turns it into an exit code.
 
@@ -256,7 +266,7 @@ which scope you asked about. So a frontend-scoped run can name a backend step as
 gate refuses over only the frontend one, and can report `all_verified: true` alongside it: the
 config has a problem elsewhere, and this scope is verified.
 
-A tag no step carries is the one case that still blocks a run whatever its scope. Nothing is dropped
+A tag no step carries is the one case that still fails `pipeline:verify` whatever its scope. Nothing is dropped
 there: the walk becomes every untagged step and those pass, so a mistyped tag would otherwise report
 a verified run for a scope that was never checked.
 
