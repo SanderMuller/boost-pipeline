@@ -10,6 +10,18 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.16.1 - 2026-09-02
+
+### Fixed
+
+- `pipeline:verify --only=<tag>` on a run whose tag no step carries said "has not verified every step" and named none. The run had verified every step it held; the scope covered nothing. The command now checks coverage on the bare call as well as under `--server-verified`, and when the config on disk confirms that no step carries the tag, it says so and points at the spelling. Exit codes are unchanged. A receipt with no coverage field is still tolerated by the bare call and still refused by `--server-verified`.
+
+### Changed
+
+- The README said a tag no step carries blocks the run. It does not: the run opens, walks the untagged steps, returns a notice, and writes a receipt with `coverage: "incomplete"` and `all_verified: false`, so `pipeline:verify` exits 1. The README now describes that, notes that a server restart forgets every open run so `status` cannot answer for a walk that just finished while the receipt and `pipeline:history` can, and points at `inspecting()` from the Configure section.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.16.0...0.16.1
+
 ## v0.16.0 - 2026-08-31
 
 A scoped run now answers for the scope it claimed, rather than for the whole config. This is the
@@ -517,6 +529,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -662,6 +675,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -737,6 +751,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -747,6 +762,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -896,6 +912,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -949,10 +966,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -1072,9 +1091,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1240,6 +1261,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1328,6 +1350,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1617,6 +1640,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1674,6 +1698,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
