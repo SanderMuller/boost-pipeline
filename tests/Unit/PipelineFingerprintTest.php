@@ -178,6 +178,26 @@ it('does NOT change when a Shell description is set without touching the command
     expect($labelled)->toBe($bare);
 });
 
+it('does NOT change when only the purpose changes', function (): void {
+    // A purpose is a label, for the same reason the pipeline name is not an input:
+    // it says which question the pipeline answers, never what it would run. Hashing
+    // it would expire every receipt on disk the day someone reworded a sentence,
+    // and a gate that fails with nothing wrong gets switched off.
+    $described = Pipeline::configure()
+        ->withPurpose('Check the work in progress.')
+        ->withSteps(baselineDeclaration());
+
+    $reworded = Pipeline::configure()
+        ->withPurpose('Confirm the branch is ready to review.')
+        ->withSteps(baselineDeclaration());
+
+    $bare = Pipeline::configure()->withSteps(baselineDeclaration());
+
+    expect(PipelineFingerprint::for($described))
+        ->toBe(PipelineFingerprint::for($reworded))
+        ->and(PipelineFingerprint::for($described))->toBe(PipelineFingerprint::for($bare));
+});
+
 it('reaches the walk, and every scope of one pipeline carries the same digest', function (): void {
     // The walk carries the digest but must never compute it. A digest derived from
     // the walk's own steps would describe the SELECTED scope, so a scoped run would

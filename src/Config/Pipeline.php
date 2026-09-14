@@ -26,6 +26,8 @@ final class Pipeline
 
     private ?float $timeoutSeconds = null;
 
+    private ?string $purpose = null;
+
     private function __construct()
     {
         $this->phases = new Phases;
@@ -79,6 +81,38 @@ final class Pipeline
     public function timeoutSeconds(): ?float
     {
         return $this->timeoutSeconds;
+    }
+
+    /**
+     * The one question this pipeline answers.
+     *
+     * A project declaring several pipelines has to pick one before it can open a
+     * run, and the step list is a poor way to make that choice: two pipelines
+     * built from the same closures differ in the one or two steps that decide
+     * which question they answer, and telling them apart means reading both.
+     * This is where a config says it in a sentence instead.
+     *
+     * Deliberately NOT part of the declaration digest. It says which question the
+     * pipeline answers, never what it would run, so rewording it must not expire
+     * the receipts on disk.
+     */
+    public function withPurpose(string $purpose): self
+    {
+        $purpose = trim($purpose);
+
+        if ($purpose === '') {
+            throw InvalidPipelineConfigException::purposeIsBlank();
+        }
+
+        $this->purpose = $purpose;
+
+        return $this;
+    }
+
+    /** Null when the config declared none, which every config did before this existed. */
+    public function purpose(): ?string
+    {
+        return $this->purpose;
     }
 
     public function phases(): Phases

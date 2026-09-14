@@ -189,3 +189,16 @@ it('refuses a negative or zero per-step timeout too', function (): void {
         ->and(fn (): Shell => Shell::run('true')->timeout(-5))
         ->toThrow(InvalidPipelineConfigException::class);
 });
+
+it('carries no purpose until one is declared, and trims the one it is given', function (): void {
+    expect(Pipeline::configure()->purpose())->toBeNull()
+        ->and(Pipeline::configure()->withPurpose('  Check the work in progress.  ')->purpose())
+        ->toBe('Check the work in progress.');
+});
+
+it('refuses a blank purpose rather than reporting an empty one', function (): void {
+    // Declaring none is an honest answer the listing reports in words. An empty
+    // string is the same absence dressed as a declaration.
+    expect(fn (): Pipeline => Pipeline::configure()->withPurpose('   '))
+        ->toThrow(InvalidPipelineConfigException::class, 'cannot be blank');
+});

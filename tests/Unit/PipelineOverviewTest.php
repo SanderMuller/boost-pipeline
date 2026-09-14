@@ -309,3 +309,19 @@ it('flags a run still in flight that is walking a stale declaration', function (
 
     expect(data_get(overviewFor($this->root, twoSteps(...))->forPipeline('default'), 'live.config_matches'))->toBeFalse();
 });
+
+it('keeps a numeric tag a string, which PHP array keys do not', function (): void {
+    // `tagged()` only refuses a blank tag, so `tagged('2')` is a legal config. A
+    // tag collected as an array key to dedupe it comes back as an INT, because PHP
+    // coerces numeric-string keys — the same hazard `Receipt::readVerdicts()`
+    // already guards for step ids. `scopes` is declared `list<string>` and read by
+    // consumers under strict_types, so the coercion makes the type a lie.
+    $overview = overviewFor($this->root, function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt')->tagged('2'));
+        $steps->in(StaticAnalysis::class)->append(Shell::run('true', id: 'analyse')->tagged('backend'));
+    });
+
+    $scopes = $overview->declarations()[0]['scopes'];
+
+    expect($scopes)->toBe(['2', 'backend']);
+});

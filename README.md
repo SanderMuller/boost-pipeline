@@ -125,8 +125,12 @@ Return a map when a project asks its code more than one question:
 
 ```php
 return [
-    'pr' => Pipeline::configure()->…, 
-    'release' => Pipeline::configure()->…,
+    'pr' => Pipeline::configure()
+        ->withPurpose('Confirm the branch is ready to review.')
+        ->…,
+    'release' => Pipeline::configure()
+        ->withPurpose('Confirm the tag is safe to publish.')
+        ->…,
 ];
 ```
 
@@ -134,6 +138,12 @@ A file returning a single `Pipeline` keeps working and is named `default`. Each 
 own steps, cursor and receipt, so ids only have to be unique within one. Where a map is declared the
 name is **required** on every call and never guessed — otherwise the wrong cursor advances
 invisibly.
+
+`withPurpose()` is optional and says which question the pipeline answers, in one sentence.
+Pipelines are often built from the same closures and differ in the step or two that decides what
+they are for, so the step list is a poor way to choose between them. `php artisan pipeline:list`
+prints it. It is **not** part of the declaration digest: rewording it changes nothing a run would
+do, and a digest that moved on an edited sentence would expire every receipt on disk.
 
 ### Running only part of the pipeline
 
@@ -290,6 +300,34 @@ bare call would shrug. A receipt that predates a field it needs is refused; so i
 declaration this version cannot reproduce. Both mean the same thing (this run cannot say what it
 walked), and both clear themselves on the next run. Expect one refusal per pipeline the first time
 you call it after upgrading.
+
+## Reading what the pipelines are
+
+`php artisan pipeline:list` prints every declared pipeline, the question it answers, the steps it
+would walk, and the values `--only` accepts.
+
+```bash
+php artisan pipeline:list
+```
+
+```
+  pr .................................. Confirm the branch is ready to review.
+  --only accepts ........................................... backend, frontend
+
+  pint parallel ......................................... Formatting · backend
+  lint parallel ........................................ Formatting · frontend
+  suite .................................................. Tests · every scope
+```
+
+`every scope` is the untagged case stated rather than implied. An untagged step is selected
+whatever the selection, so `--only=frontend` above runs `lint` **and** `suite`. The tag list is not
+a partition of the steps.
+
+It is the one command that reads no record, so it describes a pipeline that has never run — which
+`pipeline:verify` and `pipeline:history` cannot, because both start from a stored one. It also
+reports a step declared into a phase that is not registered, since that step reads as part of the
+pipeline and never runs. Point your agent instructions at this command instead of restating the
+config in a table that drifts from it.
 
 ## Reading what the runs did
 

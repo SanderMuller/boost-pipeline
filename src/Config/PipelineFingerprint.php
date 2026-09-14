@@ -25,7 +25,10 @@ use SanderMuller\BoostPipeline\Steps\Skill;
  *
  * It describes a declaration, not an identity — the pipeline's name is not an
  * input. Two pipelines declaring the same steps share a digest, which is correct:
- * the question is what would run, not what it is called.
+ * the question is what would run, not what it is called. Its `purpose` is out for
+ * the same reason, and the stakes are higher there because it is prose somebody
+ * will reword: a digest that moved on an edited sentence would expire every
+ * receipt on disk and fail a gate with nothing wrong.
  *
  * DETERMINISM IS THE CONSUMER'S SIDE OF THE BARGAIN. The config file is arbitrary
  * PHP, so any value here can be computed at load time from the environment, the

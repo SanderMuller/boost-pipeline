@@ -13,6 +13,7 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Console\HistoryCommand;
+use SanderMuller\BoostPipeline\Console\ListCommand;
 use SanderMuller\BoostPipeline\Console\VerifyCommand;
 use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
@@ -271,7 +272,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         // project with no pipeline should get a clear "nothing has been verified",
         // not "command not found".
         if ($this->app->runningInConsole()) {
-            $this->commands([VerifyCommand::class, HistoryCommand::class]);
+            $this->commands([VerifyCommand::class, HistoryCommand::class, ListCommand::class]);
         }
 
         if ($this->app->runningInConsole()) {

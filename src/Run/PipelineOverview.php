@@ -12,19 +12,22 @@ use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
 
 /**
- * @phpstan-type StepRow array{id: string, phase: string, kind: string, description: string, verdict: string|null, log: string|null}
+ * @phpstan-type StepRow array{id: string, phase: string, kind: string, description: string, tags: list<string>, verdict: string|null, log: string|null}
  * @phpstan-type PositionRow array{phase: string, parallel: bool, steps: non-empty-list<StepRow>}
  * @phpstan-type UndeclaredRow array{id: string, verdict: string, log: string|null}
  * @phpstan-type RunRow array{run: string, state: string, all_verified: bool, stale: string|null, scope: string|null, recorded_at: string, coverage: string|null, tree_matches: bool|null, config_matches: bool|null, positions: list<PositionRow>, undeclared: list<UndeclaredRow>}
  * @phpstan-type LiveRow array{run: string, state: string, steps: list<string>, scope: string|null, started_at: string, interrupted: bool, config_matches: bool|null}
  * @phpstan-type HistoryRow array{run: string, state: string, all_verified: bool, scope: string|null, recorded_at: string, tree_matches: bool|null, config_matches: bool|null, verdicts: array<string, int>}
  * @phpstan-type PipelineRow array{pipeline: string, current: RunRow|null, live: LiveRow|null, history: list<HistoryRow>}
+ * @phpstan-type DeclarationRow array{pipeline: string, purpose: string|null, scopes: list<string>, positions: list<PositionRow>, dropped: list<array{id: string, phase: string}>}
  *
  * What a reader should be told about each declared pipeline.
  *
- * One answer, two surfaces: the page polls it and `pipeline:history` prints it.
- * Two readers of the same files would drift, and the first symptom is a terminal
- * and a browser disagreeing about one run.
+ * One answer, three surfaces: the page polls it, `pipeline:history` prints it,
+ * and `pipeline:list` prints the declaration half alone. Two readers of the same
+ * files would drift, and the first symptom is a terminal and a browser
+ * disagreeing about one run — or, for the declaration half, two commands
+ * disagreeing about which steps share a position.
  *
  * Everything it returns is a plain array. The stores and the walk are the
  * contracts; this is a projection over them, not a third thing to keep in step.
@@ -134,6 +137,75 @@ final readonly class PipelineOverview
     }
 
     /**
+     * What each declared pipeline would do, with no run behind it.
+     *
+     * The other methods here answer "what happened", and every one of them starts
+     * from a stored record — so a pipeline that has never run has nothing to say
+     * through them, which is exactly the pipeline a reader choosing between
+     * several most needs described. This reads the config alone: no receipt, no
+     * history, no live record.
+     *
+     * Unscoped, always. A scoped walk would describe one selection while the
+     * listing's whole job is to show which selections exist.
+     *
+     * @return list<DeclarationRow>
+     */
+    public function declarations(): array
+    {
+        return array_map($this->declarationOf(...), $this->pipelines->names());
+    }
+
+    /** @return DeclarationRow */
+    private function declarationOf(string $name): array
+    {
+        $pipeline = $this->pipelines->get($name);
+        $walk = $pipeline instanceof Pipeline ? $pipeline->walk() : null;
+        $steps = $walk instanceof Walk ? $walk->steps : [];
+
+        return [
+            'pipeline' => $name,
+            'purpose' => $pipeline instanceof Pipeline ? $pipeline->purpose() : null,
+            'scopes' => $this->scopes($steps),
+            'positions' => $this->positions($steps, [], []),
+            // A step declared into an unregistered phase never runs. Omitting it
+            // would let the listing describe a pipeline that does more than it
+            // does, which is the one way a listing can actively mislead.
+            'dropped' => $walk instanceof Walk ? $walk->dropped : [],
+        ];
+    }
+
+    /**
+     * Every tag some step carries, sorted, without repeats.
+     *
+     * These are the values `--only` accepts. Derived rather than declared: a tag
+     * exists because a step carries it, so a separate list would be a second
+     * source of truth that can disagree with the steps.
+     *
+     * @param  list<WalkStep>  $steps
+     * @return list<string>
+     */
+    private function scopes(array $steps): array
+    {
+        $tags = [];
+
+        foreach ($steps as $walkStep) {
+            foreach ($walkStep->step->tags() as $tag) {
+                $tags[$tag] = true;
+            }
+        }
+
+        // Cast back, because a tag of "2" arrives as an int: PHP coerces
+        // numeric-string array keys, and dedupe here needs keys. `tagged()`
+        // refuses only a blank tag, so a numeric one is a legal config, and this
+        // list is declared `list<string>` for consumers reading it under
+        // strict_types. Same coercion `Receipt::readVerdicts()` undoes for ids.
+        $scopes = array_map(static fn (string|int $tag): string => (string) $tag, array_keys($tags));
+        sort($scopes);
+
+        return $scopes;
+    }
+
+    /**
      * @param  array<string, string|null>  $logs
      * @return RunRow
      */
@@ -153,7 +225,7 @@ final readonly class PipelineOverview
             'coverage' => $receipt->coverage,
             'tree_matches' => $this->treeMatches($receipt),
             'config_matches' => $this->configMatches($name, $receipt),
-            'positions' => $this->positions($steps, $receipt, $logs),
+            'positions' => $this->positions($steps, $receipt->verdicts, $logs),
             'undeclared' => $this->undeclared($steps, $receipt, $logs),
         ];
     }
@@ -166,11 +238,16 @@ final readonly class PipelineOverview
      * nothing stores the step list a past run walked. A step added since shows as
      * never run, and one removed since surfaces under `undeclared`.
      *
+     * Verdicts and logs arrive as maps rather than as a `Receipt`, so the same
+     * grouping serves a declaration that has no run behind it. Both are empty
+     * there, and every step reads as never run — which is the truth.
+     *
      * @param  list<WalkStep>  $steps
+     * @param  array<string, string>  $verdicts
      * @param  array<string, string|null>  $logs
      * @return list<PositionRow>
      */
-    private function positions(array $steps, Receipt $receipt, array $logs): array
+    private function positions(array $steps, array $verdicts, array $logs): array
     {
         $positions = [];
 
@@ -187,7 +264,10 @@ final readonly class PipelineOverview
                 'phase' => $walkStep->phaseName,
                 'kind' => $walkStep->step->kind()->value,
                 'description' => $walkStep->step->description(),
-                'verdict' => $receipt->verdicts[$walkStep->step->id()] ?? null,
+                // The scopes this step belongs to, which is the one thing a reader
+                // cannot work out from a step list: it decides what `--only` runs.
+                'tags' => $walkStep->step->tags(),
+                'verdict' => $verdicts[$walkStep->step->id()] ?? null,
                 'log' => $logs[$walkStep->step->id()] ?? null,
             ];
         }

@@ -90,4 +90,9 @@ final class InvalidPipelineConfigException extends RuntimeException
     {
         return new self("A step timeout must be greater than zero, got {$seconds}. Symfony's process runner treats zero as no limit at all, so it would remove the ceiling rather than tighten it — and a step that never returns holds the tool call open until the client gives up.");
     }
+
+    public static function purposeIsBlank(): self
+    {
+        return new self('A pipeline purpose cannot be blank. It exists so a reader can tell which question this pipeline answers, and a blank one is worse than none: `pipeline:list` reports a pipeline that declares no purpose, and an empty string turns that honest answer into an empty column. Leave `withPurpose()` off instead.');
+    }
 }
