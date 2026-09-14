@@ -10,6 +10,80 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.17.0 - 2026-09-14
+
+A project declaring several pipelines can now say which question each one answers, and print what
+any of them would walk without running anything first.
+
+### Added
+
+- **`Pipeline::withPurpose()` records the one question a pipeline answers.** Pipelines are often
+  built from the same closures and differ in the step or two that decides what they are for, so the
+  step list is a poor way to choose between them. This is where a config says it in a sentence
+  instead.
+  
+  It is optional, it is trimmed, and it refuses a blank string. Declaring no purpose is an honest
+  answer that `pipeline:list` reports in words; an empty one is the same absence dressed as a
+  declaration.
+  
+  It is deliberately **not** an input to the declaration digest. The digest answers what would run,
+  and a purpose never changes that — the pipeline's name is already excluded on the same reasoning.
+  The stakes are higher here because this is prose somebody will reword, and a digest that moved on
+  an edited sentence would expire every receipt on disk and fail a gate with nothing wrong.
+  
+- **`pipeline:list` prints every declared pipeline, the question it answers, the steps it would
+  walk, and the values `--only` accepts.** It is the one command that reads no record.
+  `pipeline:verify` gates on the current receipt and `pipeline:history` reports past runs, so both
+  are silent about a pipeline that has never run — which is the pipeline someone choosing between
+  several most needs described.
+  
+  Point your agent instructions at it rather than restating the config in a table that drifts from
+  it.
+  
+  ```
+    pr .................................. Confirm the branch is ready to review.
+    --only accepts ........................................... backend, frontend
+  
+    pint parallel ......................................... Formatting · backend
+    lint parallel ........................................ Formatting · frontend
+    suite .................................................. Tests · every scope
+  
+  ```
+  Two things it states rather than implies. An untagged step is selected in **every** scope, so
+  `--only=frontend` above runs `lint` and `suite` both; printing nothing after the phase left that
+  to inference, and the available inference is the opposite one. And a step declared into a phase
+  that is not registered is reported too, because it reads as part of the pipeline and never runs.
+  
+  Like `pipeline:history`, it reports rather than gates, and exits 0 for every answer it can give.
+  
+
+### Fixed
+
+- **The `boost-pipeline` view namespace is registered whether or not the page is routed.** Naming a
+  view namespace registers a hint on the view finder and does nothing else, so there was nothing to
+  gate — but it was declared inside the UI route registration, behind a declared pipeline config and
+  the page being both enabled and local. The namespace therefore existed only when the page was
+  reachable, and anything resolving `boost-pipeline::page` in any other context saw no such view.
+  
+  Whether the page is reachable is still answered by the routes, and those guards are unchanged.
+  
+
+### Internal
+
+- **`PipelineOverview` gained a `declarations()` projection, and its exported `StepRow` gained a
+  `tags` key.** Both surfaces that already read that row — the page and `pipeline:history` — index
+  it by name, so the added key changes nothing for them. Code that *constructs* a `StepRow` from the
+  imported type rather than reading one will need the new key.
+  
+- **Distinct tags come back as strings.** Collecting tags to deduplicate them returned an `int` for
+  a numeric tag such as `2`, because PHP coerces numeric-string array keys, while the list is
+  declared `list<string>`.
+  
+
+No migration is required, so `UPGRADING.md` carries no entry for this release.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.16.1...v0.17.0
+
 ## v0.16.1 - 2026-09-02
 
 ### Fixed
@@ -530,6 +604,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -676,6 +751,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -752,6 +828,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -762,6 +839,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -913,6 +991,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -967,10 +1046,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -1092,9 +1173,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1262,6 +1345,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1350,6 +1434,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1641,6 +1726,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1698,6 +1784,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
