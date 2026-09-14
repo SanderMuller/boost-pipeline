@@ -79,6 +79,29 @@ it('registers no route when the project declares no pipeline', function (): void
     expect(Route::has('boost-pipeline.page'))->toBeFalse();
 });
 
+it('names its view namespace even where no route is registered', function (string $view): void {
+    // Declaring where the package's views live is not a routing decision. It was
+    // made inside the route registration, so the namespace existed only when the
+    // page was reachable — and a tool that resolves `boost-pipeline::page`
+    // through a booted app saw no such view in every other case. Static analysis
+    // is one such tool, and it read the controller as passing a plain string
+    // where a view-string was required.
+    @unlink(app()->basePath('.config/pipeline.php'));
+
+    config()->set('boost-pipeline.ui.enabled', false);
+    app()->instance('env', 'production');
+    app()->instance(Registrar::class, new Registrar);
+
+    new BoostPipelineServiceProvider(app())->boot();
+
+    // The name arrives as a dataset value rather than a literal. Written inline,
+    // static analysis resolves it through the same booted app the fix repairs and
+    // reports the call as always true — which is the fix working, but it leaves
+    // the assertion constant-folded rather than exercised.
+    expect(view()->exists($view))->toBeTrue()
+        ->and(Route::has('boost-pipeline.page'))->toBeFalse();
+})->with([['boost-pipeline::page']]);
+
 it('registers both routes when asked for and local', function (): void {
     bootUi(enabled: true, environment: 'local');
 

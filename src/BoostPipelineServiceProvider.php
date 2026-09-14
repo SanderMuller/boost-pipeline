@@ -281,6 +281,17 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             ], 'boost-pipeline-config');
         }
 
+        // Unconditional, and deliberately above every guard below. Naming a view
+        // namespace declares where this package's own views live; it registers a
+        // hint on the view finder and does nothing else, so there is nothing to
+        // gate. Registering it beside the ROUTES made "these views exist" depend
+        // on the UI being routed, and the namespace was then absent in every
+        // other context — including static analysis, which resolves
+        // `boost-pipeline::page` through a booted app and reported the controller
+        // as passing a plain string where a view-string was required. Whether the
+        // page is reachable is a routing question, answered below.
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'boost-pipeline');
+
         // Registered in the package's own provider rather than a published
         // routes/ai.php, so a consuming app needs no extra file.
         if (! $this->app->make(PipelineLoader::class)->exists()) {
@@ -339,8 +350,6 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         if ($config->get(self::CONFIG.'.ui.enabled') !== true || ! $this->app->environment('local')) {
             return;
         }
-
-        $this->loadViewsFrom(__DIR__.'/../resources/views', 'boost-pipeline');
 
         // Published config is consumer-owned, so neither value is assumed to be
         // the shape this package shipped.
