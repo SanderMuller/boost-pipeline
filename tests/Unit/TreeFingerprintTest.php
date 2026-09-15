@@ -240,3 +240,33 @@ it('still produces a digest while a tracked file is deleted', function (): void 
 
     expect(TreeDigest::sameContent($this->fingerprint->capture(), $deleted))->toBeTrue();
 });
+
+it('records a broken symlink rather than reading it as absent', function (): void {
+    // `is_file()` follows the link, so a broken one looks deleted. A tracked
+    // broken symlink is legitimate — mode 120000, blob content is the target
+    // path — and dropping it would hash a tree containing it identically to a
+    // tree without it. Every other gap here fails toward refusing; this one would
+    // fail toward accepting, so the link test has to come first.
+    symlink('does-not-exist.txt', $this->repo.'/broken.link');
+    git($this->repo, 'add', '-A');
+    git($this->repo, 'commit', '--quiet', '-m', 'broken link');
+
+    $withLink = $this->fingerprint->capture();
+
+    unlink($this->repo.'/broken.link');
+
+    expect(TreeDigest::sameContent($this->fingerprint->capture(), $withLink))->toBeFalse();
+});
+
+it('notices a symlink repointed to a different target', function (): void {
+    symlink('one.txt', $this->repo.'/pointer.link');
+    git($this->repo, 'add', '-A');
+    git($this->repo, 'commit', '--quiet', '-m', 'pointer');
+
+    $before = $this->fingerprint->capture();
+
+    unlink($this->repo.'/pointer.link');
+    symlink('two.txt', $this->repo.'/pointer.link');
+
+    expect(TreeDigest::sameContent($this->fingerprint->capture(), $before))->toBeFalse();
+});
