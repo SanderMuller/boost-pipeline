@@ -19,6 +19,7 @@ use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\Run;
+use SanderMuller\BoostPipeline\Runner\TreeDigest;
 use SanderMuller\BoostPipeline\Steps\Shell;
 
 /**
@@ -961,7 +962,7 @@ it('lets one pipeline go stale without touching the other', function (): void {
         ->and(Artisan::call('pipeline:verify', ['--pipeline' => 'release']))
         ->toBe(1)
         ->and(Artisan::output())
-        ->toContain('verified a different working tree');
+        ->toContain('verified different code');
 });
 
 it('composes a pipeline, a scope and the server-verified question at once', function (): void {
@@ -1060,12 +1061,12 @@ it('says nothing about a legacy receipt when there is none', function (): void {
         ->and($output)->not->toContain('0.10.0');
 });
 
-it('names the moved commit at the gate, not only in the receipt', function (): void {
+it('clears committing at the gate, rather than offering it as a cause', function (): void {
     // The two messages reach different readers. `stale` reaches an agent mid-walk;
-    // this one reaches a person running the gate, typically right after merging a
-    // base branch in — the ordinary way to arrive here having changed no file.
-    // Reading "a different working tree" then sends them hunting for an edit that
-    // does not exist.
+    // this one reaches a person running the gate. It used to name a moved commit
+    // as a cause, because the digest keyed on HEAD. The digest reads content now,
+    // so the honest gate message says the opposite — committing cannot have done
+    // this — and names the causes that remain.
     receiptStoreHolding(receipt(tree: 'tree-a'));
     treeReporting('tree-b');
 
@@ -1073,9 +1074,9 @@ it('names the moved commit at the gate, not only in the receipt', function (): v
     $output = Artisan::output();
 
     expect($exit)->toBe(1)
-        ->and($output)->toContain('verified a different working tree')
-        ->and($output)->toContain('rebase')
-        ->and($output)->toContain('nothing to undo');
+        ->and($output)->toContain('verified different code')
+        ->and($output)->toContain('Committing is not a cause')
+        ->and($output)->toContain('rebase');
 });
 
 /**
@@ -1438,7 +1439,7 @@ it('lets the tree message win when both the tree and the declaration moved', fun
     $output = Artisan::output();
 
     expect($exit)->toBe(1)
-        ->and($output)->toContain('different working tree')
+        ->and($output)->toContain('verified different code')
         ->and($output)->not->toContain('not the declaration');
 });
 
@@ -1703,4 +1704,74 @@ it('does not blame a stale server for a run that simply never finished', functio
     expect($exit)->toBe(1)
         ->and($output)->toContain('[pint] failed')
         ->and($output)->not->toContain('reconnect the client');
+});
+
+/**
+ * The content digest survives a commit on purpose, which means it cannot say
+ * WHICH code was committed. These three pin the one combination that gap makes
+ * dangerous, and the two it must not touch.
+ */
+function digest(string $content, string $head, bool $clean): string
+{
+    return TreeDigest::compose($content, $head, $clean);
+}
+
+it('passes once everything is committed, though the commit moved', function (): void {
+    // The transition the content digest exists to allow. Same code, nothing
+    // outstanding, HEAD advanced — the walk that verified this is still an
+    // answer about exactly what would ship, and re-running it proves nothing.
+    receiptStoreHolding(receipt(tree: digest('same', 'head-before', false)));
+    treeReporting(digest('same', 'head-after', true));
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('passes mid-work, where nothing has been committed since the run', function (): void {
+    // Ordinary dirty-tree verification. The gate has always been allowed to
+    // answer this, and the new guard must not quietly take it away.
+    receiptStoreHolding(receipt(tree: digest('same', 'head-one', false)));
+    treeReporting(digest('same', 'head-one', false));
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('refuses a partial commit, where what is committed is not what was verified', function (): void {
+    // Content matches, so the receipt is honestly fresh: the code on disk is what
+    // ran. But only part of it was committed, so HEAD now carries something no
+    // walk has seen, and this gate is what stands between that and a push.
+    receiptStoreHolding(receipt(tree: digest('same', 'head-before', false)));
+    treeReporting(digest('same', 'head-after', false));
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('not what was verified')
+        ->and($output)->toContain('partial commit');
+});
+
+it('does not refuse a receipt it cannot read the commit from', function (): void {
+    // A receipt written by an older algorithm says nothing about what is being
+    // shipped. Refusing on silence would fail a gate that has nothing wrong.
+    receiptStoreHolding(receipt(tree: 'untagged-legacy-digest'));
+    treeReporting('untagged-legacy-digest');
+
+    expect(Artisan::call('pipeline:verify'))->toBe(0);
+});
+
+it('refuses a receipt whose digest this build cannot read, rather than assuming it still holds', function (): void {
+    // The upgrade case. The receipt made a claim about a tree, in a format from
+    // before the digest changed, so whether it describes the code on disk is
+    // unanswerable — and unanswerable is not yes. Distinct from a receipt that
+    // recorded NO fingerprint, which the bare call has always tolerated because
+    // there is then no claim to check.
+    receiptStoreHolding(receipt(tree: 'a1b2c3d4e5f60718'));
+    treeReporting(digest('now', 'head-one', true));
+
+    $exit = Artisan::call('pipeline:verify');
+    $output = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($output)->toContain('cannot read')
+        ->and($output)->toContain('expected once');
 });

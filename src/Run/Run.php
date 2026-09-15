@@ -16,6 +16,7 @@ use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
+use SanderMuller\BoostPipeline\Runner\TreeDigest;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\Walk;
@@ -504,7 +505,11 @@ final class Run
         $now = $this->tree?->capture();
 
         return [
-            'moved' => $now !== null && $this->lastSeen !== null && $now !== $this->lastSeen,
+            // Only `false` moves it. `sameContent` answers null when the two
+            // digests cannot be compared — a receipt from another algorithm, or a
+            // tree that could not be read — and reading that as movement would
+            // discard a run for a change that did not happen.
+            'moved' => TreeDigest::sameContent($now, $this->lastSeen) === false,
             'stale' => $this->staleGiven($now) !== null,
         ];
     }
@@ -520,9 +525,9 @@ final class Run
             // numeric-string array keys. Cast it back rather than crash on a legal id.
             $stepId = (string) $stepId;
 
-            if ($measuredAt !== null && $measuredAt !== $now) {
+            if (TreeDigest::sameContent($measuredAt, $now) === false) {
                 return sprintf(
-                    'Step [%s] measured a different working tree than the one on disk now, so its verdict is not proven for this code. Something edited files, or the commit moved (a commit, amend, checkout or rebase — the fingerprint covers HEAD too, so this needs no file to change and nothing to undo), or a step that rewrites code is missing ->mutating(), which belongs before the checks that must see it.%s Open a new run.',
+                    'Step [%s] measured different code than the one on disk now, so its verdict is not proven for this code. Something edited files, or a checkout or rebase brought different content in, or a step that rewrites code is missing ->mutating(), which belongs before the checks that must see it. Committing alone does not cause this: the fingerprint reads content, so staging and committing the same bytes leave it unchanged.%s Open a new run.',
                     $stepId,
                     // Naming a step in a group would read as identifying the writer.
                     // Every step in a group measures the same tree from before the
@@ -547,9 +552,7 @@ final class Run
             return false;
         }
 
-        $now = $this->tree->capture();
-
-        return $now !== null && $now !== $this->lastSeen;
+        return TreeDigest::sameContent($this->tree->capture(), $this->lastSeen) === false;
     }
 
     /**

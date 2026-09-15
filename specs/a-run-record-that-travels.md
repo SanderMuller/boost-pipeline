@@ -8,6 +8,14 @@ Nothing a run writes leaves the machine. The receipt sits under `storage/logs/`,
 gitignores, so a reviewer reading a pull request sees no record and a CI job has nothing to read. A
 PR checkbox saying the pipeline ran is therefore backed by nothing a second party can check.
 
+> **Superseded premise, read before implementing.** This spec was written while the tree
+> fingerprint keyed on `rev-parse HEAD` plus dirty contents. It now keys on tree CONTENT, so a
+> commit no longer moves it. Both STOP conditions still hold — a note still disturbs nothing, and
+> committing a receipt still adds a file and so still moves a content digest — but one consequence
+> reverses: a receipt written before the commit now describes the commit's tree, so `publish` no
+> longer implies a walk that ran *after* committing. The "refuse when the receipt does not describe
+> `HEAD`" rule below needs rewriting against `TreeDigest` before anyone builds it.
+
 This publishes the receipt as a **git note** on the commit, which travels with a push and does not
 disturb the tree fingerprint. It deliberately does not claim to prove that the steps ran: a local
 receipt is a self-report, and no mechanism inside this package can make one unforgeable. What it can

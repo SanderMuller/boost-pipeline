@@ -116,7 +116,7 @@ it('refuses to verify when a read-only step is the one that changed the tree', f
     $run->resolveCurrent();
     $run->resolveCurrent();
 
-    expect($run->staleReason())->toContain('Step [first] measured a different working tree')
+    expect($run->staleReason())->toContain('Step [first] measured different code')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -132,7 +132,7 @@ it('refuses to verify when the tree changed between two steps', function (): voi
 
     $run->resolveCurrent();
 
-    expect($run->staleReason())->toContain('Step [first] measured a different working tree')
+    expect($run->staleReason())->toContain('Step [first] measured different code')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -147,7 +147,7 @@ it('refuses to verify when the tree changed after the walk finished', function (
 
     $tree->value = 'edited-after';
 
-    expect($run->staleReason())->toContain('measured a different working tree')
+    expect($run->staleReason())->toContain('measured different code')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -209,7 +209,7 @@ it('refuses to verify when a rewriting step runs after a check already passed', 
     $run->resolveCurrent();
     $run->resolveCurrent();
 
-    expect($run->staleReason())->toContain('Step [checks] measured a different working tree')
+    expect($run->staleReason())->toContain('Step [checks] measured different code')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -361,7 +361,7 @@ it('refuses to verify when a numeric step id measured a tree that moved', functi
 
     $run->resolveCurrent();
 
-    expect($run->staleReason())->toContain('Step [123] measured a different working tree')
+    expect($run->staleReason())->toContain('Step [123] measured different code')
         ->and($run->allVerified())->toBeFalse();
 });
 
@@ -388,11 +388,12 @@ it('never reports verified and stale from different readings of the tree', funct
     expect($verification['all_verified'] && $verification['stale'] !== null)->toBeFalse();
 });
 
-it('names the moved commit as a cause, not just an edit', function (): void {
-    // The fingerprint is HEAD plus everything uncommitted, so a commit, amend,
-    // checkout or rebase moves it with no file changed and nothing to undo. A
-    // consumer who amended mid-walk went looking for an edit that never happened,
-    // because the message enumerated two causes for a three-cause condition.
+it('rules committing out as a cause rather than offering it as one', function (): void {
+    // The fingerprint was HEAD plus everything uncommitted, so a commit moved it
+    // with no file changed, and the message had to name that as a third cause.
+    // It reads content now, so committing cannot produce this at all — and a
+    // message still offering it would send a reader back through their history
+    // hunting for something that could not have done it.
     $tree = new SettableFingerprint;
     $run = Run::start(twoStepPipeline()->walk(), new AlwaysPasses, 'r-amend', $tree);
 
@@ -400,7 +401,7 @@ it('names the moved commit as a cause, not just an edit', function (): void {
 
     $tree->value = 'moved';
 
-    expect($run->staleReason())->toContain('the commit moved')
-        ->and($run->staleReason())->toContain('amend')
-        ->and($run->staleReason())->toContain('no file to change');
+    expect($run->staleReason())->toContain('Committing alone does not cause this')
+        ->and($run->staleReason())->toContain('checkout or rebase')
+        ->and($run->staleReason())->not->toContain('the commit moved');
 });

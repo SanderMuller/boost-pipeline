@@ -8,6 +8,7 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Runner\TreeDigest;
 use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
 
@@ -353,9 +354,10 @@ final readonly class PipelineOverview
             return null;
         }
 
-        $now = $this->tree->capture();
-
-        return $now === null ? null : $now === $receipt->tree;
+        // Content, not the whole digest. A receipt written before a commit still
+        // describes the code the commit carries, and reporting it as moved there
+        // was the false stale this projection exists to avoid.
+        return TreeDigest::sameContent($this->tree->capture(), $receipt->tree);
     }
 
     /**

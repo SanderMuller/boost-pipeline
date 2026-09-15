@@ -206,17 +206,33 @@ run would have walked but cannot run forces `all_verified: false`.
 
 ## A receipt is about the code that was there
 
-Each resolution fingerprints the tree: the commit plus the contents of everything dirty or
-untracked. Edit code after a run went green and `all_verified` flips to false, with a `stale` key
-saying so. `open_run` uses the same signal — it returns the open run while the tree sits still, and
-starts a fresh one once you change something, which is what makes the fix loop work.
+Each resolution fingerprints the tree by its **content**: every tracked path's bytes and mode, with
+uncommitted and untracked files counted as they are on disk. Edit code after a run went green and
+`all_verified` flips to false, with a `stale` key saying so. `open_run` uses the same signal — it
+returns the open run while the code sits still, and starts a fresh one once you change something,
+which is what makes the fix loop work.
 
-**Do not work in the repository while a walk is open.** A run holds a claim about one tree, and
-*any* git-visible change invalidates it — not only an edit. The commit is part of the fingerprint,
-so `git commit`, `--amend`, `checkout`, `rebase` and `stash` all move it with nothing on disk
-changed. That is the mechanism working, and it is worth knowing before it surprises you: finishing
-a step and committing the work feels like progress rather than a change, and it stales the run all
-the same. Nothing needs undoing when it happens — reopen against the commit you now have.
+**Committing does not stale a run.** `git add` and `git commit` change no code, so the fingerprint
+does not move: a suite that passed seconds before a commit still answers for the commit. That is
+deliberate, because verify, commit, gate is the order you actually work in — the walk is what makes
+it safe to commit, and the commit is what makes a receipt worth having. Undoing an edit also
+returns to the earlier fingerprint, so a change made and reverted leaves the run valid rather than
+permanently stale.
+
+**Do not edit the repository while a walk is open.** A run holds a claim about one set of bytes, so
+an edit, a `checkout`, a `rebase` or a `stash` that brings different content in all invalidate it.
+Nothing needs undoing when it happens — reopen against the code you now have.
+
+`pipeline:verify` asks one extra question the fingerprint deliberately cannot answer. Because the
+digest survives a commit, it cannot say *which* code was committed — so committing half a verified
+change leaves it honestly fresh while `HEAD` carries something no run has seen. The gate refuses
+exactly that one combination: the commit has moved since the run **and** the tree still holds
+uncommitted changes. Everything committed with the commit moved is the case this is all for, and
+passes.
+
+Gitignored paths stay outside the fingerprint, which is what makes it usable — the run writes its
+own logs while it runs. `.env` is outside it too, so a check whose result depends on one is not a
+pure function of the tree and nothing here can tell.
 
 A step that rewrites code declares it, so its own writes do not count against the run:
 

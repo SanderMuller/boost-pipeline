@@ -52,6 +52,19 @@ parameters:
     treatPhpDocTypesAsCertain: false
 
     ignoreErrors:
+        # SHA-1 in the tree fingerprint is git's blob FORMAT, not a security
+        # hash. The entry for a path has to equal the one git wrote into the
+        # index, or staging a file would move the digest for a change to
+        # nothing. Git hashes the files themselves (attributes and filters can
+        # rewrite the bytes on the way in, so the working copy is not always
+        # what git hashed); this covers the one case git cannot be asked about,
+        # a symlink, whose blob is simply its target path and which no filter
+        # touches. `TreeFingerprintTest` pins the equality both ways.
+        -
+            identifier: disallowed.function
+            message: '#^Calling hash(_init)?\(\) is forbidden#'
+            paths:
+                - src/Runner/GitTreeFingerprint.php
         -
             identifier: trait.unused
             reportUnmatched: false

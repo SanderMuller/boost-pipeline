@@ -18,6 +18,7 @@ use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunState;
+use SanderMuller\BoostPipeline\Runner\TreeDigest;
 
 /**
  * Answers "has this tree been verified?" with an exit code.
@@ -82,11 +83,37 @@ final class VerifyCommand extends Command
         // PR is the ordinary way to arrive here having changed no file.
         $now = $tree->capture();
 
-        if ($now !== null && $receipt->tree !== null && $receipt->tree !== $now) {
+        $sameCode = TreeDigest::sameContent($receipt->tree, $now);
+
+        if ($sameCode === false) {
             $this->components->error(sprintf(
-                'Run [%s] verified a different working tree, so its result does not describe this code. A commit, amend, checkout or rebase counts as much as an edit does — the fingerprint covers the commit — so there may be nothing to hunt for and nothing to undo. Open a new run.',
+                'Run [%s] verified different code, so its result does not describe what is on disk. Committing is not a cause — the fingerprint reads content, so staging and committing the same bytes leave it unchanged — but an edit, a checkout or a rebase that brings different content in is. Open a new run.',
                 $receipt->runId,
             ));
+
+            return self::FAILURE;
+        }
+
+        // Unknown is not clean, and here it is a refusal rather than a shrug. The
+        // bare call tolerates a receipt that recorded NO fingerprint, because
+        // there is then no claim to check. This is the other case: the receipt
+        // made a claim, in a format this build cannot reproduce, so whether it
+        // describes the code on disk is unanswerable — and an unanswerable
+        // question about what was verified cannot be answered yes. It costs one
+        // re-run on the release that changes the digest, once.
+        if ($sameCode === null && $receipt->tree !== null && $now !== null) {
+            $this->components->error(sprintf(
+                'Run [%s] recorded its tree in a format this version cannot read, so whether it describes the code on disk cannot be determined. This is expected once, on the release that changed the fingerprint. Open a new run.',
+                $receipt->runId,
+            ));
+
+            return self::FAILURE;
+        }
+
+        $shipping = $this->shippingMismatch($receipt, $now);
+
+        if ($shipping !== null) {
+            $this->components->error($shipping);
 
             return self::FAILURE;
         }
@@ -696,6 +723,43 @@ final class VerifyCommand extends Command
         } catch (InvalidPipelineConfigException) {
             return false;
         }
+    }
+
+    /**
+     * Whether what would ship differs from what was verified, and why.
+     *
+     * The one thing the content digest deliberately cannot see. It survives a
+     * commit because a commit changes no code — that is the point — but the
+     * consequence is that it also cannot tell WHICH code was committed. Commit
+     * half a verified change and the digest is still fresh, correctly: the code
+     * on disk is what ran. HEAD, however, now carries something no walk saw, and
+     * a gate reading exit 0 is about to ship exactly that.
+     *
+     * So it refuses one combination and only one: the tree holds something
+     * uncommitted AND the commit has moved since the run. Clean with a moved
+     * commit is the transition this whole digest exists to allow — everything
+     * committed, nothing outstanding, HEAD and disk and receipt all the same
+     * code. Dirty with an unchanged commit is ordinary mid-work verification,
+     * which a gate has always been allowed to answer.
+     *
+     * Unknown never refuses, on either half. A receipt from another algorithm and
+     * a tree that cannot be read both say nothing about what is being shipped,
+     * and refusing on silence would fail a gate that has nothing wrong with it.
+     */
+    private function shippingMismatch(Receipt $receipt, ?string $now): ?string
+    {
+        if (TreeDigest::sameCommit($receipt->tree, $now) !== false) {
+            return null;
+        }
+
+        if (TreeDigest::wasClean($now) !== false) {
+            return null;
+        }
+
+        return sprintf(
+            'Run [%s] verified the code on disk, but the commit has moved since and the tree still holds uncommitted changes. What is committed is therefore not what was verified — a partial commit does this — and this gate would pass while shipping code no run has seen. Commit the rest, or open a new run.',
+            $receipt->runId,
+        );
     }
 
     /**
