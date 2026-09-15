@@ -10,6 +10,76 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.18.0 - 2026-09-15
+
+Committing no longer throws away a green run. The tree fingerprint measured the commit; it measures
+the code now, so verifying and then committing what you verified costs one walk instead of two.
+
+**Every existing receipt is refused once.** The digest carries a format tag now, and one recorded
+before this release is in a format this version cannot read. `pipeline:verify` refuses it rather
+than assuming it still describes your code, and says so. Open a run; there is nothing to migrate.
+
+### Changed
+
+- **The tree fingerprint reads content, not the commit.** It keyed on `rev-parse HEAD` plus the raw
+  `git status` output, and both moved when no code changed — `git add` rewrites the status codes, a
+  commit advances `HEAD` and empties the dirty set. A suite that passed seconds before a commit was
+  void, and the only way forward was to run it again against identical bytes. That is the order the
+  work actually happens in: the walk is what makes it safe to commit, and the commit is what makes a
+  receipt worth having.
+  
+  It now records one entry per path — `path mode blob` — with the working tree replacing the index
+  for anything dirty and untracked files counted. The mode is in the entry because `chmod +x`
+  changes what a step invoked as `./script` does while changing no byte of it.
+  
+  Git does the hashing rather than the package. `.gitattributes` can put a filter between the
+  working tree and the blob: `* text=auto` stores LF-normalised bytes while the working copy holds
+  CRLF, and Git LFS replaces the content with a pointer. A value computed from the bytes on disk
+  would not equal the blob git wrote for those files, and staging one would move the digest
+  permanently — silently, as churn rather than as a wrong answer.
+  
+- **Undoing an edit returns to the earlier digest.** Content addressing makes a change made and
+  reverted leave a run valid, where a commit-keyed digest read it as stale from then on.
+  
+- **The stale message no longer offers a moved commit as a cause,** because it can no longer be
+  one. It previously sent a reader back through their history hunting for something that, as of this
+  release, cannot have done it.
+  
+
+### Added
+
+- **`pipeline:verify` refuses a partial commit.** Surviving a commit means the digest cannot say
+  *which* code was committed. Commit half a verified change and it stays honestly fresh — the code
+  on disk is what ran — while `HEAD` carries something no walk has seen, and a gate reading exit 0
+  would ship exactly that.
+  
+  It refuses one combination and only one: the commit has moved since the run **and** the tree still
+  holds uncommitted changes. Everything committed with the commit moved is the case this release
+  exists for and passes. Nothing committed since the run is ordinary mid-work verification, which
+  the gate has always answered.
+  
+- **The tree digest carries a format tag.** Without one, a digest from a different algorithm is
+  indistinguishable from a digest of different code, so changing what it measures would report "the
+  tree moved" to every consumer at once and blame a tree that never moved. Unknown is refused rather
+  than assumed, which is what makes this release's one forced re-run a clear message instead of a
+  confusing mismatch.
+  
+
+### Unchanged
+
+- **A custom `TreeFingerprint` binding is unaffected.** The contract is the same, and two digests
+  this package cannot parse are compared exactly as before. Only the shipped `GitTreeFingerprint`
+  changed.
+  
+- **Gitignored paths stay outside the fingerprint,** which is what makes it usable — a run writes
+  its own logs while it runs. `.env` is outside it for the same reason, so a check whose result
+  depends on one is not a pure function of the tree and nothing here can tell.
+  
+
+See `UPGRADING.md` for the full migration notes.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.17.0...v0.18.0
+
 ## v0.17.0 - 2026-09-14
 
 A project declaring several pipelines can now say which question each one answers, and print what
@@ -47,6 +117,7 @@ any of them would walk without running anything first.
     pint parallel ......................................... Formatting · backend
     lint parallel ........................................ Formatting · frontend
     suite .................................................. Tests · every scope
+  
   
   ```
   Two things it states rather than implies. An untagged step is selected in **every** scope, so
@@ -605,6 +676,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -752,6 +824,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -829,6 +902,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -839,6 +913,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -992,6 +1067,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -1047,10 +1123,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -1174,9 +1252,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1346,6 +1426,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1434,6 +1515,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1727,6 +1809,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1784,6 +1867,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
