@@ -1,5 +1,37 @@
 # Upgrading
 
+## From 0.17 to 0.18
+
+- **Every existing receipt is refused once, and one run fixes it.** The tree fingerprint changed
+  what it measures, so it carries a format tag now. A receipt recorded before this release holds a
+  digest this version cannot read, and `pipeline:verify` refuses it rather than assuming it still
+  describes your code — an unanswerable question about what was verified cannot be answered yes.
+  The message says this is expected on this release. Open a new run; there is nothing to migrate.
+
+- **Committing no longer stales a run, and that is the point of the release.** The digest keyed on
+  `rev-parse HEAD` plus the raw `git status` output, and both moved when no code changed: `git add`
+  rewrote the status codes, and a commit advanced `HEAD` and emptied the dirty set. A suite that
+  passed seconds before a commit was void. It reads content now — every tracked path's bytes and
+  mode, with uncommitted and untracked files as they are on disk — so staging and committing the
+  same bytes leave it alone.
+
+  Undoing an edit also returns to the earlier digest, so a change made and reverted leaves a run
+  valid rather than permanently stale.
+
+- **`pipeline:verify` refuses one new combination: a partial commit.** Surviving a commit means the
+  digest cannot say *which* code was committed. Commit half a verified change and it stays honestly
+  fresh — the code on disk is what ran — while `HEAD` carries something no walk has seen. The gate
+  now refuses when the commit has moved since the run **and** the tree still holds uncommitted
+  changes. Everything committed with the commit moved passes, which is the case this release
+  exists for, and nothing committed since the run is ordinary mid-work verification, which was
+  always allowed.
+
+  If you hit this, commit the rest or open a new run.
+
+- **A custom `TreeFingerprint` keeps working unchanged.** The contract is the same, and two digests
+  this package cannot parse are compared exactly as before. Only the shipped `GitTreeFingerprint`
+  changed.
+
 ## From 0.15 to 0.16
 
 - **A scoped run is no longer held back by a step dropped in a scope it never claimed.**
