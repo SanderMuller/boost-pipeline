@@ -217,3 +217,26 @@ it('stays invariant for a CRLF file under text=auto, which git stores normalised
     expect(TreeDigest::sameContent($unstaged, $staged))->toBeTrue()
         ->and(TreeDigest::sameContent($staged, $this->fingerprint->capture()))->toBeTrue();
 });
+
+it('still produces a digest while a tracked file is deleted', function (): void {
+    // A deleted path is in the dirty set, and handing it to `git hash-object`
+    // fails the whole batch — which would either make the digest unavailable for
+    // as long as any file is deleted, or record the fatal line as a hash. Its
+    // contribution is that its index entry is DROPPED: not replaced, not hashed.
+    file_put_contents($this->repo.'/second.php', "<?php // second\n");
+    git($this->repo, 'add', '-A');
+    git($this->repo, 'commit', '--quiet', '-m', 'two files');
+
+    $before = $this->fingerprint->capture();
+
+    unlink($this->repo.'/second.php');
+    $deleted = $this->fingerprint->capture();
+
+    expect($deleted)->not->toBeNull()
+        ->and(TreeDigest::sameContent($deleted, $before))->toBeFalse();
+
+    // And the deletion survives being staged, like any other change.
+    git($this->repo, 'add', '-A');
+
+    expect(TreeDigest::sameContent($this->fingerprint->capture(), $deleted))->toBeTrue();
+});
