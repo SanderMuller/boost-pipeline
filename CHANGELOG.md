@@ -10,6 +10,18 @@ on publish, so an entry written here before a release is duplicated by the secti
 adds — which happened at every release that had one. Unreleased work lives in the release notes
 draft until it ships.
 
+## v0.19.0 - 2026-09-17
+
+### Added
+
+- `laravel/mcp` 1.x is now accepted alongside 0.9. The constraint becomes `^0.9.4||^1.0`, and no package code changed: the surface this package uses — `Server`, `Tool`, `Prompt`, `Response`, `ResponseFactory`, `Request` and `Registrar::local()` — is the same on both lines, and none of the 1.0 removals (`Request::sessionId()`, the `SessionInitialized` event, `Server::CAPABILITY_UI`) was ever used. The new `_meta` and `Mcp-*` header rules apply to `Mcp::web()` routes, which this package does not register. The stdio server was exercised against 1.0.0 with both a legacy `initialize` client and a `server/discover` client; both get the tool list, so an existing client keeps working. The test matrix runs the suite against each end of the range.
+
+### Internal
+
+- `laravel/boost` moves to `^2.9` as a development dependency. `2.7.0` required `laravel/mcp ^0.7.1|^0.8.0|^0.9.0`, which held the development tree on 0.9.
+
+**Full Changelog**: https://github.com/SanderMuller/boost-pipeline/compare/v0.18.0...v0.19.0
+
 ## v0.18.0 - 2026-09-15
 
 Committing no longer throws away a green run. The tree fingerprint measured the commit; it measures
@@ -117,6 +129,7 @@ any of them would walk without running anything first.
     pint parallel ......................................... Formatting · backend
     lint parallel ........................................ Formatting · frontend
     suite .................................................. Tests · every scope
+  
   
   
   ```
@@ -677,6 +690,7 @@ consuming applications; no API removed and no verdict changed.
   
   
   
+  
   ```
 - **Dropped output is now reported as lost when no log holds it**, on every verdict — passed, failed
   and error. When the log write fails, the pointer is correctly absent and the bound still fires, so
@@ -825,6 +839,7 @@ Three pieces of adoption feedback on 0.10.0. No API changes.
   
   
   
+  
   ```
   Unchanged when there is no legacy file: a project that never ran an older version still gets the
   short message, because for it nothing has genuinely been verified.
@@ -903,6 +918,7 @@ had to answer all of them.
   
   
   
+  
   ```
   A file that returns a single `Pipeline` keeps working and is named `default`.
   
@@ -913,6 +929,7 @@ had to answer all of them.
   ```
   open_run(pipeline: "release")
   php artisan pipeline:verify --pipeline=release
+  
   
   
   
@@ -1068,6 +1085,7 @@ found by an independent review and each confirmed against a real receipt before 
   
   
   
+  
   ```
   Exit 0 alone never said which checks ran, so a caller skipping work on the strength of it could be
   skipping a check the pipeline does not hold. This does not close that gap — a pipeline declaring
@@ -1124,10 +1142,12 @@ hear yes to it. This release adds the narrower question, with the guards that an
   
   
   
+  
   ```
   ```
   Run [r-4f2a] passed all 6 step(s) the server verified against this tree. 2 step(s) were only
   acknowledged and are not counted, so this is not a claim that the tree is verified.
+  
   
   
   
@@ -1253,9 +1273,11 @@ migration.
   
   
   
+  
   ```
   ```
   open_run(only: "backend")
+  
   
   
   
@@ -1427,6 +1449,7 @@ migration.
   
   
   
+  
   ```
   One `next_step` call runs both and returns both verdicts. Three commands running at once is still
   one thing in front of the agent, so the one-step-at-a-time guarantee is untouched.
@@ -1515,6 +1538,7 @@ migration.
           instruction: 'Review the error handling in files changed since main. Ignore style and tests.'))
       ->append(Skill::run('/code-review', id: 'tests',
           instruction: 'Judge whether the tests would catch a regression in this change.'));
+  
   
   
   
@@ -1810,6 +1834,7 @@ migration of each one.
   
   
   
+  
   ```
   A run whose skill steps all carry proofs can reach `all_verified`, which was impossible for any
   configuration with an `Agent` phase.
@@ -1867,6 +1892,7 @@ applies to itself a check it had only been recommending.
   
   ```bash
   vendor/bin/pint --test . .config
+  
   
   
   
