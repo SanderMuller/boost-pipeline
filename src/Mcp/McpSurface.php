@@ -12,14 +12,14 @@ use Laravel\Mcp\Server\Registrar;
 use Laravel\Mcp\Server\Tool;
 
 /**
- * Checks the `laravel/mcp` 0.x surface this package depends on actually
+ * Checks the `laravel/mcp` surface this package depends on actually
  * exists, before the boot-time gate leans on it.
  *
- * A 0.x minor "may move any of these without ceremony" (see
- * `.ai/docs/laravel-mcp-notes.md`), and a moved symbol currently produces a
- * raw PHP fatal on the stdio stream — the JSON-RPC channel a client cannot
- * parse a fatal from. This check turns that fatal into a declined
- * registration and a stderr line instead.
+ * The constraint spans `^0.9.4||^1.0`, and a 0.x minor "may move any of
+ * these without ceremony" (see `.ai/docs/laravel-mcp-notes.md`). A moved
+ * symbol currently produces a raw PHP fatal on the stdio stream — the
+ * JSON-RPC channel a client cannot parse a fatal from. This check turns that
+ * fatal into a declined registration and a stderr line instead.
  *
  * `Server\Testing\*` is dev-only and deliberately absent from the
  * production list below — it is never touched at boot.

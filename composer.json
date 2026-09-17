@@ -25,13 +25,13 @@
         "illuminate/console": "^12.41.1||^13.0",
         "illuminate/contracts": "^12.41.1||^13.0",
         "illuminate/support": "^12.41.1||^13.0",
-        "laravel/mcp": "^0.9.4",
+        "laravel/mcp": "^0.9.4||^1.0",
         "symfony/process": "^7.0||^8.0"
     },
     "require-dev": {
         "driftingly/rector-laravel": "^2.5",
         "larastan/larastan": "^3.10",
-        "laravel/boost": "^2.0",
+        "laravel/boost": "^2.9",
         "laravel/pao": "^1.0",
         "laravel/pint": "^1.29",
         "nunomaduro/collision": "^8.0",

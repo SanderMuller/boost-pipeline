@@ -530,7 +530,7 @@ None of these are quietly handled somewhere. If a row matters to you, budget rea
 
 - PHP 8.4+
 - Laravel 12.41+ or 13
-- `laravel/mcp`, currently 0.9.x and pre-1.0, so its API may move between minor releases
+- `laravel/mcp` 0.9.4+ or 1.x. The 0.9 line is pre-1.0, so its API may move between minor releases
 
 ## Testing
 

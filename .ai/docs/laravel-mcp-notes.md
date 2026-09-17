@@ -1,13 +1,14 @@
 # `laravel/mcp` notes
 
-Facts about the dependency that cost time to establish, each verified against
-`vendor/laravel/mcp` at **v0.9.4**. Read this before changing anything in `src/Mcp/` or writing
-a test that goes through the server.
+Facts about the dependency that cost time to establish. They were established against
+`vendor/laravel/mcp` at **v0.9.4**, the declared floor. The symbol list below and every cited
+file line were re-checked at **v1.0.0**, and the line numbers are the v1.0.0 ones. Read this
+before changing anything in `src/Mcp/` or writing a test that goes through the server.
 
-## It is pre-1.0, and the design leans on its 0.x surface
+## The design leans on a narrow surface, and the 0.9 floor is pre-1.0
 
-`laravel/mcp` is `v0.9.4`. It is a direct requirement here, constrained to `^0.9.4`, but a 0.x
-minor may move any of these without ceremony:
+`laravel/mcp` is a direct requirement here, constrained to `^0.9.4||^1.0`. Both lines expose the
+same symbols the design uses, but a 0.x minor may move any of them without ceremony:
 
 `Facades\Mcp` · `Registrar::local()` · `Server` · `Server\Tool` · `Server\Prompt` ·
 `Response::error()` · `Response::structured()` · `Tool::annotations()` ·
@@ -34,7 +35,7 @@ work-around-it.
 
 The package is registered with `Mcp::local('pipeline', PipelineServer::class)` from this
 package's service provider — `Registrar::local(string $handle, string $serverClass)` at
-`vendor/laravel/mcp/src/Server/Registrar.php:71`. There is no `routes/ai.php` in the consuming
+`vendor/laravel/mcp/src/Server/Registrar.php:68`. There is no `routes/ai.php` in the consuming
 repo. The entry point is `php artisan mcp:start pipeline`, which is `laravel/mcp`'s own
 `StartCommand`.
 
@@ -71,8 +72,8 @@ Two encoding details that broke test assertions:
   accepts either, and `Tool::handle()` is duck-typed, so the tools here declare
   `Response|ResponseFactory`. Calling `->toArray()[0]` on the result does not work.
 - **It encodes with `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE`**
-  (`vendor/laravel/mcp/src/Response.php:97`), so an assertion containing an escaped slash will
-  not match.
+  (`vendor/laravel/mcp/src/Response.php:97`), so an assertion containing an escaped slash will not
+  match.
 
 ## Arguments arrive empty in tests
 
@@ -81,7 +82,7 @@ Two encoding details that broke test assertions:
 
 **Cause:** arguments reach a tool through exactly one path. `Server::runMethodHandle()` binds the
 request as the container instance `mcp.request`
-(`vendor/laravel/mcp/src/Server.php:297`), and `McpServiceProvider::registerContainerCallbacks()`
+(`vendor/laravel/mcp/src/Server.php:415`), and `McpServiceProvider::registerContainerCallbacks()`
 registers a `resolving(Request::class)` callback that copies the arguments off that binding into
 each freshly resolved `Request`. `ToolInvoker` then calls the handler through
 `Container::call()`, so the `Request` it injects is only populated if that callback exists.
