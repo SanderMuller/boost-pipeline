@@ -1,29 +1,12 @@
 # boost-pipeline
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/sandermuller/boost-
-pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
-[![Tests](https://img.shields.io/github/actions/workflow/status/SanderMuller/boost-pipeline/run-
-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/SanderMuller/boost-
-pipeline/actions/workflows/run-tests.yml)
-[![Total Downloads](https://img.shields.io/packagist/dt/sandermuller/boost-
-pipeline.svg?style=flat-square)](https://packagist.org/packages/sandermuller/boost-pipeline)
-[![License](https://img.shields.io/packagist/l/sandermuller/boost-pipeline.svg?style=flat-
-square)](LICENSE)
-
 **An MCP server that hands an agent one step at a time: phases, steps, and a cursor it cannot
 move.**
 
-You already have the checks. Ask an agent in prose to run them and you get most of the work, most
-of the time, then a report that says *"I ran the tests"* rather than *"the tests ran"*.
+Instead of letting the context of your main agent impact how well each step of your code quality pipeline works, let boost-pipeline process your QA steps one by one in it's own fresh context to make sure it has full attention for your important checks to get the highest quality code.
 
 The server only ever **executes** the step at the cursor, and the cursor only advances when that
-step resolves. A `passed` is what the server wrote after running a process and reading its exit
-code. The agent may read `.config/pipeline.php` and see what is coming — that does not get it a
-receipt.
-
-> **Status: prototype.** It works and it is tested, but several designed behaviours are
-> deliberately deferred. Read
-> [What it deliberately does not do](#what-it-deliberately-does-not-do) before relying on it.
+step resolves.
 
 ## A run, start to finish
 
