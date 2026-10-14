@@ -723,6 +723,9 @@ it('kills the command itself on stop, not only the shell that started it', funct
     $marker = sys_get_temp_dir().'/bp-stop-'.bin2hex(random_bytes(4));
     $pending = $this->runner->begin([Shell::run('sh -c '.escapeshellarg('sleep 1; touch '.escapeshellarg($marker)), id: 'killed')], 'r-test');
 
+    // Late enough that the shells have started the command, so a stop that
+    // reached only the outer one would leave it running.
+    Sleep::usleep(300_000);
     $pending->stop();
     Sleep::usleep(1_500_000);
 

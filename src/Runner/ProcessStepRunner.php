@@ -356,13 +356,11 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             $process = $this->processFor(
                 $files === null
                     ? $step->command()
-                    // `exec` with no command only redirects the shell's own
-                    // descriptors. The shell then execs the step's command as
-                    // its last command, so a stop or a timeout signals the
-                    // command itself, as it does without the redirect. The
-                    // runner tests pin this with a command that would leave a
-                    // marker if only the outer shell were killed.
-                    : sprintf("exec >%s 2>%s\n%s", escapeshellarg($files[0]), escapeshellarg($files[1]), $step->command()),
+                    // One simple command that execs a shell for the step, so
+                    // the process Symfony signals on a stop or a timeout runs
+                    // the command itself. A redirect on its own line before the
+                    // command leaves dash forking a child that outlives a kill.
+                    : sprintf('exec /bin/sh -c %s >%s 2>%s', escapeshellarg($step->command()), escapeshellarg($files[0]), escapeshellarg($files[1])),
                 $timeout,
                 $step->env(),
             );
