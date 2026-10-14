@@ -95,4 +95,17 @@ final class InvalidPipelineConfigException extends RuntimeException
     {
         return new self('A pipeline purpose cannot be blank. It exists so a reader can tell which question this pipeline answers, and a blank one is worse than none: `pipeline:list` reports a pipeline that declares no purpose, and an empty string turns that honest answer into an empty column. Leave `withPurpose()` off instead.');
     }
+
+    public static function ignoredPathInvalid(string $pattern): self
+    {
+        return new self(sprintf(
+            'An ignored path must be a plain pathspec such as `specs` or `*.md`, got [%s]. A blank pattern ignores nothing, and a leading colon is git pathspec magic that could turn the exclusion off or narrow the fingerprint to one directory.',
+            $pattern,
+        ));
+    }
+
+    public static function responseWindowNotPositive(float $seconds): self
+    {
+        return new self("A response window must be greater than zero, got {$seconds}. Leave `withResponseWindow()` off to wait for every verdict.");
+    }
 }

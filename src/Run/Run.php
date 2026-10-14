@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use InvalidArgumentException;
+use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
@@ -21,6 +22,7 @@ use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
 use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
+use Throwable;
 
 /**
  * One pipeline execution.
@@ -77,6 +79,9 @@ final class Run
     /** Owns the live record this run wrote last, so a clear can prove it is ours. */
     private ?string $liveToken = null;
 
+    /** Steps started by an earlier call that have not all finished yet. */
+    private ?PendingPosition $pending = null;
+
     private function __construct(
         public readonly string $id,
         public readonly Walk $walk,
@@ -97,6 +102,13 @@ final class Run
          * payload that never had a name to report.
          */
         public readonly ?string $pipeline = null,
+        /**
+         * How long one resolution may wait on its steps before it hands back
+         * control, or null to wait for the verdict as every run always has.
+         *
+         * Honoured only by a runner that can start steps in the background.
+         */
+        public readonly ?float $responseWindow = null,
     ) {
         $this->lastSeen = $this->tree?->capture();
 
@@ -115,6 +127,7 @@ final class Run
         ?string $pipeline = null,
         ?RunHistoryStore $history = null,
         ?LiveProgressStore $live = null,
+        ?float $responseWindow = null,
     ): self {
         // A verdict is measured from THIS walk's selection, so a scope that
         // disagrees would put a true answer about one scope on a receipt claiming
@@ -144,6 +157,7 @@ final class Run
             $history,
             $live,
             $pipeline,
+            $responseWindow,
         );
     }
 
@@ -195,10 +209,18 @@ final class Run
      * a unit: all of them run, all of their verdicts are recorded, and the cursor
      * moves past the whole group or not at all.
      *
-     * @return list<Result> empty when there was nothing to resolve
+     * With a response window, a position still running when the window closes
+     * returns nothing and stays pending; the next call continues the same wait.
+     * The verdicts it then records are the ones a blocking call would have.
+     *
+     * @return list<Result> empty when there was nothing to resolve, or when the position is still running
      */
     public function resolveCurrent(): array
     {
+        if ($this->pending instanceof PendingPosition) {
+            return $this->collect($this->pending);
+        }
+
         $position = $this->walk->positionAt($this->cursor);
 
         if ($position === []) {
@@ -220,8 +242,89 @@ final class Run
         $steps = array_map(static fn (WalkStep $walkStep): Step => $walkStep->step, $position);
         $token = $this->writeLive(RunState::Running, $position);
 
+        if ($this->responseWindow !== null && $this->runner instanceof BackgroundStepRunner) {
+            try {
+                $pending = $this->runner->begin($steps, $this->id);
+            } catch (Throwable $throwable) {
+                $this->clearLive($token);
+
+                throw $throwable;
+            }
+
+            $this->state = RunState::Running;
+
+            return $this->collect($this->pending = new PendingPosition($pending, $steps, $measuredAt, $token, microtime(true)));
+        }
+
+        return $this->settle(fn (): array => $this->resolveSteps($steps), $steps, $measuredAt, $token);
+    }
+
+    /**
+     * Whether steps this run started are still running.
+     *
+     * Only a run with a response window ever has one. While it does, the cursor
+     * cannot move and nothing but `next_step` collects the verdict.
+     */
+    public function isPending(): bool
+    {
+        return $this->pending instanceof PendingPosition;
+    }
+
+    /** Whole seconds since the pending position started, or null when nothing is pending. */
+    public function pendingSeconds(): ?int
+    {
+        return $this->pending instanceof PendingPosition
+            ? (int) floor(microtime(true) - $this->pending->startedAt)
+            : null;
+    }
+
+    /**
+     * Discard this run: stop what it started and drop its in-flight record.
+     *
+     * A replaced run is unreachable, so a step it left running would write logs
+     * for a run nobody can ask about, and its verdict would never be read.
+     */
+    public function abandon(): void
+    {
+        if ($this->pending instanceof PendingPosition) {
+            $this->pending->pending->stop();
+            $this->pending = null;
+        }
+
+        $this->releaseLive();
+    }
+
+    /** @return list<Result> */
+    private function collect(PendingPosition $position): array
+    {
         try {
-            $results = $this->record($this->resolveSteps($steps), $steps, $measuredAt);
+            $results = $position->pending->await($this->responseWindow ?? 0.0);
+        } catch (Throwable $throwable) {
+            $position->pending->stop();
+            $this->pending = null;
+            $this->clearLive($position->liveToken);
+
+            throw $throwable;
+        }
+
+        if ($results === null) {
+            return [];
+        }
+
+        $this->pending = null;
+
+        return $this->settle(static fn (): array => $results, $position->steps, $position->measuredAt, $position->liveToken);
+    }
+
+    /**
+     * @param  callable(): array<string, Result>  $resolve
+     * @param  list<Step>  $steps
+     * @return list<Result>
+     */
+    private function settle(callable $resolve, array $steps, ?string $measuredAt, string $token): array
+    {
+        try {
+            $results = $this->record($resolve(), $steps, $measuredAt);
 
             // The ordinary handover: a shell step whose successor is a skill step
             // settles to Awaiting inside record(), never through the branch above.

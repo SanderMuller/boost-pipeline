@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Sleep;
+use SanderMuller\BoostPipeline\Contracts\PendingSteps;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
@@ -599,4 +601,173 @@ it('says nothing about a lost log on a noisy passing step that could log', funct
     expect($result->verdict)->toBe(Verdict::Passed)
         ->and($result->logPath)->not->toBeNull()
         ->and($result->summary)->not->toContain('No log could be written');
+});
+
+it('warns when a step finished but used most of its timeout', function (): void {
+    $result = runStep($this->runner, Shell::run('sleep 1.7', id: 'slow')->timeout(2.0));
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->toContain('of its 2s timeout')->toContain('->timeout()');
+});
+
+it('warns on a failing step that used most of its timeout as well', function (): void {
+    $result = runStep($this->runner, Shell::run('sleep 1.7; exit 1', id: 'slow')->timeout(2.0));
+
+    expect($result->verdict)->toBe(Verdict::Failed)
+        ->and($result->summary)->toContain('of its 2s timeout');
+});
+
+it('says nothing about the timeout when a step finished well inside it', function (): void {
+    expect(runStep($this->runner, Shell::run('true', id: 'quick'))->summary)->not->toContain('timeout');
+});
+
+it('warns for a step in a parallel group too', function (): void {
+    $results = $this->runner->runBatch([
+        Shell::run('sleep 1.7', id: 'slow')->timeout(2.0),
+        // Declared after the slow step and with the same ceiling, so a group
+        // that waited in order would time it by its sibling.
+        Shell::run('true', id: 'quick')->timeout(2.0),
+    ], 'r-test');
+
+    expect($results['slow']->summary)->toContain('of its 2s timeout')
+        ->and($results['quick']->summary)->not->toContain('timeout');
+});
+
+/** Await a background step and return its verdict, failing loudly when it never settles. */
+function collected(PendingSteps $pending, string $stepId, float $seconds = 10.0): Result
+{
+    $results = $pending->await($seconds);
+
+    if ($results === null || ! isset($results[$stepId])) {
+        throw new RuntimeException("Step [{$stepId}] did not settle.");
+    }
+
+    return $results[$stepId];
+}
+
+it('returns no verdict while a background step still runs, then the same verdict a blocking call gives', function (): void {
+    $pending = $this->runner->begin([Shell::run('sleep 0.5; echo done', id: 'slow')], 'r-test');
+
+    expect($pending->await(0.05))->toBeNull();
+
+    $result = collected($pending, 'slow');
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->toContain('done');
+});
+
+it('does not stall a background step that prints more than a pipe holds while nobody polls', function (): void {
+    // Between two tool calls nothing reads a pipe. A step writing to one would
+    // block on its own output until the next call, and its timeout would keep
+    // counting while it sat there.
+    $pending = $this->runner->begin([Shell::run('head -c 2000000 /dev/zero | tr "\\0" "x"; echo; echo tail-marker >&2', id: 'loud')->timeout(5.0)], 'r-test');
+
+    expect($pending->await(0.0))->toBeNull();
+
+    Sleep::usleep(1_500_000);
+
+    $started = microtime(true);
+    $result = collected($pending, 'loud');
+
+    expect(microtime(true) - $started)->toBeLessThan(1.0)
+        ->and($result->verdict)->toBe(Verdict::Passed)
+        ->and(file_get_contents((string) $result->logPath))->toContain('tail-marker');
+});
+
+it('keeps stdout and stderr apart for a background step', function (): void {
+    $result = collected($this->runner->begin([Shell::run('echo out; echo err >&2; exit 1', id: 'split')], 'r-test'), 'split');
+
+    expect($result->verdict)->toBe(Verdict::Failed)
+        ->and($result->summary)->toContain("out\nerr");
+});
+
+it('keeps the verdict of a background step that finished inside its timeout but was collected after it', function (): void {
+    $pending = $this->runner->begin([Shell::run('sleep 0.3', id: 'finished')->timeout(1.0)], 'r-test');
+
+    expect($pending->await(0.0))->toBeNull();
+
+    // Nothing polls during this pause, so the process is first seen as finished
+    // after its ceiling has passed. A pass must not turn into a timeout for that.
+    Sleep::usleep(1_500_000);
+
+    $result = collected($pending, 'finished', 5.0);
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->toContain('up to')->toContain('can be shorter');
+});
+
+it('still times out a background step that is running past its timeout when it is next polled', function (): void {
+    $marker = sys_get_temp_dir().'/bp-hung-'.bin2hex(random_bytes(4));
+    $pending = $this->runner->begin([Shell::run('sh -c '.escapeshellarg('sleep 2; touch '.escapeshellarg($marker)), id: 'hung')->timeout(0.5)], 'r-test');
+
+    expect($pending->await(0.0))->toBeNull();
+
+    Sleep::usleep(800_000);
+
+    $result = collected($pending, 'hung', 5.0);
+    Sleep::usleep(2_000_000);
+
+    expect($result->verdict)->toBe(Verdict::Error)
+        ->and($result->summary)->toContain('Timed out after 0.5s')
+        ->and(file_exists($marker))->toBeFalse();
+});
+
+it('reports a missing binary in the background as an error, never as a failure', function (): void {
+    expect(collected($this->runner->begin([Shell::run('definitely-not-a-real-binary-xyz', id: 'missing')], 'r-test'), 'missing')->verdict)
+        ->toBe(Verdict::Error);
+});
+
+it('kills the command itself on stop, not only the shell that started it', function (): void {
+    // The command runs in a shell of its own, so a stop that reached only the
+    // outer shell would leave it running and the marker would appear.
+    $marker = sys_get_temp_dir().'/bp-stop-'.bin2hex(random_bytes(4));
+    $pending = $this->runner->begin([Shell::run('sh -c '.escapeshellarg('sleep 1; touch '.escapeshellarg($marker)), id: 'killed')], 'r-test');
+
+    $pending->stop();
+    Sleep::usleep(1_500_000);
+
+    expect(file_exists($marker))->toBeFalse();
+});
+
+it('keeps a parallel group in declaration order in the background', function (): void {
+    $results = $this->runner->begin([
+        Shell::run('sleep 0.3', id: 'second-to-finish'),
+        Shell::run('true', id: 'first-to-finish'),
+    ], 'r-test')->await(10.0);
+
+    expect(array_keys((array) $results))->toBe(['second-to-finish', 'first-to-finish']);
+});
+
+it('says nothing about headroom when the runner has no timeout at all', function (): void {
+    $runner = new ProcessStepRunner(
+        workingDirectory: sys_get_temp_dir(),
+        logs: new LogWriter($this->logDir),
+        summariser: new OutputSummariser,
+        environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        timeoutSeconds: 0.0,
+    );
+
+    $result = runStep($runner, Shell::run('true', id: 'unbounded'));
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->not->toContain('timeout');
+});
+
+/** @return list<string> */
+function outputFilesOnDisk(): array
+{
+    $files = glob(sys_get_temp_dir().'/bp-out-*');
+
+    return $files === false ? [] : $files;
+}
+
+it('removes the output files of a background step dropped before it finished', function (): void {
+    $before = outputFilesOnDisk();
+    $pending = $this->runner->begin([Shell::run('sleep 5', id: 'dropped')], 'r-test');
+
+    expect(array_diff(outputFilesOnDisk(), $before))->toHaveCount(1);
+
+    unset($pending);
+
+    expect(array_diff(outputFilesOnDisk(), $before))->toBeEmpty();
 });

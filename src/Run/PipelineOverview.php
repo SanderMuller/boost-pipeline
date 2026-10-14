@@ -8,6 +8,7 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Runner\PipelineTree;
 use SanderMuller\BoostPipeline\Runner\TreeDigest;
 use SanderMuller\BoostPipeline\Walk\Walk;
 use SanderMuller\BoostPipeline\Walk\WalkStep;
@@ -224,7 +225,7 @@ final readonly class PipelineOverview
             'scope' => $receipt->scope,
             'recorded_at' => $receipt->recordedAt,
             'coverage' => $receipt->coverage,
-            'tree_matches' => $this->treeMatches($receipt),
+            'tree_matches' => $this->treeMatches($name, $receipt),
             'config_matches' => $this->configMatches($name, $receipt),
             'positions' => $this->positions($steps, $receipt->verdicts, $logs),
             'undeclared' => $this->undeclared($steps, $receipt, $logs),
@@ -348,16 +349,18 @@ final readonly class PipelineOverview
      * Null when there is nothing to compare — no fingerprint available, or a
      * receipt that recorded none. Unknown is not the same answer as no.
      */
-    private function treeMatches(Receipt $receipt): ?bool
+    private function treeMatches(string $name, Receipt $receipt): ?bool
     {
-        if (! $this->tree instanceof TreeFingerprint || $receipt->tree === null) {
+        $tree = PipelineTree::for($this->tree, $this->pipelines->get($name));
+
+        if (! $tree instanceof TreeFingerprint || $receipt->tree === null) {
             return null;
         }
 
         // Content, not the whole digest. A receipt written before a commit still
         // describes the code the commit carries, and reporting it as moved there
         // was the false stale this projection exists to avoid.
-        return TreeDigest::sameContent($this->tree->capture(), $receipt->tree);
+        return TreeDigest::sameContent($tree->capture(), $receipt->tree);
     }
 
     /**
@@ -375,7 +378,7 @@ final readonly class PipelineOverview
                 'all_verified' => $record->receipt->allVerified,
                 'scope' => $record->receipt->scope,
                 'recorded_at' => $record->receipt->recordedAt,
-                'tree_matches' => $this->treeMatches($record->receipt),
+                'tree_matches' => $this->treeMatches($name, $record->receipt),
                 // A list row without this reads worst for the run that most needs
                 // attention: a stale declaration leaves the tree matching, so the
                 // one run the gate refuses is the only row claiming to be healthy.

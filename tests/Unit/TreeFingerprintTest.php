@@ -270,3 +270,49 @@ it('notices a symlink repointed to a different target', function (): void {
 
     expect(TreeDigest::sameContent($this->fingerprint->capture(), $before))->toBeFalse();
 });
+
+it('does not move when only an excluded path changes', function (): void {
+    mkdir($this->repo.'/specs/nested', recursive: true);
+    file_put_contents($this->repo.'/specs/nested/plan.md', "- [ ] one\n");
+    git($this->repo, 'add', '-A');
+    git($this->repo, 'commit', '--quiet', '-m', 'spec');
+
+    $fingerprint = $this->fingerprint->excluding(['specs']);
+    $before = $fingerprint->capture();
+
+    file_put_contents($this->repo.'/specs/nested/plan.md', "- [x] one\n");
+    file_put_contents($this->repo.'/specs/new.md', "new\n");
+
+    expect($fingerprint->capture())->toBe($before)
+        ->and($this->fingerprint->capture())->not->toBe($this->fingerprint->excluding(['specs'])->capture());
+});
+
+it('matches a star across directories, the way a plain git pathspec does', function (): void {
+    $fingerprint = $this->fingerprint->excluding(['*.md']);
+    $before = $fingerprint->capture();
+
+    mkdir($this->repo.'/docs/deep', recursive: true);
+    file_put_contents($this->repo.'/docs/deep/guide.md', "text\n");
+    file_put_contents($this->repo.'/README.md', "text\n");
+
+    expect($fingerprint->capture())->toBe($before);
+});
+
+it('still moves for a path the exclusions do not cover', function (): void {
+    $fingerprint = $this->fingerprint->excluding(['*.md', 'specs']);
+    $before = $fingerprint->capture();
+
+    file_put_contents($this->repo.'/src.php', "<?php // two\n");
+
+    expect(TreeDigest::sameContent($fingerprint->capture(), $before))->toBeFalse();
+});
+
+it('reads a tree whose only uncommitted change is excluded as clean', function (): void {
+    // The case the clean flag exists for: commit the code, leave the notes. The
+    // commit then holds every byte the run measured, so a gate must not call it
+    // a partial commit.
+    file_put_contents($this->repo.'/notes.md', "draft\n");
+
+    expect(TreeDigest::wasClean($this->fingerprint->capture()))->toBeFalse()
+        ->and(TreeDigest::wasClean($this->fingerprint->excluding(['*.md'])->capture()))->toBeTrue();
+});

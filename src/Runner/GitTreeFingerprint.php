@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Runner;
 
+use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -51,7 +52,38 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
     /** Paths per `hash-object` call, so a very large dirty set cannot overrun the argument limit. */
     private const int HASH_BATCH = 200;
 
-    public function __construct(private string $workingDirectory) {}
+    /**
+     * @param  list<string>  $excluded  plain pathspecs left out of the digest, see {@see Pipeline::ignoring()}
+     */
+    public function __construct(
+        private string $workingDirectory,
+        private array $excluded = [],
+    ) {}
+
+    /**
+     * The same fingerprint with these paths left out.
+     *
+     * The status and the index listing take the SAME pathspecs, so a path is
+     * either in both or in neither. Filtering only one would hash an excluded
+     * dirty file anyway, or drop a clean one while its edit still counted.
+     *
+     * The clean flag is read from the filtered status as well. A tree whose only
+     * uncommitted change is an excluded file then reads as clean, which is what
+     * lets "commit the code, leave the notes" pass a gate: the commit holds every
+     * byte the run measured.
+     *
+     * @param  list<string>  $patterns
+     */
+    public function excluding(array $patterns): self
+    {
+        return new self($this->workingDirectory, array_values(array_unique([...$this->excluded, ...$patterns])));
+    }
+
+    /** @return list<string> */
+    public function excluded(): array
+    {
+        return $this->excluded;
+    }
 
     public function capture(): ?string
     {
@@ -59,7 +91,7 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
         // before the first commit `rev-parse HEAD` fails while the dirty set is
         // still perfectly meaningful. Treating that as unfingerprintable turned
         // expiry off for a whole new repository.
-        $status = $this->git(['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+        $status = $this->git(['status', '--porcelain=v1', '-z', '--untracked-files=all', ...$this->pathspec()]);
 
         if ($status === null) {
             return null;
@@ -124,7 +156,7 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
      */
     private function indexEntries(array $dirty): ?array
     {
-        $tracked = $this->git(['ls-files', '-s', '-z']);
+        $tracked = $this->git(['ls-files', '-s', '-z', ...$this->pathspec()]);
 
         if ($tracked === null) {
             return null;
@@ -286,6 +318,24 @@ final readonly class GitTreeFingerprint implements TreeFingerprint
         }
 
         return $paths;
+    }
+
+    /**
+     * Nothing at all when no path is excluded, so the default reads the tree with
+     * exactly the commands it always has.
+     *
+     * Exclusions only, no positive entry: git then matches everything else, the
+     * same set a call without a pathspec covers.
+     *
+     * @return list<string>
+     */
+    private function pathspec(): array
+    {
+        if ($this->excluded === []) {
+            return [];
+        }
+
+        return ['--', ...array_map(static fn (string $pattern): string => ':(exclude)'.$pattern, $this->excluded)];
     }
 
     /**

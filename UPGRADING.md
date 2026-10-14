@@ -1,5 +1,20 @@
 # Upgrading
 
+## From 0.19 to 0.20
+
+Nothing to change. Both new settings are off until you set them.
+
+- **`Pipeline::configure()->ignoring([...])`** leaves paths out of the tree fingerprint. A config
+  that does not call it keeps the declaration digest it had, so no receipt on disk expires. Adding
+  or changing the list changes the digest, and `pipeline:verify` then asks for one new run.
+
+- **`Pipeline::configure()->withResponseWindow($seconds)`** makes `next_step` return before a long
+  step finishes. A driver that reads `next_step` must then accept a `running` payload with a
+  `pending` key and no result, and call `next_step` again. The `run_pipeline` prompt says this.
+
+- **A step summary can carry one new line.** A step that used more than 80% of its timeout ends
+  its summary with a note that says so. Verdicts do not change.
+
 ## From 0.17 to 0.18
 
 - **Every existing receipt is refused once, and one run fixes it.** The tree fingerprint changed

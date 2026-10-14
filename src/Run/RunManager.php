@@ -8,6 +8,7 @@ use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
+use SanderMuller\BoostPipeline\Runner\PipelineTree;
 use SanderMuller\BoostPipeline\Runner\StepRunnerFactory;
 
 /**
@@ -63,8 +64,16 @@ final class RunManager
         // open answers the wrong one. Same reasoning as a tree that moved, and it
         // touches only this pipeline's entry.
         if ($run instanceof Run && $run->scope !== $selection) {
-            $run->releaseLive();
+            $run->abandon();
             $run = null;
+        }
+
+        // A step still running is not interrupted by a reopen. The tree it
+        // measured was read before it started, so an edit made meanwhile already
+        // makes its verdict stale once collected; replacing the run here would
+        // only throw away a suite that is minutes into its work.
+        if ($run instanceof Run && $run->isPending()) {
+            return $run;
         }
 
         if ($run instanceof Run) {
@@ -83,7 +92,7 @@ final class RunManager
                 // and keeps its id instead of being thrown away.
                 $run->rebaseline();
             } elseif ($moved) {
-                $run->releaseLive();
+                $run->abandon();
                 $run = null;
             } elseif ($stale) {
                 // A stale run can never verify: an earlier step measured a tree
@@ -91,21 +100,24 @@ final class RunManager
                 // Reopening is the documented way out of a fix applied with
                 // next_step, so it has to be a real one — and by then the tree has
                 // stopped moving, because resolving that step absorbed it.
-                $run->releaseLive();
+                $run->abandon();
                 $run = null;
             }
         }
 
         if (! $run instanceof Run) {
+            $declared = $this->pipelineNamed($name);
+
             $run = Run::start(
-                $this->pipelineNamed($name)->walk($selection),
+                $declared->walk($selection),
                 $this->runners->for($name),
-                tree: $this->tree,
+                tree: PipelineTree::for($this->tree, $declared),
                 receipts: $this->receipts?->for($name),
                 scope: $selection,
                 pipeline: $this->pipelines->requiresName() ? $name : null,
                 history: $this->history?->for($name),
                 live: $this->live?->for($name),
+                responseWindow: $declared->responseWindow(),
             );
         }
 

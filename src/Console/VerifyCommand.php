@@ -18,6 +18,8 @@ use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
 use SanderMuller\BoostPipeline\Run\Receipt;
 use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunState;
+use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
+use SanderMuller\BoostPipeline\Runner\PipelineTree;
 use SanderMuller\BoostPipeline\Runner\TreeDigest;
 
 /**
@@ -47,6 +49,21 @@ final class VerifyCommand extends Command
 
         if ($name === null) {
             return self::FAILURE;
+        }
+
+        // Said before any answer, whatever the answer is. Exit 0 means "verified
+        // except these paths", and a reader who did not write the config has no
+        // other way to learn the exception.
+        $measured = PipelineTree::for($tree, $pipelines->get($name));
+        // A custom fingerprint never saw the list, so naming it there would claim
+        // an exclusion that did not happen.
+        $excluded = $measured instanceof GitTreeFingerprint ? $measured->excluded() : [];
+
+        if ($excluded !== []) {
+            $this->components->warn(sprintf(
+                'The fingerprint leaves out paths this pipeline declares it does not read: %s. An edit there does not change this answer.',
+                implode(', ', $excluded),
+            ));
         }
 
         $receipt = $receipts->for($name)->read();
@@ -81,7 +98,7 @@ final class VerifyCommand extends Command
         // two reach different readers: `stale` reaches an agent mid-walk, this
         // reaches a person at a gate. Merging a base branch in before opening a
         // PR is the ordinary way to arrive here having changed no file.
-        $now = $tree->capture();
+        $now = $measured?->capture();
 
         $sameCode = TreeDigest::sameContent($receipt->tree, $now);
 

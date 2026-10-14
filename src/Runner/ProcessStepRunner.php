@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Runner;
 
+use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
+use SanderMuller\BoostPipeline\Contracts\PendingSteps;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Results\Result;
@@ -12,6 +14,7 @@ use SanderMuller\BoostPipeline\Steps\Shell;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 use Throwable;
+use WeakMap;
 
 /**
  * Executes a shell step in a subprocess and owns the verdict.
@@ -21,7 +24,7 @@ use Throwable;
  * timeout and a thrown exception all produce Verdict::Error, never Failed and
  * never Passed.
  */
-final readonly class ProcessStepRunner implements BatchStepRunner
+final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchStepRunner
 {
     /**
      * Under the MCP per-call wall clock, which the spec pins at 600000ms in
@@ -32,8 +35,18 @@ final readonly class ProcessStepRunner implements BatchStepRunner
 
     private const float SCOPE_TIMEOUT_SECONDS = 60.0;
 
+    /** Past this share of its timeout, a step that still finished is reported as close to the edge. */
+    private const float HEADROOM_WARNING_RATIO = 0.8;
+
     /** Shell conventions: 127 = not found, 126 = found but not executable. */
     private const array UNRUNNABLE_EXIT_CODES = [126, 127];
+
+    /**
+     * The files a background process writes its output to, by process.
+     *
+     * @var WeakMap<Process, array{string, string}>
+     */
+    private WeakMap $redirects;
 
     public function __construct(
         private string $workingDirectory,
@@ -41,7 +54,9 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         private OutputSummariser $summariser,
         private EnvironmentScrubber $environment,
         private float $timeoutSeconds = self::DEFAULT_TIMEOUT_SECONDS,
-    ) {}
+    ) {
+        $this->redirects = new WeakMap;
+    }
 
     /**
      * The ceiling this runner would enforce for a step, or null when it enforces none.
@@ -79,12 +94,34 @@ final readonly class ProcessStepRunner implements BatchStepRunner
      */
     public function runBatch(array $steps, string $runId): array
     {
-        $results = [];
-        $pending = [];
+        // Polled together rather than waited on in order. Waiting in order timed
+        // a fast step by its slowest sibling, so every step in the group read as
+        // close to its timeout.
+        return $this->begin($steps, $runId)->await(INF) ?? [];
+    }
+
+    /**
+     * Starts every step and returns at once; {@see PendingSteps::await()} collects.
+     *
+     * Each process writes its output to two files instead of to pipes. Between two
+     * tool calls nothing reads a pipe, so a suite printing more than the pipe
+     * buffer would block on its own output until the agent called again — and its
+     * timeout would keep counting while it sat there. Two files, not one, so the
+     * output keeps stdout and stderr apart exactly as a pipe-read step does.
+     *
+     * Scope commands still run here, before this returns. They are capped at a
+     * minute and usually take milliseconds.
+     *
+     * @param  list<Step>  $steps
+     */
+    public function begin(array $steps, string $runId): PendingSteps
+    {
+        $settled = [];
+        $running = [];
 
         foreach ($steps as $step) {
             if ($step->kind() !== StepKind::Shell || ! $step instanceof Shell) {
-                $results[$step->id()] = Result::error($step->id(), 'Only shell steps can be executed by the server.');
+                $settled[$step->id()] = Result::error($step->id(), 'Only shell steps can be executed by the server.');
 
                 continue;
             }
@@ -92,40 +129,82 @@ final readonly class ProcessStepRunner implements BatchStepRunner
             $scope = $this->resolveScope($step, $runId);
 
             if ($scope instanceof Result) {
-                $results[$step->id()] = $scope;
+                $settled[$step->id()] = $scope;
+
+                continue;
+            }
+
+            // Windows runs the command through cmd.exe, which has no `exec` to
+            // redirect with, so output stays on pipes there. A long background
+            // step can then block on a full pipe between calls.
+            $windows = DIRECTORY_SEPARATOR === '\\';
+            $files = $windows ? null : $this->outputFiles();
+
+            if (! $windows && $files === null) {
+                $settled[$step->id()] = Result::error($step->id(), sprintf('Could not run: no file for its output could be created in %s.', sys_get_temp_dir()));
 
                 continue;
             }
 
             $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
-            $process = $this->start($step, $timeout, $runId);
+            $process = $this->start($step, $timeout, $runId, $files);
+            $discard = static function () use ($files): void {
+                if ($files !== null) {
+                    @unlink($files[0]);
+                    @unlink($files[1]);
+                }
+            };
 
             if ($process instanceof Result) {
-                $results[$step->id()] = $process;
+                $settled[$step->id()] = $process;
+                $discard();
 
                 continue;
             }
 
-            $pending[] = [$process, $step, $scope, $timeout];
+            $running[$step->id()] = [
+                $process,
+                function (?Throwable $failure, float $seenAt, bool $late) use ($step, $process, $scope, $runId, $timeout, $discard): Result {
+                    try {
+                        return match (true) {
+                            ! $failure instanceof Throwable => $this->verdictFor($step, $process, $scope, $runId, $timeout, $seenAt, $late),
+                            $failure instanceof ProcessTimedOutException => $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s."),
+                            default => $this->preserving($process, $step->id(), $runId, "Could not run: {$failure->getMessage()}"),
+                        };
+                    } finally {
+                        $discard();
+                    }
+                },
+                $discard,
+            ];
         }
 
-        // Everything is already running, so waiting in order costs nothing beyond
-        // the slowest step.
-        foreach ($pending as [$process, $step, $scope, $timeout]) {
-            $timedOut = $this->settle($process, $step->id(), $timeout, $runId);
+        return new ProcessPendingSteps(
+            array_map(static fn (Step $step): string => $step->id(), $steps),
+            $settled,
+            $running,
+        );
+    }
 
-            $results[$step->id()] = $timedOut instanceof Result
-                ? $timedOut
-                : $this->verdictFor($step, $process, $scope, $runId);
+    /** @return array{string, string}|null */
+    private function outputFiles(): ?array
+    {
+        $out = @tempnam(sys_get_temp_dir(), 'bp-out-');
+        $err = @tempnam(sys_get_temp_dir(), 'bp-err-');
+
+        if ($out === false || $err === false) {
+            if (is_string($out)) {
+                @unlink($out);
+            }
+
+            if (is_string($err)) {
+                @unlink($err);
+            }
+
+            return null;
         }
 
-        $ordered = [];
-
-        foreach ($steps as $step) {
-            $ordered[$step->id()] = $results[$step->id()];
-        }
-
-        return $ordered;
+        return [$out, $err];
     }
 
     private function execute(Shell $step, string $runId): Result
@@ -154,11 +233,17 @@ final readonly class ProcessStepRunner implements BatchStepRunner
             return $timedOut;
         }
 
-        return $this->verdictFor($step, $process, $scope, $runId);
+        return $this->verdictFor($step, $process, $scope, $runId, $timeout);
     }
 
-    private function verdictFor(Shell $step, Process $process, ?int $scope, string $runId): Result
+    /**
+     * @param  float|null  $finishedAt  when the process was first seen finished, null for now
+     * @param  bool  $measuredLate  it was first seen after a gap with no poll, so its duration is an upper bound
+     */
+    private function verdictFor(Shell $step, Process $process, ?int $scope, string $runId, float $timeout, ?float $finishedAt = null, bool $measuredLate = false): Result
     {
+        $headroom = $this->headroomNote($process, $timeout, $finishedAt ?? microtime(true), $measuredLate);
+
         $output = $this->combinedOutput($process);
         $logPath = $this->logs->write($runId, $step->id(), $output);
         $exitCode = $process->getExitCode() ?? 1;
@@ -176,7 +261,7 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         if ($exitCode !== 0) {
             return Result::failed(
                 $step->id(),
-                $this->describeFailure($summary, $logPath),
+                $this->describeFailure($summary, $logPath).$headroom,
                 $exitCode,
                 $logPath,
                 $scope,
@@ -185,9 +270,39 @@ final readonly class ProcessStepRunner implements BatchStepRunner
 
         return Result::passed(
             $step->id(),
-            $this->describePass($summary, $scope, $logPath),
+            $this->describePass($summary, $scope, $logPath).$headroom,
             $scope,
             $logPath,
+        );
+    }
+
+    /**
+     * A note when a step finished, but used most of its timeout.
+     *
+     * A step that took 95s of a 100s ceiling and passed says nothing about the
+     * next run, which can cross it and halt. Said on its own line, after the
+     * output, because the summary above it is what the step printed.
+     *
+     * A background step is timed at the poll that first saw it finished. After a
+     * gap between two tool calls that can be long after it exited, and the note
+     * then says the figure is an upper bound rather than the step's duration.
+     */
+    private function headroomNote(Process $process, float $timeout, float $finishedAt, bool $measuredLate): string
+    {
+        $elapsed = $finishedAt - $process->getStartTime();
+
+        // Zero is Symfony's "no timeout", so there is no ceiling to be close to.
+        if ($timeout <= 0.0 || $elapsed <= $timeout * self::HEADROOM_WARNING_RATIO) {
+            return '';
+        }
+
+        return sprintf(
+            "\n\nTook %s%.0fs of its %.0fs timeout (%d%%)%s. A slower run will time out: raise this step's ->timeout(), or the pipeline's ->withTimeout().",
+            $measuredLate ? 'up to ' : '',
+            $elapsed,
+            $timeout,
+            (int) floor($elapsed / $timeout * 100),
+            $measuredLate ? ', measured when the server next checked, so the real time can be shorter' : '',
         );
     }
 
@@ -230,11 +345,31 @@ final readonly class ProcessStepRunner implements BatchStepRunner
         return count($this->nonEmptyLines($process->getOutput()));
     }
 
-    /** Started but not waited on, so a caller can have several running at once. */
-    private function start(Shell $step, float $timeout, string $runId): Process|Result
+    /**
+     * Started but not waited on, so a caller can have several running at once.
+     *
+     * @param  array{string, string}|null  $files  where stdout and stderr go instead of to pipes
+     */
+    private function start(Shell $step, float $timeout, string $runId, ?array $files = null): Process|Result
     {
         try {
-            $process = $this->processFor($step->command(), $timeout, $step->env());
+            $process = $this->processFor(
+                $files === null
+                    ? $step->command()
+                    // `exec` with no command only redirects the shell's own
+                    // descriptors. The shell then execs the step's command as
+                    // its last command, so a stop or a timeout signals the
+                    // command itself, as it does without the redirect. The
+                    // runner tests pin this with a command that would leave a
+                    // marker if only the outer shell were killed.
+                    : sprintf("exec >%s 2>%s\n%s", escapeshellarg($files[0]), escapeshellarg($files[1]), $step->command()),
+                $timeout,
+                $step->env(),
+            );
+
+            if ($files !== null) {
+                $this->redirects[$process] = $files;
+            }
         } catch (Throwable $throwable) {
             // Nothing was built, so there is no captured output to preserve.
             return Result::error($step->id(), "Could not run: {$throwable->getMessage()}");
@@ -306,10 +441,19 @@ final readonly class ProcessStepRunner implements BatchStepRunner
 
     private function combinedOutput(Process $process): string
     {
+        $files = $this->redirects[$process] ?? null;
+
         return implode("\n", array_filter([
-            rtrim($process->getOutput()),
-            rtrim($process->getErrorOutput()),
+            rtrim($files === null ? $process->getOutput() : $this->contents($files[0])),
+            rtrim($files === null ? $process->getErrorOutput() : $this->contents($files[1])),
         ], static fn (string $part): bool => $part !== ''));
+    }
+
+    private function contents(string $path): string
+    {
+        $contents = @file_get_contents($path);
+
+        return $contents === false ? '' : $contents;
     }
 
     /** @param array{summary: string, output_lines: int, shown_lines: int, truncated: bool, clipped: bool} $summary */

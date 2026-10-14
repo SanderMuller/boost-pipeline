@@ -41,6 +41,8 @@ final class RunPipeline extends Prompt
            scoped run verifies less, says so in `scope`, and its receipt records it.
            A name picks which pipeline; a scope narrows the one you picked.
         2. Call `next_step` repeatedly until `state` is `complete` or `halted`.
+           A response that carries `pending` and no result means the step is still
+           running on the server: call `next_step` again to keep waiting.
         3. When a step's `kind` is `skill`, invoke the skill it names, then call
            `report_step` with what you did. Until you do, the run stays `awaiting`
            and will not advance.

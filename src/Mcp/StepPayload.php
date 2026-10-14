@@ -58,6 +58,22 @@ final readonly class StepPayload
         ];
     }
 
+    /**
+     * A position whose steps are still running after the response window.
+     *
+     * The step is named so the agent knows what it is waiting on, and the
+     * envelope carries `pending`, which says what to do next.
+     *
+     * @return array<string, mixed>
+     */
+    public static function running(Run $run): array
+    {
+        return [
+            ...self::envelope($run),
+            ...self::currentStep($run),
+        ];
+    }
+
     /** @return array<string, mixed> */
     public static function complete(Run $run): array
     {
@@ -140,6 +156,18 @@ final readonly class StepPayload
         // and forced `OpenRun` to assemble a second copy to work around that.
         if ($run->walk->notices !== []) {
             $envelope['notices'] = $run->walk->notices;
+        }
+
+        // On every payload, not only on next_step: status and open_run are what an
+        // agent calls while it waits, and they must not read as an idle run.
+        $runningFor = $run->pendingSeconds();
+
+        if ($runningFor !== null) {
+            $envelope['running_for_seconds'] = $runningFor;
+            $envelope['pending'] = sprintf(
+                'The step at the cursor has been running for %ds and has no verdict yet. The server keeps it running. Call next_step to keep waiting for its verdict, or status to check on it. Do not run its command yourself, and do not edit files while it runs: an edit makes its verdict stale.',
+                $runningFor,
+            );
         }
 
         if ($run->results() !== []) {

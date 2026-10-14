@@ -202,3 +202,23 @@ it('refuses a blank purpose rather than reporting an empty one', function (): vo
     expect(fn (): Pipeline => Pipeline::configure()->withPurpose('   '))
         ->toThrow(InvalidPipelineConfigException::class, 'cannot be blank');
 });
+
+it('ignores nothing by default', function (): void {
+    expect(Pipeline::configure()->ignoredPaths())
+        ->toBeEmpty();
+});
+
+it('collects ignored paths once each, in declared order', function (): void {
+    $pipeline = Pipeline::configure()->ignoring(['specs', ' *.md '])->ignoring(['specs', 'docs/**']);
+
+    expect($pipeline->ignoredPaths())->toBe(['specs', '*.md', 'docs/**']);
+});
+
+it('refuses an ignored path that is blank or carries pathspec magic', function (string $pattern): void {
+    Pipeline::configure()->ignoring([$pattern]);
+})->with([
+    'blank' => [''],
+    'whitespace' => ['   '],
+    'magic' => [':(top)src'],
+    'short magic' => [':!src'],
+])->throws(InvalidPipelineConfigException::class);

@@ -10,6 +10,7 @@ use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Phases\Defaults\Agent;
 use SanderMuller\BoostPipeline\Phases\Defaults\Formatting;
 use SanderMuller\BoostPipeline\Phases\Defaults\StaticAnalysis;
+use SanderMuller\BoostPipeline\Phases\Defaults\Tests;
 use SanderMuller\BoostPipeline\Phases\StepCollection;
 use SanderMuller\BoostPipeline\Phases\Steps;
 use SanderMuller\BoostPipeline\Results\Result;
@@ -145,6 +146,26 @@ it('changes when the pipeline timeout changes', function (): void {
     $slower = Pipeline::configure()->withSteps(baselineDeclaration())->withTimeout(1200.0);
 
     expect(PipelineFingerprint::for($slower))->not->toBe(PipelineFingerprint::for($base));
+});
+
+it('keeps the digest every existing config already has when it ignores nothing', function (): void {
+    // Pinned to the value the release before `ignoring()` produced. A digest that
+    // moved here would expire every receipt on disk on upgrade.
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Tests::class)->append(Shell::run('vendor/bin/pest', id: 'tests'));
+    });
+
+    expect(PipelineFingerprint::for($pipeline))->toBe('v1:2e506521431b5b40')
+        ->and(PipelineFingerprint::for($pipeline->ignoring([])))->toBe('v1:2e506521431b5b40');
+});
+
+it('changes when the ignored paths change, and not when they are reordered', function (): void {
+    $base = PipelineFingerprint::for(Pipeline::configure()->withSteps(baselineDeclaration()));
+    $ignoring = PipelineFingerprint::for(Pipeline::configure()->withSteps(baselineDeclaration())->ignoring(['specs', '*.md']));
+    $reordered = PipelineFingerprint::for(Pipeline::configure()->withSteps(baselineDeclaration())->ignoring(['*.md', 'specs']));
+
+    expect($ignoring)->not->toBe($base)
+        ->and($reordered)->toBe($ignoring);
 });
 
 it('does NOT change when only an env VALUE changes', function (): void {

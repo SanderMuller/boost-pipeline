@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Config;
 
 use Closure;
+use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Phases;
 use SanderMuller\BoostPipeline\Phases\Steps;
@@ -27,6 +28,11 @@ final class Pipeline
     private ?float $timeoutSeconds = null;
 
     private ?string $purpose = null;
+
+    private ?float $responseWindow = null;
+
+    /** @var list<string> */
+    private array $ignoredPaths = [];
 
     private function __construct()
     {
@@ -113,6 +119,85 @@ final class Pipeline
     public function purpose(): ?string
     {
         return $this->purpose;
+    }
+
+    /**
+     * Return from `next_step` after this many seconds, even while a step still runs.
+     *
+     * The server starts the step, waits at most this long, and answers `running`
+     * with no verdict when the step is not done. The step keeps running; the next
+     * `next_step` continues the same wait, and `status` answers in between. See
+     * {@see BackgroundStepRunner} for why `status` cannot answer otherwise.
+     *
+     * Only when the call returns changes. The step runs once, its timeout still
+     * counts from its start, the tree it measured is the one from before it
+     * started, and its verdict is the one a blocking call would record. So this
+     * is NOT part of the declaration digest.
+     *
+     * Off by default: without it, every resolution blocks until its verdict, as
+     * it always has. Honoured only by a runner that implements
+     * {@see BackgroundStepRunner}, as the shipped one does.
+     */
+    public function withResponseWindow(float $seconds): self
+    {
+        if ($seconds <= 0.0) {
+            throw InvalidPipelineConfigException::responseWindowNotPositive($seconds);
+        }
+
+        $this->responseWindow = $seconds;
+
+        return $this;
+    }
+
+    public function responseWindow(): ?float
+    {
+        return $this->responseWindow;
+    }
+
+    /**
+     * Paths no step of this pipeline reads, so editing one does not stale a run.
+     *
+     * Each pattern is a git pathspec, matched from the project root the way git
+     * matches a plain pathspec: `*` crosses directory boundaries, so `*.md` is
+     * every markdown file at any depth, and a bare directory name such as `specs`
+     * covers everything under it. They are handed to git as `:(exclude)` entries.
+     *
+     * A claim the consumer makes, never one the package checks. A step that does
+     * read an ignored path keeps its pass after that path changes, which is the
+     * false green this setting trades for not re-running a suite after a prose
+     * edit. So the list is part of the declaration digest — changing it changes
+     * what a receipt is about — and `pipeline:verify` names it on every answer.
+     *
+     * Applied by the shipped git fingerprint only. A project that binds its own
+     * `TreeFingerprint` keeps that implementation's view of the tree, which is the
+     * stricter one.
+     *
+     * @param  list<string>  $patterns
+     */
+    public function ignoring(array $patterns): self
+    {
+        foreach ($patterns as $pattern) {
+            $pattern = trim($pattern);
+
+            // A leading colon is pathspec magic. Accepting it would let a pattern
+            // switch the exclusion off, or turn it into a positive pathspec that
+            // narrows the fingerprint to one directory.
+            if ($pattern === '' || str_starts_with($pattern, ':')) {
+                throw InvalidPipelineConfigException::ignoredPathInvalid($pattern);
+            }
+
+            if (! in_array($pattern, $this->ignoredPaths, true)) {
+                $this->ignoredPaths[] = $pattern;
+            }
+        }
+
+        return $this;
+    }
+
+    /** @return list<string> empty when the config ignores nothing, which is the default */
+    public function ignoredPaths(): array
+    {
+        return $this->ignoredPaths;
     }
 
     public function phases(): Phases

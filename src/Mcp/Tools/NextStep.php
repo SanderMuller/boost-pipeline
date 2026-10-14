@@ -25,7 +25,7 @@ final class NextStep extends Tool
 
     protected string $name = 'next_step';
 
-    protected string $description = 'Resolve the current step and get the next one. Shell steps are executed by the server — do not run the command yourself. If a step failed, fix the cause and then call open_run rather than this: it hands back the run you were already in when nothing moved, and a fresh one when anything did, which this tool never re-checks. You will get the same step until it passes.';
+    protected string $description = 'Resolve the current step and get the next one. Shell steps are executed by the server — do not run the command yourself. If a step failed, fix the cause and then call open_run rather than this: it hands back the run you were already in when nothing moved, and a fresh one when anything did, which this tool never re-checks. You will get the same step until it passes. A response with `pending` and no result means the step is still running: call this again to keep waiting.';
 
     public function __construct(private readonly RunManager $runs) {}
 
@@ -92,6 +92,12 @@ final class NextStep extends Tool
     private function resolve(Run $run): Response|ResponseFactory
     {
         $results = $run->resolveCurrent();
+
+        // The response window closed with the step still running. No verdict
+        // exists yet, so this is neither a result nor an error.
+        if ($results === [] && $run->isPending()) {
+            return Response::structured(StepPayload::running($run));
+        }
 
         if ($results === []) {
             // Resolving revealed a skill step (now awaiting) or the walk's end.

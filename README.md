@@ -151,6 +151,23 @@ unless you pass the same `--only=`.
 
 The runner caps a step at 540s. Raise it for one step with `Shell::run(…)->timeout(1800)`, or for
 the whole pipeline with `Pipeline::configure()->withTimeout(1800)`. The step's own value wins.
+A step that finishes after more than 80% of its timeout says so in its summary, so you can raise
+the ceiling before a slower run crosses it.
+
+### Long steps and `status`
+
+The stdio MCP server answers one call at a time. While `next_step` waits on a long step, a
+`status` call is not even read. Set a response window to make `next_step` return while the step
+keeps running:
+
+```php
+Pipeline::configure()->withResponseWindow(90);
+```
+
+After 90 seconds without a verdict, `next_step` answers `state: running` with a `pending` key and no
+result. The step keeps running on the server. Call `next_step` again to keep waiting, and `status`
+answers in between. The step still runs once, its timeout still counts from its start, and an edit
+made while it runs still makes its verdict stale. Off by default.
 
 ## Verdicts
 
@@ -212,6 +229,19 @@ change leaves it honestly fresh while `HEAD` carries something no run has seen. 
 exactly that one combination: the commit has moved since the run **and** the tree still holds
 uncommitted changes. Everything committed with the commit moved is the case this is all for, and
 passes.
+
+**Paths no step reads can be left out.** A spec checkbox, a screenshot or a prose file changes
+nothing a check reads, but by default it stales the run like any edit:
+
+```php
+Pipeline::configure()->ignoring(['specs', 'docs/**', '*.md']);
+```
+
+Each entry is a git pathspec, matched from the project root as git matches a plain pathspec: `*`
+crosses directories, so `*.md` is every markdown file, and `specs` covers everything under it. The
+list is a claim you make. If a step does read an ignored path, its pass survives an edit there.
+So the list is part of the declaration digest, and `pipeline:verify` names it on every answer.
+Only the shipped git fingerprint applies it; a custom `TreeFingerprint` ignores the list.
 
 Gitignored paths stay outside the fingerprint, which is what makes it usable — the run writes its
 own logs while it runs. `.env` is outside it too, so a check whose result depends on one is not a

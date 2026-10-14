@@ -152,13 +152,22 @@ final readonly class PipelineFingerprint
             $declared[] = ['phase' => $phaseClass, 'entries' => $entries];
         }
 
-        return [
+        $canonical = [
             // Registered phases decide which declared steps reach a walk at all,
             // and in what order the phases run.
             'phases' => $pipeline->phases()->all(),
             'declared' => $declared,
             'timeout' => self::number($pipeline->timeoutSeconds()),
         ];
+
+        // Only when set, so every config that ignores nothing keeps the digest it
+        // had before the setting existed and no receipt on disk expires for it.
+        // Sorted: the patterns are a set, and reordering them excludes nothing new.
+        if ($pipeline->ignoredPaths() !== []) {
+            $canonical['ignored'] = self::sorted($pipeline->ignoredPaths());
+        }
+
+        return $canonical;
     }
 
     /**
