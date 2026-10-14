@@ -698,7 +698,7 @@ it('keeps the verdict of a background step that finished inside its timeout but 
 
 it('still times out a background step that is running past its timeout when it is next polled', function (): void {
     $marker = sys_get_temp_dir().'/bp-hung-'.bin2hex(random_bytes(4));
-    $pending = $this->runner->begin([Shell::run('sh -c '.escapeshellarg('sleep 2; touch '.escapeshellarg($marker)), id: 'hung')->timeout(0.5)], 'r-test');
+    $pending = $this->runner->begin([Shell::run('sleep 2; touch '.escapeshellarg($marker), id: 'hung')->timeout(0.5)], 'r-test');
 
     expect($pending->await(0.0))->toBeNull();
 
@@ -717,14 +717,12 @@ it('reports a missing binary in the background as an error, never as a failure',
         ->toBe(Verdict::Error);
 });
 
-it('kills the command itself on stop, not only the shell that started it', function (): void {
-    // The command runs in a shell of its own, so a stop that reached only the
-    // outer shell would leave it running and the marker would appear.
+it('kills the shell running the step on stop, through the output redirect', function (): void {
     $marker = sys_get_temp_dir().'/bp-stop-'.bin2hex(random_bytes(4));
-    $pending = $this->runner->begin([Shell::run('sh -c '.escapeshellarg('sleep 1; touch '.escapeshellarg($marker)), id: 'killed')], 'r-test');
+    $pending = $this->runner->begin([Shell::run('sleep 1; touch '.escapeshellarg($marker), id: 'killed')], 'r-test');
 
-    // Late enough that the shells have started the command, so a stop that
-    // reached only the outer one would leave it running.
+    // Late enough that the step is running, so a stop that reached only a
+    // wrapper process would leave it to write the marker.
     Sleep::usleep(300_000);
     $pending->stop();
     Sleep::usleep(1_500_000);
