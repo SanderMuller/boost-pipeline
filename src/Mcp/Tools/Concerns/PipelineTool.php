@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Mcp\Tools\Concerns;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\JsonSchema\Types\ArrayType;
+use Illuminate\JsonSchema\Types\BooleanType;
 use Illuminate\JsonSchema\Types\ObjectType;
 use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Request;
@@ -113,7 +115,7 @@ trait PipelineTool
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{step: ObjectType, steps: ArrayType, parallel: BooleanType}
      */
     protected function stepSchema(JsonSchema $schema): array
     {
@@ -142,7 +144,7 @@ trait PipelineTool
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{result: ObjectType, results: ArrayType}
      */
     protected function resultSchema(JsonSchema $schema): array
     {

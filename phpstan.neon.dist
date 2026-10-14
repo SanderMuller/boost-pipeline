@@ -68,6 +68,25 @@ parameters:
         -
             identifier: trait.unused
             reportUnmatched: false
+        # Naming rules symplify/phpstan-rules added in 14.16. Every public
+        # contract, the shared tool trait, the exception classes and the test
+        # base would have to be renamed or moved, and each of those is a break
+        # for every consumer that implements or catches them.
+        -
+            identifier: symplify.explicitInterfaceSuffixName
+            reportUnmatched: false
+        -
+            identifier: symplify.explicitTraitSuffixName
+            reportUnmatched: false
+        -
+            identifier: symplify.explicitAbstractPrefixName
+            reportUnmatched: false
+        -
+            identifier: symplify.requireExceptionNamespace
+            reportUnmatched: false
+        -
+            identifier: symplify.classNameRespectsParentSuffix
+            reportUnmatched: false
         # Pest's expectation API is marked @internal but is the intended public
         # surface for tests. Allow calling it from our tests/.
         -

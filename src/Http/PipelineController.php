@@ -88,7 +88,7 @@ final readonly class PipelineController
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{pipelines: list<mixed>, error: string|null}
      */
     private function payload(): array
     {

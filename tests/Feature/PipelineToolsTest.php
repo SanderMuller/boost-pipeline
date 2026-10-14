@@ -142,7 +142,7 @@ it('returns the same step repeatedly while it fails, and blocks rather than halt
     $this->verdicts->set(['pint' => Verdict::Failed]);
     PipelineServer::tool(OpenRun::class);
 
-    foreach (range(1, 3) as $ignored) {
+    for ($attempt = 1; $attempt <= 3; $attempt++) {
         PipelineServer::tool(NextStep::class)
             ->assertOk()
             ->assertSee('"state":"blocked"')

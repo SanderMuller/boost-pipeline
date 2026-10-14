@@ -108,7 +108,7 @@ it('holds the cursor on a failure and returns the same step however often it is 
     $run = threeStepRun($runner);
     $run->resolveCurrent();
 
-    foreach (range(1, 4) as $ignored) {
+    for ($attempt = 1; $attempt <= 4; $attempt++) {
         $run->resolveCurrent();
         expect($run->currentStep()?->step->id())->toBe('phpstan')
             ->and($run->state())->toBe(RunState::Blocked);

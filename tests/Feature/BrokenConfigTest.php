@@ -99,7 +99,7 @@ it('fails at server start when any pipeline in a map is broken', function (): vo
     // A session that only ever opens `pr` would otherwise never learn that
     // `release` cannot walk at all. Validation covers every pipeline the file
     // declares, not the one a session happens to reach for.
-    $registrar = bootWithConfig(<<<'PHP'
+    bootWithConfig(<<<'PHP'
         <?php
 
         use SanderMuller\BoostPipeline\Config\Pipeline;
