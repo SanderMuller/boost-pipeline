@@ -1,5 +1,23 @@
 # Upgrading
 
+## From 0.20 to 0.21
+
+- **`open_run` reloads a changed `.config/pipeline.php`.** You no longer reconnect the MCP server
+  after an edit or a branch switch. A reload replaces every open run, unless its step is still
+  running.
+
+- **`open_run` can refuse with a reconnect message.** It does so when it cannot run the config again
+  safely in one process: the file declares a named class, function or constant, includes another
+  file, a project class it loaded changed, or the pipeline names changed. Move a class or function
+  out of the config into an autoloaded file to keep reloads working. A project class loaded before
+  the config is not tracked: after an edit to it, reconnect.
+
+- **A server that started with an invalid config still needs a reconnect.** It serves only the
+  tool that explains the error, so there is no `open_run` to reload from.
+
+- **`RunManager` takes an optional `ConfigReloader`,** and `StepRunnerFactory` gained `flush()`.
+  Both are additive. A `RunManager` built without a reloader loads the config once, as before.
+
 ## From 0.19 to 0.20
 
 Nothing to change. Both new settings are off until you set them.

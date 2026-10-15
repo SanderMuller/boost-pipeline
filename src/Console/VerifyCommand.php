@@ -512,9 +512,10 @@ final class VerifyCommand extends Command
     /**
      * Whether the run walked a declaration this config no longer produces.
      *
-     * The server resolves the config once when its process starts, so a step
-     * redefined after that is invisible to every run until the client reconnects.
-     * It then runs an OLDER DEFINITION of the same step id and records it as a
+     * A run walks the declaration it opened with, so a step redefined while the
+     * run is open is invisible to it — and a server older than 0.21 kept the
+     * config it loaded at start until the client reconnected. The run then runs
+     * an OLDER DEFINITION of the same step id and records it as a
      * pass, and nothing else notices: the verdicts are keyed by id, so the
      * declared-step guard sees nothing missing, and the tree fingerprint matches
      * because the run ran against the tree that already held the new config.
@@ -564,7 +565,7 @@ final class VerifyCommand extends Command
         }
 
         return sprintf(
-            'Run [%s] walked a pipeline declaration that is not the declaration this config produces now, so what it recorded describes steps this project no longer declares. Three things cause that. The MCP server resolves the config once when its process starts, so a step changed after that is invisible to every run until the client reconnects — that is the usual one, and reconnecting then opening a new run fixes it. The config may also be one git cannot see, ignored or symlinked or composed from outside the repository, in which case the tree fingerprint could not tell you it moved. Or the config computes part of its declaration when it loads, from the environment or a file outside the repository, in which case two processes disagree about files nobody touched and no run will ever match — set [%s.verify.config_fingerprint] to false if that is deliberate.',
+            'Run [%s] walked a pipeline declaration that is not the declaration this config produces now, so what it recorded describes steps this project no longer declares. Three things cause that. A run walks the declaration it opened with, so a step changed while it was open is invisible to it — that is the usual one, and opening a new run fixes it: open_run reloads a changed config, and says when it cannot, in which case reconnect the MCP client first. The config may also be one git cannot see, ignored or symlinked or composed from outside the repository, in which case the tree fingerprint could not tell you it moved. Or the config computes part of its declaration when it loads, from the environment or a file outside the repository, in which case two processes disagree about files nobody touched and no run will ever match — set [%s.verify.config_fingerprint] to false if that is deliberate.',
             $receipt->runId,
             BoostPipelineServiceProvider::CONFIG,
         );
@@ -578,11 +579,11 @@ final class VerifyCommand extends Command
      * dropped. A step the server never loaded raises no notice, leaves no
      * verdict, and lands in a receipt that calls itself complete.
      *
-     * That is reachable in ordinary use: the MCP server resolves the config once
-     * when its process starts, so a step declared after that is invisible to
-     * every run until the client reconnects. The tree fingerprint does not catch
-     * it either — the run ran against the tree that already held the new step, so
-     * the fingerprints match.
+     * That is reachable in ordinary use: a run walks the declaration it opened
+     * with, so a step declared while it is open is invisible to it, and a server
+     * older than 0.21 kept its start-up config until the client reconnected. The
+     * tree fingerprint does not catch it either — the run ran against the tree
+     * that already held the new step, so the fingerprints match.
      *
      * This command is the one place that can answer it. It runs in its own
      * process and loads the config as it stands now, so it can compare what is
@@ -682,7 +683,7 @@ final class VerifyCommand extends Command
         }
 
         return sprintf(
-            'Run [%s] never held %d step(s) this pipeline declares%s: [%s]. The run reports itself complete because it walked every step it knew about — these were not among them, so nothing failed and nothing was skipped. The usual cause is a step declared after the MCP server process started, which resolves the config once: reconnect the client, then open a new run.',
+            'Run [%s] never held %d step(s) this pipeline declares%s: [%s]. The run reports itself complete because it walked every step it knew about — these were not among them, so nothing failed and nothing was skipped. The usual cause is a step declared while the run was open, which a run never picks up: open a new run, which reloads the config. If open_run refuses the reload, reconnect the client first.',
             $receipt->runId,
             count($missing),
             $receipt->scope === null ? '' : " in scope [{$receipt->scope}]",

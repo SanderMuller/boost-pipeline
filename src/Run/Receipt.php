@@ -88,9 +88,10 @@ final readonly class Receipt
         /**
          * Which declaration the run walked.
          *
-         * The server resolves the config once when its process starts, so a step
-         * declared or redefined after that is invisible to every run until the
-         * client reconnects. It can then run a DIFFERENT DEFINITION of the same
+         * A run walks the declaration it opened with, so a step declared or
+         * redefined while it is open is invisible to it, and a server older than
+         * 0.21 kept its start-up config until the client reconnected. It can then
+         * run a DIFFERENT DEFINITION of the same
          * step id and record it as a pass: the verdicts are keyed by id, and the
          * tree fingerprint matches because the run ran against the tree that
          * already held the new config. This is the only field that can catch that.

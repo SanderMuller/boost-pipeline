@@ -108,4 +108,20 @@ final class InvalidPipelineConfigException extends RuntimeException
     {
         return new self("A response window must be greater than zero, got {$seconds}. Leave `withResponseWindow()` off to wait for every verdict.");
     }
+
+    public static function configNeedsReconnect(string $reason): self
+    {
+        return new self(sprintf(
+            '.config/pipeline.php changed since this server loaded it, and it cannot be reloaded in place: %s. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again. Opening a run now would walk steps the project no longer declares.',
+            $reason,
+        ));
+    }
+
+    public static function configReloadFailed(string $message): self
+    {
+        return new self(sprintf(
+            '.config/pipeline.php changed since this server loaded it, and the new version does not load: %s Fix the file and call open_run again; the server keeps the old declaration until a reload succeeds, and opens no run on it.',
+            rtrim($message, '.').'.',
+        ));
+    }
 }

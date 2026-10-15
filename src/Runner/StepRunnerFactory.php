@@ -28,4 +28,15 @@ final class StepRunnerFactory
     {
         return $this->runners[$pipeline] ??= ($this->build)($pipeline);
     }
+
+    /**
+     * Drop every runner built so far, so the next one reads the config again.
+     *
+     * A reloaded config can change a pipeline's timeout, and a runner built
+     * before the reload would keep the old one.
+     */
+    public function flush(): void
+    {
+        $this->runners = [];
+    }
 }

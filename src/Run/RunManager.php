@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Config\ConfigReloader;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
@@ -40,13 +41,21 @@ final class RunManager
     /** @var array<string, Run> */
     private array $runs = [];
 
+    /**
+     * The map each open run was started from.
+     *
+     * @var array<string, Pipelines>
+     */
+    private array $openedFrom = [];
+
     public function __construct(
-        private readonly Pipelines $pipelines,
+        private Pipelines $pipelines,
         private readonly StepRunnerFactory $runners,
         private readonly ?TreeFingerprint $tree = null,
         private readonly ?ReceiptStoreFactory $receipts = null,
         private readonly ?RunHistoryStoreFactory $history = null,
         private readonly ?LiveProgressStoreFactory $live = null,
+        private readonly ?ConfigReloader $config = null,
     ) {}
 
     /**
@@ -57,6 +66,8 @@ final class RunManager
      */
     public function open(?string $pipeline = null, ?string $selection = null): Run
     {
+        $this->reloadChangedConfig();
+
         $name = $this->resolveName($pipeline);
         $run = $this->runs[$name] ?? null;
 
@@ -74,6 +85,16 @@ final class RunManager
         // only throw away a suite that is minutes into its work.
         if ($run instanceof Run && $run->isPending()) {
             return $run;
+        }
+
+        // A run walks the declaration it opened with, so a reload replaces it
+        // before the tree is even asked about — the rebaseline below would
+        // otherwise keep a stale walk for a run that has recorded nothing yet.
+        // Not by digest: that leaves out env values and the response window,
+        // which the run also carries.
+        if ($run instanceof Run && ($this->openedFrom[$name] ?? null) !== $this->pipelines) {
+            $run->abandon();
+            $run = null;
         }
 
         if ($run instanceof Run) {
@@ -119,9 +140,29 @@ final class RunManager
                 live: $this->live?->for($name),
                 responseWindow: $declared->responseWindow(),
             );
+
+            $this->openedFrom[$name] = $this->pipelines;
         }
 
         return $this->runs[$name] = $run;
+    }
+
+    /**
+     * Swap in the config on disk when it changed since it was loaded.
+     *
+     * Only here, between runs. `next_step` and `status` keep walking the run they
+     * have, so a reload never changes a walk under its cursor.
+     *
+     * @throws InvalidPipelineConfigException when it changed and cannot be reloaded in place
+     */
+    private function reloadChangedConfig(): void
+    {
+        $fresh = $this->config?->refresh();
+
+        if ($fresh instanceof Pipelines) {
+            $this->pipelines = $fresh;
+            $this->runners->flush();
+        }
     }
 
     /** @throws InvalidPipelineConfigException */

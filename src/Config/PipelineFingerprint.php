@@ -12,9 +12,10 @@ use SanderMuller\BoostPipeline\Steps\Skill;
 /**
  * Digests a pipeline's whole declaration, so a run can record which one it used.
  *
- * The MCP server resolves the config once when its process starts. A step
- * declared or redefined after that is invisible to every run until the client
- * reconnects, and the server can then run a different definition of the same step
+ * A run walks the declaration it opened with, so a step declared or redefined
+ * while it is open is invisible to it, and a server older than 0.21 kept its
+ * start-up config until the client reconnected. The server can then run a
+ * different definition of the same step
  * id and record it as a pass. Nothing else catches that: the receipt's verdicts
  * are keyed by step id, and the tree fingerprint matches because the run ran
  * against the tree that already held the new config.

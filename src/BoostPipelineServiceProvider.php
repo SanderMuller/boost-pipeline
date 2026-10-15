@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\ConfigError;
+use SanderMuller\BoostPipeline\Config\ConfigReloader;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Config\Pipelines;
@@ -70,8 +71,22 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 
         $this->app->singleton(PipelineLoader::class, fn (): PipelineLoader => new PipelineLoader($this->app->basePath()));
 
+        // A reload rebinds the map, so every lazy reader gets the new one, and the
+        // sole-pipeline alias with it. A reload never changes the names.
+        $this->app->singleton(ConfigReloader::class, fn (): ConfigReloader => new ConfigReloader(
+            $this->app->make(PipelineLoader::class),
+            $this->app->basePath(),
+            function (Pipelines $pipelines): void {
+                $this->app->instance(Pipelines::class, $pipelines);
+
+                if ($pipelines->soleName() !== null) {
+                    $this->app->instance(Pipeline::class, $pipelines->sole());
+                }
+            },
+        ));
+
         $this->app->singleton(Pipelines::class, function (): Pipelines {
-            $pipelines = $this->app->make(PipelineLoader::class)->load();
+            $pipelines = $this->app->make(ConfigReloader::class)->pipelines();
 
             // Registration is gated on the same check, so an opted-out project
             // never reaches this fallback.
@@ -189,6 +204,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             $this->app->make(ReceiptStoreFactory::class),
             $this->app->make(RunHistoryStoreFactory::class),
             $this->app->make(LiveProgressStoreFactory::class),
+            $this->app->make(ConfigReloader::class),
         ));
     }
 

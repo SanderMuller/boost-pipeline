@@ -262,7 +262,7 @@ explained away. Only a pass records a tree, so fixing a blocked step and retryin
 ## Letting something else read the run
 
 Run state lives in the server process. Anything that restarts that process, such as a client
-reconnect after an edit to `.config/pipeline.php`, forgets every open run: `status` then answers
+reconnect, forgets every open run: `status` then answers
 `No run is open`, and only the receipt and `pipeline:history` still describe the walk that just
 finished. A receipt goes to
 `storage/logs/pipeline/receipts/<pipeline>.json`
@@ -273,12 +273,16 @@ receipt describes a different tree, when the run recorded itself stale, and when
 unverified. That first case is the point: a gate that treats a missing answer as "nothing to check"
 passes the run that never happened.
 
-It also fails when the run walked a pipeline declaration your config no longer produces. The server
-resolves the config once when its process starts, so a step you redefine after that keeps running
-its old definition — an old command under the same step id, recorded as a pass. The verdicts are
-keyed by id, so nothing about the step list looks wrong, and the tree fingerprint matches because
-the run ran against
-the tree that already held your change. Reconnect the MCP client and open a new run.
+It also fails when the run walked a pipeline declaration your config no longer produces: an old
+command under the same step id, recorded as a pass. The verdicts are keyed by id, so nothing about
+the step list looks wrong, and the tree fingerprint matches because the run ran against the tree
+that already held your change. Open a new run.
+
+**`open_run` reloads a changed `.config/pipeline.php`**, so an edit or a branch switch needs no
+reconnect. A reload replaces every open run, unless its step is still running.
+`open_run` refuses instead, and says why, when running the file again in the same process is not
+safe: the config declares a named class, function or constant, it includes another file, a class
+it loaded changed, or the set of pipeline names changed. Reconnect the MCP client then.
 
 Two other things produce the same mismatch, and the message names all three. A config git cannot
 see — ignored, symlinked, or composed from a file outside the repository — moves without moving the
@@ -288,9 +292,9 @@ them disagree about files nobody touched. If that is deliberate, set `verify.con
 false in the published config; nothing else compensates for it, so do it knowingly.
 
 It also fails when your config declares a step the run never held. The command loads the config in
-its own process, so it sees the steps declared now, not the ones the server loaded when it
-started — and a server started before a step was declared walks right past it, recording a run
-that calls itself complete. Reconnect the MCP client and open a new run. The comparison is made in
+its own process, so it sees the steps declared now, not the ones the run held when it
+opened — and a run opened before a step was declared walks right past it, recording a run that
+calls itself complete. Open a new run. The comparison is made in
 the scope the answer is about, and a step you have since removed does not fail anything.
 
 It also fails when your config declares a step into a phase nothing registers. Such a step never
