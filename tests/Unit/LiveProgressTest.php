@@ -27,6 +27,7 @@ use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
 use SanderMuller\BoostPipeline\Runner\StepRunnerFactory;
 use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Steps\Skill;
+use Symfony\Component\Process\Process;
 
 /** Reads the live record while a step is running — the only moment it exists. */
 final class WatchingRunner implements StepRunner
@@ -479,3 +480,25 @@ it('reads a live record written before it carried a declaration digest', functio
     expect($record)->not->toBeNull()
         ->and($record?->configDigest)->toBeNull();
 });
+
+it('expires any record whose server is gone, and only then', function (RunState $state): void {
+    $exited = new Process(['sleep', '0.1']);
+    $exited->start();
+
+    $gone = $exited->getPid() ?? throw new RuntimeException('No pid.');
+    $exited->wait();
+
+    $record = static fn (?int $owner): LiveProgress => new LiveProgress(
+        runId: 'r-live',
+        token: 't',
+        state: $state,
+        stepIds: ['review'],
+        startedAt: gmdate('c'),
+        owner: $owner,
+    );
+
+    expect($record($gone)->hasExpired())->toBeTrue()
+        ->and($record((int) getmypid())->hasExpired())->toBeFalse()
+        ->and($record(null)->hasExpired())->toBeFalse()
+        ->and(LiveProgress::fromArray($record($gone)->toArray())?->owner)->toBe($gone);
+})->with([RunState::Awaiting, RunState::Running]);

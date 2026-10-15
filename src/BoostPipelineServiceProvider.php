@@ -42,6 +42,7 @@ use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
+use SanderMuller\BoostPipeline\Runner\MachineSlots;
 use SanderMuller\BoostPipeline\Runner\OutputSummariser;
 use SanderMuller\BoostPipeline\Runner\ProcessStepRunner;
 use SanderMuller\BoostPipeline\Runner\StepRunnerFactory;
@@ -83,6 +84,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
                     $this->app->instance(Pipeline::class, $pipelines->sole());
                 }
             },
+            $this->app->basePath('vendor/composer/installed.php'),
         ));
 
         $this->app->singleton(Pipelines::class, function (): Pipelines {
@@ -245,7 +247,15 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             summariser: new OutputSummariser,
             environment: new EnvironmentScrubber($this->app->basePath()),
             timeoutSeconds: $declared ?? ProcessStepRunner::DEFAULT_TIMEOUT_SECONDS,
+            slots: new MachineSlots($this->slotsDirectory()),
         );
+    }
+
+    private function slotsDirectory(): string
+    {
+        $directory = config(self::CONFIG.'.slots.directory');
+
+        return is_string($directory) && trim($directory) !== '' ? $directory : MachineSlots::defaultDirectory();
     }
 
     /**

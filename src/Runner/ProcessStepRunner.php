@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Runner;
 
+use Closure;
+use Illuminate\Support\Sleep;
 use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\PendingSteps;
 use SanderMuller\BoostPipeline\Contracts\Step;
+use SanderMuller\BoostPipeline\Contracts\WaitsForSlots;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Results\Result;
 use SanderMuller\BoostPipeline\Steps\Shell;
@@ -35,6 +38,11 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
 
     private const float SCOPE_TIMEOUT_SECONDS = 60.0;
 
+    private const float ABORT_TIMEOUT_SECONDS = 60.0;
+
+    /** How often a blocking wait looks at its process. */
+    private const float POLL_SECONDS = 0.02;
+
     /** Past this share of its timeout, a step that still finished is reported as close to the edge. */
     private const float HEADROOM_WARNING_RATIO = 0.8;
 
@@ -48,14 +56,18 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
      */
     private WeakMap $redirects;
 
+    private MachineSlots $slots;
+
     public function __construct(
         private string $workingDirectory,
         private LogWriter $logs,
         private OutputSummariser $summariser,
         private EnvironmentScrubber $environment,
         private float $timeoutSeconds = self::DEFAULT_TIMEOUT_SECONDS,
+        ?MachineSlots $slots = null,
     ) {
         $this->redirects = new WeakMap;
+        $this->slots = $slots ?? new MachineSlots(MachineSlots::defaultDirectory());
     }
 
     /**
@@ -114,10 +126,11 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
      *
      * @param  list<Step>  $steps
      */
-    public function begin(array $steps, string $runId): PendingSteps
+    public function begin(array $steps, string $runId): PendingSteps&WaitsForSlots
     {
         $settled = [];
         $running = [];
+        $queued = [];
 
         foreach ($steps as $step) {
             if ($step->kind() !== StepKind::Shell || ! $step instanceof Shell) {
@@ -134,56 +147,117 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
                 continue;
             }
 
-            // Windows runs the command through cmd.exe, which has no `exec` to
-            // redirect with, so output stays on pipes there. A long background
-            // step can then block on a full pipe between calls.
-            $windows = DIRECTORY_SEPARATOR === '\\';
-            $files = $windows ? null : $this->outputFiles();
+            $slot = $step->slotName();
 
-            if (! $windows && $files === null) {
-                $settled[$step->id()] = Result::error($step->id(), sprintf('Could not run: no file for its output could be created in %s.', sys_get_temp_dir()));
+            try {
+                $hold = $slot === null ? null : $this->slots->take($slot, $step->slotCapacity());
+            } catch (SlotUnavailable $slotUnavailable) {
+                $settled[$step->id()] = Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
 
                 continue;
             }
 
-            $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
-            $process = $this->start($step, $timeout, $runId, $files);
-            $discard = static function () use ($files): void {
-                if ($files !== null) {
-                    @unlink($files[0]);
-                    @unlink($files[1]);
-                }
-            };
+            if ($slot !== null && ! $hold instanceof SlotHold) {
+                // Not started until it holds a slot, so the wait never counts
+                // toward its timeout: Symfony's clock starts at start().
+                $queuedAt = microtime(true);
+                $queued[$step->id()] = [
+                    $slot,
+                    function () use ($step, $runId, $scope, $slot, $queuedAt): array|Result|null {
+                        try {
+                            $hold = $this->slots->take($slot, $step->slotCapacity());
+                        } catch (SlotUnavailable $slotUnavailable) {
+                            return Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
+                        }
 
-            if ($process instanceof Result) {
-                $settled[$step->id()] = $process;
-                $discard();
+                        return $hold instanceof SlotHold
+                            ? $this->launch($step, $runId, $scope, $hold, $this->milliseconds(microtime(true) - $queuedAt))
+                            : null;
+                    },
+                ];
 
                 continue;
             }
 
-            $running[$step->id()] = [
-                $process,
-                function (?Throwable $failure, float $seenAt, bool $late) use ($step, $process, $scope, $runId, $timeout, $discard): Result {
-                    try {
-                        return match (true) {
-                            ! $failure instanceof Throwable => $this->verdictFor($step, $process, $scope, $runId, $timeout, $seenAt, $late),
-                            $failure instanceof ProcessTimedOutException => $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s."),
-                            default => $this->preserving($process, $step->id(), $runId, "Could not run: {$failure->getMessage()}"),
-                        };
-                    } finally {
-                        $discard();
-                    }
-                },
-                $discard,
-            ];
+            $launched = $this->launch($step, $runId, $scope, $hold, $slot === null ? null : 0);
+
+            if ($launched instanceof Result) {
+                $settled[$step->id()] = $launched;
+            } else {
+                $running[$step->id()] = $launched;
+            }
         }
 
         return new ProcessPendingSteps(
             array_map(static fn (Step $step): string => $step->id(), $steps),
             $settled,
             $running,
+            $queued,
         );
+    }
+
+    /**
+     * Starts one step in the background, holding its slot until it is settled.
+     *
+     * @return array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void}|Result
+     */
+    private function launch(Shell $step, string $runId, ?int $scope, ?SlotHold $hold, ?int $slotWaitMs): array|Result
+    {
+        // Windows runs the command through cmd.exe, which has no `exec` to
+        // redirect with, so output stays on pipes there. A long background
+        // step can then block on a full pipe between calls.
+        $windows = DIRECTORY_SEPARATOR === '\\';
+        $files = $windows ? null : $this->outputFiles();
+
+        if (! $windows && $files === null) {
+            $hold?->release();
+
+            return Result::error($step->id(), sprintf('Could not run: no file for its output could be created in %s.', sys_get_temp_dir()));
+        }
+
+        $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
+        $process = $this->start($step, $timeout, $runId, $files);
+        $discard = static function () use ($files, $hold): void {
+            if ($files !== null) {
+                @unlink($files[0]);
+                @unlink($files[1]);
+            }
+
+            $hold?->release();
+        };
+
+        if ($process instanceof Result) {
+            $discard();
+
+            return $process;
+        }
+
+        return [
+            $process,
+            function (?Throwable $failure, float $seenAt, bool $late) use ($step, $process, $scope, $runId, $timeout, $discard, $slotWaitMs): Result {
+                try {
+                    $result = match (true) {
+                        ! $failure instanceof Throwable => $this->verdictFor($step, $process, $scope, $runId, $timeout, $seenAt, $late),
+                        $failure instanceof ProcessTimedOutException => $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s.", $this->aborted($step, $runId)),
+                        default => $this->preserving($process, $step->id(), $runId, "Could not run: {$failure->getMessage()}"),
+                    };
+
+                    return $result->timed($this->milliseconds($seenAt - $process->getStartTime()), $slotWaitMs);
+                } finally {
+                    // After an onAbort command, so the cleanup runs inside the slot.
+                    $discard();
+                }
+            },
+            $discard,
+            function () use ($step, $runId): void {
+                $this->aborted($step, $runId);
+            },
+        ];
+    }
+
+    private function milliseconds(float $seconds): int
+    {
+        return (int) round(max(0.0, $seconds) * 1000);
     }
 
     /** @return array{string, string}|null */
@@ -215,25 +289,73 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             return $scope;
         }
 
-        $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
-
-        // The command ALWAYS runs. An empty scope annotates the verdict; it never
-        // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
-        // scope command that silently matches nothing, permanently disables the
-        // gate — a false green of exactly the kind this pipeline exists to stop.
-        $process = $this->start($step, $timeout, $runId);
-
-        if ($process instanceof Result) {
-            return $process;
+        try {
+            [$hold, $slotWaitMs] = $this->waitForSlot($step);
+        } catch (SlotUnavailable $slotUnavailable) {
+            return Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
         }
 
-        $timedOut = $this->settle($process, $step->id(), $timeout, $runId);
+        try {
+            $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
 
-        if ($timedOut instanceof Result) {
-            return $timedOut;
+            // The command ALWAYS runs. An empty scope annotates the verdict; it never
+            // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
+            // scope command that silently matches nothing, permanently disables the
+            // gate — a false green of exactly the kind this pipeline exists to stop.
+            $process = $this->start($step, $timeout, $runId);
+
+            if ($process instanceof Result) {
+                return $process;
+            }
+
+            try {
+                $timedOut = $this->outlived($process);
+                // Before an onAbort command runs, so its time is not the step's.
+                $endedAt = microtime(true);
+
+                if (! $timedOut) {
+                    $process->wait();
+                }
+            } catch (Throwable $throwable) {
+                return $this->preserving($process, $step->id(), $runId, "Could not run: {$throwable->getMessage()}")
+                    ->timed($this->milliseconds(microtime(true) - $process->getStartTime()), $slotWaitMs);
+            }
+
+            $result = $timedOut
+                ? $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s.", $this->aborted($step, $runId))
+                : $this->verdictFor($step, $process, $scope, $runId, $timeout, $endedAt);
+
+            return $result->timed($this->milliseconds($endedAt - $process->getStartTime()), $slotWaitMs);
+        } finally {
+            $hold?->release();
+        }
+    }
+
+    /**
+     * Blocks until the step holds its slot. Only a pipeline without a response
+     * window resolves a step this way, and config loading refuses a slot there,
+     * so this serves a runner called directly.
+     *
+     * @return array{SlotHold|null, int|null}
+     */
+    private function waitForSlot(Shell $step): array
+    {
+        $slot = $step->slotName();
+
+        if ($slot === null) {
+            return [null, null];
         }
 
-        return $this->verdictFor($step, $process, $scope, $runId, $timeout);
+        $queuedAt = microtime(true);
+
+        $hold = $this->slots->take($slot, $step->slotCapacity());
+
+        while (! $hold instanceof SlotHold) {
+            Sleep::usleep(250_000);
+            $hold = $this->slots->take($slot, $step->slotCapacity());
+        }
+
+        return [$hold, $this->milliseconds(microtime(true) - $queuedAt)];
     }
 
     /**
@@ -386,18 +508,58 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
         }
     }
 
-    /** A Result when the step never produced a verdict, null when it did. */
-    private function settle(Process $process, string $stepId, float $timeout, string $runId): ?Result
+    /**
+     * Waits for the process, and stops it with everything it started once it
+     * runs past its timeout. True when it was stopped.
+     *
+     * Not Symfony's own wait: on a timeout that signals the shell alone, and
+     * the processes below it are then lost to pid 1 before anything can find them.
+     */
+    private function outlived(Process $process): bool
     {
-        try {
-            $process->wait();
+        $timeout = $process->getTimeout();
 
-            return null;
-        } catch (ProcessTimedOutException) {
-            return $this->preserving($process, $stepId, $runId, "Timed out after {$timeout}s.");
-        } catch (Throwable $exception) {
-            return $this->preserving($process, $stepId, $runId, "Could not run: {$exception->getMessage()}");
+        while ($process->isRunning()) {
+            if ($timeout !== null && microtime(true) - $process->getStartTime() > $timeout) {
+                ProcessTree::terminate($process);
+
+                return true;
+            }
+
+            Sleep::usleep((int) (self::POLL_SECONDS * 1_000_000));
         }
+
+        return false;
+    }
+
+    /**
+     * Runs the step's onAbort command, and says how that went.
+     *
+     * Its output goes to a log of its own: the step's log holds what the step
+     * printed before it was stopped, which is the part worth diagnosing.
+     */
+    private function aborted(Shell $step, string $runId): ?string
+    {
+        $command = $step->abortCommand();
+
+        if ($command === null) {
+            return null;
+        }
+
+        try {
+            $process = $this->processFor($command, self::ABORT_TIMEOUT_SECONDS, $step->env());
+            $process->start();
+            $timedOut = $this->outlived($process);
+            $logPath = $this->logs->write($runId, $step->id().'.on-abort', $this->combinedOutput($process));
+        } catch (Throwable $throwable) {
+            return "Its onAbort command could not run: {$throwable->getMessage()}";
+        }
+
+        $where = $logPath === null ? '' : ", output at {$logPath}";
+
+        return $timedOut
+            ? sprintf('Its onAbort command was stopped after %.0fs%s.', self::ABORT_TIMEOUT_SECONDS, $where)
+            : sprintf('Ran its onAbort command: exit %d%s.', $process->getExitCode() ?? 1, $where);
     }
 
     /** @param array<string, string> $env */
@@ -411,17 +573,21 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
         }
 
         try {
-            $process->run();
+            $process->start();
+
+            if ($this->outlived($process)) {
+                return $this->preserving($process, $stepId, $runId, "Timed out after {$timeout}s.");
+            }
+
+            $process->wait();
 
             return $process;
-        } catch (ProcessTimedOutException) {
-            return $this->preserving($process, $stepId, $runId, "Timed out after {$timeout}s.");
-        } catch (Throwable $exception) {
+        } catch (Throwable $throwable) {
             // run() is start() plus wait(). A start() failure leaves the process
             // unstarted, and reading its output would throw out of this catch.
             return $process->isStarted()
-                ? $this->preserving($process, $stepId, $runId, "Could not run: {$exception->getMessage()}")
-                : Result::error($stepId, "Could not run: {$exception->getMessage()}");
+                ? $this->preserving($process, $stepId, $runId, "Could not run: {$throwable->getMessage()}")
+                : Result::error($stepId, "Could not run: {$throwable->getMessage()}");
         }
     }
 
@@ -520,14 +686,17 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
      * log write does NOT widen the summary: the MCP payload has a hard ceiling
      * that raw output would blow, so it stays bounded either way.
      */
-    private function preserving(Process $process, string $stepId, string $runId, string $message): Result
+    /**
+     * @param  string|null  $note  said on its own line after the output, which is program text
+     */
+    private function preserving(Process $process, string $stepId, string $runId, string $message, ?string $note = null): Result
     {
         $output = $this->combinedOutput($process);
         $logPath = $this->logs->write($runId, $stepId, $output);
 
         return Result::error(
             $stepId,
-            $message.' '.$this->summarised($output, $logPath),
+            $message.' '.$this->summarised($output, $logPath).($note === null ? '' : "\n\n".$note),
             logPath: $logPath,
         );
     }

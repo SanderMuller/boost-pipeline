@@ -9,6 +9,7 @@ use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Phases\Phases;
 use SanderMuller\BoostPipeline\Phases\Steps;
+use SanderMuller\BoostPipeline\Steps\Shell;
 use SanderMuller\BoostPipeline\Walk\Walk;
 
 /**
@@ -220,6 +221,16 @@ final class Pipeline
         // The digest describes the whole declaration, so every scope of one
         // pipeline shares it. Computed here because only a Pipeline holds the
         // pipeline-level settings that are part of that declaration.
-        return Walk::resolve($this->phases, $this->steps, $selection, PipelineFingerprint::for($this));
+        $walk = Walk::resolve($this->phases, $this->steps, $selection, PipelineFingerprint::for($this));
+
+        if ($this->responseWindow === null) {
+            foreach ($walk->steps as $walkStep) {
+                if ($walkStep->step instanceof Shell && $walkStep->step->slotName() !== null) {
+                    throw InvalidPipelineConfigException::slotNeedsResponseWindow($walkStep->step->id());
+                }
+            }
+        }
+
+        return $walk;
     }
 }

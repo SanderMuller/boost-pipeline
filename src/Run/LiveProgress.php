@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Runner\ProcessTree;
+
 /**
  * What a run is doing right now, between two resolutions.
  *
@@ -39,6 +41,8 @@ final readonly class LiveProgress
          * one that has already finished and written a receipt.
          */
         public ?string $configDigest = null,
+        /** The process id of the server walking the run, null for a record written before 0.22. */
+        public ?int $owner = null,
     ) {}
 
     /**
@@ -55,6 +59,7 @@ final readonly class LiveProgress
             'scope' => $this->scope,
             'timeout_seconds' => $this->timeoutSeconds,
             'config' => $this->configDigest,
+            'owner' => $this->owner,
         ];
     }
 
@@ -78,6 +83,7 @@ final readonly class LiveProgress
         $timeout = $data['timeout_seconds'] ?? null;
         $startedAt = $data['started_at'] ?? null;
         $config = $data['config'] ?? null;
+        $owner = $data['owner'] ?? null;
 
         return new self(
             runId: $runId,
@@ -88,6 +94,7 @@ final readonly class LiveProgress
             scope: is_string($scope) ? $scope : null,
             timeoutSeconds: is_int($timeout) || is_float($timeout) ? (float) $timeout : null,
             configDigest: is_string($config) ? $config : null,
+            owner: is_int($owner) && $owner > 0 ? $owner : null,
         );
     }
 
@@ -98,12 +105,17 @@ final readonly class LiveProgress
      * ceiling it enforces: that runner kills a step at the timeout, so a record
      * still open past it means the process died rather than that the step is slow.
      *
-     * An awaiting record never expires, because the package deliberately does not
-     * time out a skill step. One left by a killed process is the residue this
-     * cannot detect — the reader is told how long it has waited instead.
+     * An awaiting record never expires on age, because the package deliberately
+     * does not time out a skill step. Any record expires once the server that
+     * wrote it is gone, which is the only way to tell that an awaiting record,
+     * or a step waiting for a slot, was left behind.
      */
     public function hasExpired(float $margin = 30.0, ?int $now = null): bool
     {
+        if ($this->owner !== null && ! ProcessTree::exists($this->owner)) {
+            return true;
+        }
+
         if ($this->state !== RunState::Running || $this->timeoutSeconds === null) {
             return false;
         }

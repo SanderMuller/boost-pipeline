@@ -57,4 +57,20 @@ return [
         'config_fingerprint' => true,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Machine-wide slots
+    |--------------------------------------------------------------------------
+    |
+    | Where a step declared `->exclusive('name', 2)` takes its slot: one lock file
+    | per slot. Every project on the machine must use the same directory, or each
+    | one counts its own slots. null uses /tmp/boost-pipeline-slots, which stays
+    | the same in every agent session even when each gets its own temp directory.
+    |
+    */
+
+    'slots' => [
+        'directory' => env('BOOST_PIPELINE_SLOTS_DIRECTORY'),
+    ],
+
 ];

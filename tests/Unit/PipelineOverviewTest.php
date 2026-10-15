@@ -26,6 +26,7 @@ use SanderMuller\BoostPipeline\Run\RunHistoryStoreFactory as History;
 use SanderMuller\BoostPipeline\Run\RunState;
 use SanderMuller\BoostPipeline\Runner\SafeFilename;
 use SanderMuller\BoostPipeline\Steps\Shell;
+use Symfony\Component\Process\Process;
 
 beforeEach(function (): void {
     $this->root = sys_get_temp_dir().'/bp-overview-'.bin2hex(random_bytes(4));
@@ -324,4 +325,50 @@ it('keeps a numeric tag a string, which PHP array keys do not', function (): voi
     $scopes = $overview->declarations()[0]['scopes'];
 
     expect($scopes)->toBe(['2', 'backend']);
+});
+
+/** The id of a process that has exited. */
+function exitedPid(): int
+{
+    $process = new Process(['sleep', '0.1']);
+    $process->start();
+
+    $pid = $process->getPid() ?? throw new RuntimeException('No pid.');
+    $process->wait();
+
+    return $pid;
+}
+
+it('shows a run as abandoned once the server walking it is gone, and only then', function (): void {
+    $overview = overviewFor($this->root, twoSteps(...));
+    $history = new JsonRunHistoryStore($this->root.'/history/default');
+    $unfinished = static fn (string $id): Receipt => new Receipt(
+        runId: $id,
+        state: RunState::Running->value,
+        allVerified: false,
+        tree: null,
+        stale: null,
+        verdicts: ['fmt' => 'passed'],
+        recordedAt: '2026-01-01T00:00:00+00:00',
+    );
+
+    $history->write(new HistoryRecord($unfinished('r-gone'), owner: exitedPid()));
+    $history->write(new HistoryRecord($unfinished('r-alive'), owner: (int) getmypid()));
+    $history->write(new HistoryRecord($unfinished('r-replaced'), owner: (int) getmypid(), abandoned: true));
+    $history->write(new HistoryRecord($unfinished('r-old')));
+    $history->write(new HistoryRecord(overviewReceipt(['fmt' => 'passed']), owner: exitedPid()));
+    new JsonReceiptStore($this->root.'/receipts/default.json')->write($unfinished('r-gone'));
+
+    $states = array_column($overview->forPipeline('default')['history'], 'state', 'run');
+
+    expect($states)->toBe([
+        ...$states,
+        'r-gone' => 'abandoned',
+        'r-alive' => 'running',
+        'r-replaced' => 'abandoned',
+        'r-old' => 'running',
+        'r-one' => 'complete',
+    ])
+        ->and(data_get($overview->run('default', 'r-gone'), 'state'))->toBe('abandoned')
+        ->and(data_get($overview->forPipeline('default'), 'current.state'))->toBe('abandoned');
 });

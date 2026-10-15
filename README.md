@@ -154,6 +154,42 @@ the whole pipeline with `Pipeline::configure()->withTimeout(1800)`. The step's o
 A step that finishes after more than 80% of its timeout says so in its summary, so you can raise
 the ceiling before a slower run crosses it.
 
+A step that times out is stopped together with every process it started, such as the workers of a
+parallel test runner. Cleanup that the command does only at a normal end does not happen then.
+Declare it with `onAbort()`:
+
+```php
+Shell::run('php artisan test --parallel --drop-databases', id: 'tests')
+    ->onAbort('php artisan app:drop-test-databases');
+```
+
+The server runs it after a timeout, and when a run is replaced or its server shuts down while the
+step runs. Its output goes to a log of its own, the summary says how it went, and it never changes
+the verdict. A server that is killed runs nothing.
+
+### Steps that load the whole machine
+
+When several agent sessions share one machine, each running its test suite at once can push all of
+them past their timeouts. `exclusive()` limits how many run at a time, over every project on the
+machine:
+
+```php
+Pipeline::configure()
+    ->withResponseWindow(90)
+    ->withSteps(function (Steps $steps): void {
+        $steps->in(Tests::class)->append(
+            Shell::run('php artisan test', id: 'tests')->exclusive('tests', 2),
+        );
+    });
+```
+
+A step waits until one of the two `tests` slots is free, and its timeout starts when it gets one.
+While it waits, `next_step` answers `state: running` with `waiting_for_slot`, and its result then
+carries `slot_wait_ms` next to `duration_ms`. The slots are lock files in
+`/tmp/boost-pipeline-slots`; set `boost-pipeline.slots.directory` to use another directory. A
+server that dies frees its slot. `exclusive()` needs `withResponseWindow()`, and the config is
+refused without it.
+
 ### Long steps and `status`
 
 The stdio MCP server answers one call at a time. While `next_step` waits on a long step, a
@@ -282,7 +318,9 @@ that already held your change. Open a new run.
 reconnect. A reload replaces every open run, unless its step is still running.
 `open_run` refuses instead, and says why, when running the file again in the same process is not
 safe: the config declares a named class, function or constant, it includes another file, a class
-it loaded changed, or the set of pipeline names changed. Reconnect the MCP client then.
+it loaded changed, or the set of pipeline names changed. It also refuses once
+`vendor/composer/installed.php` changed, after a `composer install` or a branch switch, because the
+server would run a mix of old and new package classes. Reconnect the MCP client then.
 
 Two other things produce the same mismatch, and the message names all three. A config git cannot
 see — ignored, symlinked, or composed from a file outside the repository — moves without moving the
@@ -389,6 +427,10 @@ serve the page below, and both stores are optional dependencies of a run — so 
 same encoding a step log uses, which appends a short digest, so the name is not the id verbatim.
 History keeps the newest 20 runs per pipeline and
 prunes the rest on write; step logs are not pruned.
+
+A run nobody will walk any further shows as `abandoned`: one its server replaced, and one whose
+server process is gone. Several sessions can serve one project, so a run whose server still lives
+keeps its state. A run recorded before 0.22 names no server, so it keeps its state too.
 
 **The steps come from the config as it stands now, not from the record.** Nothing stores the step
 list a past run walked. So a run recorded before you edited the pipeline shows a step you added

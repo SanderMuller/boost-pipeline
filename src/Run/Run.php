@@ -13,6 +13,7 @@ use SanderMuller\BoostPipeline\Contracts\RunHistoryStore;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
+use SanderMuller\BoostPipeline\Contracts\WaitsForSlots;
 use SanderMuller\BoostPipeline\Enums\StepKind;
 use SanderMuller\BoostPipeline\Enums\Verdict;
 use SanderMuller\BoostPipeline\Results\Result;
@@ -270,6 +271,32 @@ final class Run
         return $this->pending instanceof PendingPosition;
     }
 
+    /**
+     * The pending steps that have not started because their slot is taken.
+     *
+     * @return array<string, string> step id => slot name
+     */
+    public function waitingForSlots(): array
+    {
+        return $this->pending instanceof PendingPosition && $this->pending->pending instanceof WaitsForSlots
+            ? $this->pending->pending->waitingForSlots()
+            : [];
+    }
+
+    /** This server's process id, so a reader can tell whether the run was left behind. */
+    private function owner(): ?int
+    {
+        $pid = getmypid();
+
+        return $pid === false ? null : $pid;
+    }
+
+    /** @param list<WalkStep> $position */
+    private function waitsForSlot(array $position): bool
+    {
+        return array_any($position, fn (WalkStep $walkStep) => $walkStep->step instanceof Shell && $walkStep->step->slotName() !== null);
+    }
+
     /** Whole seconds since the pending position started, or null when nothing is pending. */
     public function pendingSeconds(): ?int
     {
@@ -292,6 +319,13 @@ final class Run
         }
 
         $this->releaseLive();
+
+        // Its server lives on, so only this record can say nobody walks it now.
+        $record = $this->state->isTerminal() ? null : $this->history?->read($this->id);
+
+        if ($record instanceof HistoryRecord) {
+            $this->history?->write($record->asAbandoned());
+        }
     }
 
     /** @return list<Result> */
@@ -691,10 +725,14 @@ final class Run
             // A custom runner records none, and its record then never expires on
             // age — an honest absence rather than this runner's default applied to
             // a runner that does not use it.
-            timeoutSeconds: $this->runner instanceof ProcessStepRunner
+            //
+            // None either while a step can wait for a slot first: its timeout
+            // starts when it gets one, so the age of this record says nothing.
+            timeoutSeconds: $this->runner instanceof ProcessStepRunner && ! $this->waitsForSlot($position)
                 ? $this->runner->effectiveTimeout($position[0]->step)
                 : null,
             configDigest: $this->walk->configDigest,
+            owner: $this->owner(),
         ));
 
         // Adopted only on success. A failed replacement leaves the previous
@@ -773,7 +811,7 @@ final class Run
         $this->history?->write(new HistoryRecord($receipt, array_map(
             static fn (Result $result): ?string => $result->logPath,
             $this->results,
-        )));
+        ), $this->owner()));
     }
 
     public function acknowledgedCount(): int

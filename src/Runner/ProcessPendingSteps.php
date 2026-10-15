@@ -7,7 +7,9 @@ namespace SanderMuller\BoostPipeline\Runner;
 use Closure;
 use Illuminate\Support\Sleep;
 use SanderMuller\BoostPipeline\Contracts\PendingSteps;
+use SanderMuller\BoostPipeline\Contracts\WaitsForSlots;
 use SanderMuller\BoostPipeline\Results\Result;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 use Throwable;
 
@@ -28,7 +30,7 @@ use Throwable;
  *
  * @internal
  */
-final class ProcessPendingSteps implements PendingSteps
+final class ProcessPendingSteps implements PendingSteps, WaitsForSlots
 {
     private const float POLL_SECONDS = 0.1;
 
@@ -40,13 +42,20 @@ final class ProcessPendingSteps implements PendingSteps
     /**
      * @param  list<string>  $order  step ids in the order they were given
      * @param  array<string, Result>  $settled  steps that resolved before anything ran
-     * @param  array<string, array{Process, Closure(?Throwable, float, bool): Result, Closure(): void}>  $running  the process, what turns it into a verdict (given when it was first seen finished, and whether that followed a gap), and what discards it
+     * @param  array<string, array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void}>  $running  the process, what turns it into a verdict (given when it was first seen finished, and whether that followed a gap), what discards it, and what cleans up after a step stopped before it ended
+     * @param  array<string, array{string, Closure(): (array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void}|Result|null)}>  $queued  steps waiting for a slot: its name, and what starts the step once one is free, null while none is
      */
     public function __construct(
         private readonly array $order,
         private array $settled,
         private array $running,
+        private array $queued = [],
     ) {}
+
+    public function waitingForSlots(): array
+    {
+        return array_map(static fn (array $entry): string => $entry[0], $this->queued);
+    }
 
     public function await(float $seconds): ?array
     {
@@ -55,7 +64,7 @@ final class ProcessPendingSteps implements PendingSteps
         while (true) {
             $this->poll();
 
-            if ($this->running === []) {
+            if ($this->running === [] && $this->queued === []) {
                 $ordered = [];
 
                 foreach ($this->order as $stepId) {
@@ -77,11 +86,14 @@ final class ProcessPendingSteps implements PendingSteps
 
     public function stop(): void
     {
-        foreach ($this->running as [$process, , $discard]) {
-            try {
-                $process->stop(0);
-            } catch (Throwable) {
-                // Already gone is the outcome stop() asks for.
+        // Never started, so there is nothing to stop and nothing to clean up.
+        $this->queued = [];
+
+        foreach ($this->running as [$process, , $discard, $abort]) {
+            // A step that already ended on its own did its own cleanup.
+            if ($this->stillRunning($process)) {
+                ProcessTree::terminate($process);
+                $abort();
             }
 
             $discard();
@@ -99,26 +111,75 @@ final class ProcessPendingSteps implements PendingSteps
         $this->stop();
     }
 
+    private function pastTimeout(Process $process, float $now): bool
+    {
+        $timeout = $process->getTimeout();
+
+        return $timeout !== null && $now - $process->getStartTime() > $timeout;
+    }
+
+    private function stillRunning(Process $process): bool
+    {
+        try {
+            return $process->isRunning();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
     private function poll(): void
     {
+        foreach ($this->queued as $stepId => [, $start]) {
+            $started = $start();
+
+            if ($started === null) {
+                continue;
+            }
+
+            unset($this->queued[$stepId]);
+
+            if ($started instanceof Result) {
+                $this->settled[$stepId] = $started;
+            } else {
+                $this->running[$stepId] = $started;
+            }
+        }
+
         $now = microtime(true);
         $late = $this->lastPoll !== null && $now - $this->lastPoll > self::GAP_SECONDS;
         $this->lastPoll = $now;
 
-        foreach ($this->running as $stepId => [$process, $settle]) {
+        // Every process is looked at, and every one past its timeout stopped,
+        // before any verdict is built. Building one can run an onAbort command,
+        // and the others would otherwise wait behind it, unwatched. One that
+        // crosses its timeout while that command runs is stopped at the next poll.
+        $ended = [];
+
+        foreach ($this->running as $stepId => [$process]) {
+            $seenAt = microtime(true);
+
             try {
-                if ($process->isRunning()) {
-                    $process->checkTimeout();
-
-                    continue;
-                }
-
                 $failure = null;
+
+                if ($process->isRunning()) {
+                    if (! $this->pastTimeout($process, $seenAt)) {
+                        continue;
+                    }
+
+                    // Stopped here rather than by Symfony's checkTimeout(), which
+                    // signals the shell alone and loses the processes below it.
+                    ProcessTree::terminate($process);
+                    $failure = new ProcessTimedOutException($process, ProcessTimedOutException::TYPE_GENERAL);
+                }
             } catch (Throwable $throwable) {
                 $failure = $throwable;
             }
 
-            $this->settled[$stepId] = $settle($failure, $now, $late);
+            $ended[$stepId] = [$failure, $seenAt];
+        }
+
+        foreach ($ended as $stepId => [$failure, $seenAt]) {
+            $this->settled[$stepId] = $this->running[$stepId][1]($failure, $seenAt, $late);
             unset($this->running[$stepId]);
         }
     }

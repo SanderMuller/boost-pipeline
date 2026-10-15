@@ -23,7 +23,26 @@ final readonly class Result
          */
         public ?int $filesInspected = null,
         public ?string $reason = null,
+        /** How long the step ran, from its start to when the server saw it end. */
+        public ?int $durationMs = null,
+        /** How long it waited for a machine-wide slot before it started. */
+        public ?int $slotWaitMs = null,
     ) {}
+
+    public function timed(int $durationMs, ?int $slotWaitMs = null): self
+    {
+        return new self(
+            $this->verdict,
+            $this->stepId,
+            $this->summary,
+            $this->exitCode,
+            $this->logPath,
+            $this->filesInspected,
+            $this->reason,
+            $durationMs,
+            $slotWaitMs,
+        );
+    }
 
     public static function passed(string $stepId, string $summary, ?int $filesInspected = null, ?string $logPath = null): self
     {
@@ -70,6 +89,8 @@ final readonly class Result
             'files_inspected' => $this->filesInspected,
             'server_run' => $this->serverRun(),
             'reason' => $this->reason,
+            'duration_ms' => $this->durationMs,
+            'slot_wait_ms' => $this->slotWaitMs,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

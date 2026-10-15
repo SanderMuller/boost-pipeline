@@ -65,7 +65,9 @@ final readonly class PipelineOverview
         return [
             'pipeline' => $name,
             'current' => $receipt instanceof Receipt
-                ? $this->describe($name, $receipt, $this->logsFor($name, $receipt->runId))
+                // History holds its logs: the receipt carries none, and the current
+                // run is the one a reader most wants log links for.
+                ? $this->describe($name, $receipt, $this->history->for($name)->read($receipt->runId))
                 : null,
             'live' => $live,
             'history' => $this->historySummaries($name, $historyLimit),
@@ -86,24 +88,8 @@ final readonly class PipelineOverview
         $record = $this->history->for($pipeline)->read($runId);
 
         return $record instanceof HistoryRecord
-            ? $this->describe($pipeline, $record->receipt, $record->logs)
+            ? $this->describe($pipeline, $record->receipt, $record)
             : null;
-    }
-
-    /**
-     * Where the current run wrote each step's log.
-     *
-     * The receipt does not carry them — history does — so the current run would
-     * otherwise be the one view with no log links, which is the run a reader is
-     * most likely to want them for.
-     *
-     * @return array<string, string|null>
-     */
-    private function logsFor(string $name, string $runId): array
-    {
-        $record = $this->history->for($name)->read($runId);
-
-        return $record instanceof HistoryRecord ? $record->logs : [];
     }
 
     /**
@@ -208,18 +194,19 @@ final readonly class PipelineOverview
     }
 
     /**
-     * @param  array<string, string|null>  $logs
+     * @param  HistoryRecord|null  $record  where its logs went, and whether it was abandoned
      * @return RunRow
      */
-    private function describe(string $name, Receipt $receipt, array $logs): array
+    private function describe(string $name, Receipt $receipt, ?HistoryRecord $record): array
     {
+        $logs = $record instanceof HistoryRecord ? $record->logs : [];
         $pipeline = $this->pipelines->get($name);
         $walk = $pipeline instanceof Pipeline ? $pipeline->walk($receipt->scope) : null;
         $steps = $walk instanceof Walk ? $walk->steps : [];
 
         return [
             'run' => $receipt->runId,
-            'state' => $receipt->state,
+            'state' => $record instanceof HistoryRecord ? $record->shownState() : $receipt->state,
             'all_verified' => $receipt->allVerified,
             'stale' => $receipt->stale,
             'scope' => $receipt->scope,
@@ -374,7 +361,7 @@ final readonly class PipelineOverview
         return array_map(
             fn (HistoryRecord $record): array => [
                 'run' => $record->receipt->runId,
-                'state' => $record->receipt->state,
+                'state' => $record->shownState(),
                 'all_verified' => $record->receipt->allVerified,
                 'scope' => $record->receipt->scope,
                 'recorded_at' => $record->receipt->recordedAt,

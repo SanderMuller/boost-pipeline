@@ -105,6 +105,9 @@ trait PipelineTool
             'running_for_seconds' => $schema->integer()->description(
                 'Present only while the step at the cursor is still running after the response window. How long it has run.'
             ),
+            'waiting_for_slot' => $schema->array()->description(
+                'Present only while a step at the cursor waits for a machine-wide slot that other runs hold. The slot names. The step has not started, and its timeout has not started either.'
+            ),
             'pending' => $schema->string()->description(
                 'Present only while the step at the cursor is still running. There is no verdict yet: call next_step to keep waiting for it.'
             ),
@@ -172,6 +175,12 @@ trait PipelineTool
                 'Whether the server produced this verdict. True for failed and error too — it answers who ran it, not whether it passed.'
             ),
             'reason' => $schema->string(),
+            'duration_ms' => $schema->integer()->description(
+                'How long the step ran, when the server ran it. For a step the server checked only between two tool calls, the time to the check that saw it end.'
+            ),
+            'slot_wait_ms' => $schema->integer()->description(
+                'How long the step waited for a machine-wide slot before it started. Present only for a step declared exclusive(). Not part of duration_ms, and not counted toward its timeout.'
+            ),
         ]);
     }
 }

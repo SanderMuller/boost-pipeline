@@ -30,6 +30,12 @@ final class Shell implements Step
 
     private ?float $timeoutSeconds = null;
 
+    private ?string $abortCommand = null;
+
+    private ?string $slotName = null;
+
+    private int $slotCapacity = 1;
+
     private function __construct(
         private readonly string $command,
         private readonly string $id,
@@ -170,6 +176,67 @@ final class Shell implements Step
     public function timeoutSeconds(): ?float
     {
         return $this->timeoutSeconds;
+    }
+
+    /**
+     * A command to run when this step is stopped before it ends: it timed out, or
+     * its run was replaced or its server shut down while it ran.
+     *
+     * For the cleanup a step does only when it ends normally, such as a parallel
+     * test runner dropping the databases it created. It runs after the step and
+     * every process it started are gone. Its output goes to its own log, and it
+     * never changes the step's verdict.
+     */
+    public function onAbort(string $command): self
+    {
+        if (trim($command) === '') {
+            throw InvalidPipelineConfigException::emptyAbortCommand($this->id);
+        }
+
+        $this->abortCommand = $command;
+
+        return $this;
+    }
+
+    public function abortCommand(): ?string
+    {
+        return $this->abortCommand;
+    }
+
+    /**
+     * Run only while one of `$capacity` slots named `$name` is free, counted over
+     * every pipeline server on this machine, in every project.
+     *
+     * For a step that loads the whole machine, such as a test suite: several
+     * agent sessions running one each at once can push all of them past their
+     * timeouts. The step waits for a slot before it starts, and its timeout
+     * starts when it gets one. The wait needs the pipeline's
+     * withResponseWindow(), so that no tool call stays open while it lasts.
+     */
+    public function exclusive(string $name, int $capacity = 1): self
+    {
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name) !== 1) {
+            throw InvalidPipelineConfigException::slotNameInvalid($this->id, $name);
+        }
+
+        if ($capacity < 1) {
+            throw InvalidPipelineConfigException::slotCapacityNotPositive($this->id, $capacity);
+        }
+
+        $this->slotName = $name;
+        $this->slotCapacity = $capacity;
+
+        return $this;
+    }
+
+    public function slotName(): ?string
+    {
+        return $this->slotName;
+    }
+
+    public function slotCapacity(): int
+    {
+        return $this->slotCapacity;
     }
 
     /**

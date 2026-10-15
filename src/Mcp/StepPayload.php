@@ -162,7 +162,18 @@ final readonly class StepPayload
         // agent calls while it waits, and they must not read as an idle run.
         $runningFor = $run->pendingSeconds();
 
-        if ($runningFor !== null) {
+        $waiting = $run->waitingForSlots();
+
+        if ($runningFor !== null && $waiting !== []) {
+            $envelope['running_for_seconds'] = $runningFor;
+            $envelope['waiting_for_slot'] = array_values(array_unique($waiting));
+            $envelope['pending'] = sprintf(
+                'Waiting for a slot: %s waits for a free [%s] slot, which other runs on this machine hold (%ds so far). Its timeout starts when it gets one. Call next_step to keep waiting, or status to check on it. Do not run its command yourself.',
+                implode(', ', array_keys($waiting)),
+                implode('], [', array_unique($waiting)),
+                $runningFor,
+            );
+        } elseif ($runningFor !== null) {
             $envelope['running_for_seconds'] = $runningFor;
             $envelope['pending'] = sprintf(
                 'The step at the cursor has been running for %ds and has no verdict yet. The server keeps it running. Call next_step to keep waiting for its verdict, or status to check on it. Do not run its command yourself, and do not edit files while it runs: an edit makes its verdict stale.',

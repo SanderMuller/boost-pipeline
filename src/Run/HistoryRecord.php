@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Run;
 
+use SanderMuller\BoostPipeline\Runner\ProcessTree;
+
 /**
  * One past run, as history keeps it: a receipt plus the logs that run wrote.
  *
@@ -18,20 +20,51 @@ namespace SanderMuller\BoostPipeline\Run;
  */
 final readonly class HistoryRecord
 {
+    /** Shown in place of the receipt's state for a run nobody will walk any further. */
+    public const string ABANDONED = 'abandoned';
+
     /**
      * @param  array<string, string|null>  $logs  step id => log path, null where the step wrote none
+     * @param  int|null  $owner  the process id of the server walking the run, null for a record written before 0.22
+     * @param  bool  $abandoned  the server replaced the run before it finished
      */
     public function __construct(
         public Receipt $receipt,
         public array $logs = [],
+        public ?int $owner = null,
+        public bool $abandoned = false,
     ) {}
+
+    public function asAbandoned(): self
+    {
+        return new self($this->receipt, $this->logs, $this->owner, abandoned: true);
+    }
+
+    /**
+     * The receipt's state, or `abandoned` for an unfinished run nobody walks.
+     *
+     * Several servers can share one project's storage, so a run this process does
+     * not hold may belong to another live one. Only a dead owner proves the run
+     * was left behind. Without a way to ask, the owner counts as alive: a run
+     * shown as running is what readers saw before, and never hides a live walk.
+     */
+    public function shownState(): string
+    {
+        if (RunState::tryFrom($this->receipt->state)?->isTerminal() === true) {
+            return $this->receipt->state;
+        }
+
+        return $this->abandoned || ($this->owner !== null && ! ProcessTree::exists($this->owner))
+            ? self::ABANDONED
+            : $this->receipt->state;
+    }
 
     /**
      * @return array<string, mixed>
      */
     public function toArray(): array
     {
-        return [...$this->receipt->toArray(), 'logs' => $this->logs];
+        return [...$this->receipt->toArray(), 'logs' => $this->logs, 'owner' => $this->owner, 'abandoned' => $this->abandoned];
     }
 
     /**
@@ -45,7 +78,14 @@ final readonly class HistoryRecord
             return null;
         }
 
-        return new self($receipt, self::readLogs($data['logs'] ?? null));
+        $owner = $data['owner'] ?? null;
+
+        return new self(
+            $receipt,
+            self::readLogs($data['logs'] ?? null),
+            is_int($owner) && $owner > 0 ? $owner : null,
+            ($data['abandoned'] ?? false) === true,
+        );
     }
 
     /**

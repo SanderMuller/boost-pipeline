@@ -414,3 +414,22 @@ it('tracks a project class a failed reload loaded, so a later edit to it is refu
 
     expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, $class.'.php');
 });
+
+it('refuses once the installed packages changed, before it looks at the config', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo old']]));
+    $installed = $this->base.'/installed.php';
+    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '1.0.0']];\n");
+    $reloader = new ConfigReloader(new PipelineLoader($this->base), $this->base, installedPackages: $installed);
+    $runs = new RunManager($reloader->pipelines() ?? throw new RuntimeException('No config.'), new StepRunnerFactory(static fn (): StepRunner => new TimedRunner(null)), config: $reloader);
+    $runs->open('default');
+
+    // Same bytes written again, as a `composer install` that changes nothing does.
+    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '1.0.0']];\n");
+
+    $runs->open('default');
+
+    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '2.0.0']];\n");
+    writeConfig($this->base, configDeclaring(['default' => ['echo new']]));
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'vendor/ changed');
+});

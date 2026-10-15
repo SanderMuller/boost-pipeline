@@ -65,6 +65,13 @@ parameters:
             message: '#^Calling hash(_init)?\(\) is forbidden#'
             paths:
                 - src/Runner/GitTreeFingerprint.php
+        # Signals are this class's whole job: stopping a step stops the processes
+        # it started, and signal 0 asks whether a run's server is still alive.
+        -
+            identifier: disallowed.function
+            message: '#^Calling posix_kill\(\) is forbidden#'
+            paths:
+                - src/Runner/ProcessTree.php
         -
             identifier: trait.unused
             reportUnmatched: false

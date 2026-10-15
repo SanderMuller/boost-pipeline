@@ -1,5 +1,24 @@
 # Upgrading
 
+## From 0.21 to 0.22
+
+- **A timeout now stops every process the step started,** not only its shell. Add
+  `->onAbort('<command>')` to a step whose own cleanup runs only at a normal end.
+
+- **`open_run` refuses once `vendor/composer/installed.php` changed** since the server started.
+  Reconnect the MCP server after a `composer install` or a branch switch that changes packages.
+
+- **`exclusive()` needs `withResponseWindow()`.** A pipeline that declares a slot without a window
+  is refused when it loads.
+
+- **`pipeline:history` and the page can show `abandoned`** as a run's state. A reader that matches
+  on the states of `RunState` should accept it.
+
+- **Additive API:** `Result` has `durationMs` and `slotWaitMs`, and the step result in the MCP
+  answers has `duration_ms` and `slot_wait_ms`. `ProcessStepRunner` takes an optional
+  `MachineSlots`. `HistoryRecord` has `owner` and `abandoned`. A runner of your own can implement
+  the new `WaitsForSlots` contract on its pending steps.
+
 ## From 0.20 to 0.21
 
 - **`open_run` reloads a changed `.config/pipeline.php`.** You no longer reconnect the MCP server

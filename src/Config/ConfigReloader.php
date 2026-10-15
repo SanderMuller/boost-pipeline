@@ -33,6 +33,9 @@ use Throwable;
  *
  * A failed reload — a parse error, an invalid declaration — keeps the map and the
  * hashes it had, so the next `open_run` tries again once the file is fixed.
+ *
+ * It also refuses once Composer's installed-package list changed, because the
+ * vendor classes this server loaded cannot be loaded again either.
  */
 final class ConfigReloader
 {
@@ -47,12 +50,23 @@ final class ConfigReloader
 
     private bool $loaded = false;
 
-    /** @param (Closure(Pipelines): void)|null $onReload */
+    /** The hash of Composer's installed-package list when this server started. */
+    private readonly ?string $installed;
+
+    /**
+     * @param  (Closure(Pipelines): void)|null  $onReload
+     * @param  string|null  $installedPackages  Composer's `vendor/composer/installed.php`, or null to not watch it
+     */
     public function __construct(
         private readonly PipelineLoader $loader,
         private readonly string $basePath,
         private readonly ?Closure $onReload = null,
-    ) {}
+        private readonly ?string $installedPackages = null,
+    ) {
+        // Taken now, at server start, because that is when the vendor classes
+        // loaded. A first `open_run` can come after a `composer install`.
+        $this->installed = $installedPackages === null ? null : $this->hash($installedPackages);
+    }
 
     /**
      * The map loaded at the first call, or null when the project has not opted in.
@@ -82,6 +96,12 @@ final class ConfigReloader
      */
     public function refresh(): ?Pipelines
     {
+        // PHP keeps the vendor classes it already loaded and autoloads the rest
+        // from the new files, so the server would run a mix of two versions.
+        if ($this->installedPackages !== null && $this->hash($this->installedPackages) !== $this->installed) {
+            throw InvalidPipelineConfigException::vendorChanged();
+        }
+
         $current = $this->pipelines();
 
         if (! $current instanceof Pipelines) {

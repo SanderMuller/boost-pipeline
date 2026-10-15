@@ -117,6 +117,31 @@ final class InvalidPipelineConfigException extends RuntimeException
         ));
     }
 
+    public static function emptyAbortCommand(string $stepId): self
+    {
+        return new self("Step [{$stepId}] has an empty onAbort() command. Pass the cleanup command to run when the step is stopped, or leave onAbort() out.");
+    }
+
+    public static function slotNameInvalid(string $stepId, string $name): self
+    {
+        return new self("Step [{$stepId}] names the slot [{$name}] in exclusive(). A slot name names a lock file, so it uses letters, digits, dots, dashes and underscores only, and starts with a letter or digit.");
+    }
+
+    public static function slotCapacityNotPositive(string $stepId, int $capacity): self
+    {
+        return new self("Step [{$stepId}] gives exclusive() a capacity of {$capacity}. A slot needs room for at least one step.");
+    }
+
+    public static function slotNeedsResponseWindow(string $stepId): self
+    {
+        return new self("Step [{$stepId}] waits for a machine-wide slot (exclusive()), but its pipeline sets no withResponseWindow(). Without one, next_step would stay open for the whole wait and the client can give up on it. Add ->withResponseWindow(90) to the pipeline.");
+    }
+
+    public static function vendorChanged(): self
+    {
+        return new self('vendor/ changed since this server started: a composer install, a composer update or a branch switch installed other packages. This server still holds classes from the old versions, and it would load the rest from the new ones. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again.');
+    }
+
     public static function configReloadFailed(string $message): self
     {
         return new self(sprintf(
