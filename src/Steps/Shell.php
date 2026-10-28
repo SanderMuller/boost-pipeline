@@ -221,7 +221,8 @@ final class Shell implements Step
      * means "everything". For a step that usually runs a small selection and
      * falls back to the full suite. Every step with inspecting() gets that output
      * in the file named by BOOST_PIPELINE_SCOPE_FILE: read it to run the same
-     * selection the slot was decided on.
+     * selection the slot was decided on. The file holds the output as printed,
+     * so trim each line and skip empty ones, as the slot decision does.
      */
     public function exclusive(string $name, int $capacity = 1, bool $onlyWhenWhole = false): self
     {

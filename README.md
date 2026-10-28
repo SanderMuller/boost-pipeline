@@ -208,8 +208,9 @@ Shell::run('composer test:affected', id: 'tests')
 A scope command that cannot work out the selection prints `*` and exits 0. A non-zero exit makes the
 step an error. The scope command and the step run one after the other, and each can reach its own
 answer. So the step reads the scope output from the file in `BOOST_PIPELINE_SCOPE_FILE` and runs that
-selection: otherwise a full suite can run without a slot. `onlyWhenWhole` without `inspecting()` is
-refused.
+selection: otherwise a full suite can run without a slot. The file holds the output as printed, so
+trim each line and skip empty ones, as the slot decision does. `onlyWhenWhole` without `inspecting()`
+is refused.
 
 ### Long steps and `status`
 
