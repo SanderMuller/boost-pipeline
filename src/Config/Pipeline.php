@@ -223,6 +223,12 @@ final class Pipeline
         // pipeline-level settings that are part of that declaration.
         $walk = Walk::resolve($this->phases, $this->steps, $selection, PipelineFingerprint::for($this));
 
+        foreach ($walk->steps as $walkStep) {
+            if ($walkStep->step instanceof Shell && $walkStep->step->slotOnlyWhenWhole() && $walkStep->step->scopeCommand() === null) {
+                throw InvalidPipelineConfigException::wholeSlotNeedsScope($walkStep->step->id());
+            }
+        }
+
         if ($this->responseWindow === null) {
             foreach ($walk->steps as $walkStep) {
                 if ($walkStep->step instanceof Shell && $walkStep->step->slotName() !== null) {

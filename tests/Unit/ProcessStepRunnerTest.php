@@ -161,6 +161,59 @@ it('still runs the command when the declared scope is empty, and still reports i
         ->and($result->filesInspected)->toBe(0);
 });
 
+it('reports no count, and no empty-scope note, when the scope says it is whole', function (string $scope): void {
+    $result = runStep($this->runner, Shell::run('exit 0', id: 'whole')->inspecting($scope));
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->filesInspected)->toBeNull()
+        ->and($result->summary)->not->toContain('Inspected 0 files')
+        ->and($result->toArray())->not->toHaveKey('files_inspected');
+})->with([
+    'only the marker' => ['echo "*"'],
+    'the marker among files' => ['printf "a.php\n  *  \nb.php\n"'],
+]);
+
+it('counts a line that only contains a star among other text as a file, not as the marker', function (): void {
+    $result = runStep($this->runner, Shell::run('exit 0', id: 'starry')->inspecting('printf "src/*.php\nb.php\n"'));
+
+    expect($result->filesInspected)->toBe(2);
+});
+
+it('hands the scope output to the step in a file, and removes the file once the step ends', function (): void {
+    $result = runStep($this->runner,
+        Shell::run('echo "path=$BOOST_PIPELINE_SCOPE_FILE"; cat "$BOOST_PIPELINE_SCOPE_FILE"', id: 'reads-scope')
+            ->inspecting('printf "a.php\nb.php\n"')
+            ->withEnv(['BOOST_PIPELINE_SCOPE_FILE' => '/not/the/scope'])
+    );
+
+    preg_match('/path=(\S+)/', $result->summary, $path);
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($result->summary)->toContain("a.php\nb.php")
+        ->and($path[1] ?? '')->not->toBe('/not/the/scope')
+        ->and($path[1] ?? '')->toContain('bp-scope-')
+        ->and($path[1] ?? '')->not->toBeFile();
+});
+
+it('removes the scope file of a background step once its verdict is in', function (): void {
+    $pending = $this->runner->begin([
+        Shell::run('echo "path=$BOOST_PIPELINE_SCOPE_FILE"; test -s "$BOOST_PIPELINE_SCOPE_FILE"', id: 'bg-scope')->inspecting('echo a.php'),
+    ], 'r-test');
+    $result = ($pending->await(INF) ?? [])['bg-scope'];
+
+    preg_match('/path=(\S+)/', $result->summary, $path);
+
+    expect($result->verdict)->toBe(Verdict::Passed)
+        ->and($path[1] ?? '')->toContain('bp-scope-')
+        ->and($path[1] ?? '')->not->toBeFile();
+});
+
+it('gives a step without a scope no scope file', function (): void {
+    $result = runStep($this->runner, Shell::run('echo "path=[${BOOST_PIPELINE_SCOPE_FILE:-}]"', id: 'no-scope'));
+
+    expect($result->summary)->toContain('path=[]');
+});
+
 it('errors rather than passing when the scope command cannot run', function (): void {
     // A broken scope command produced zero lines, which read as "empty scope"
     // and handed back a pass. A declared scope that cannot be computed is a

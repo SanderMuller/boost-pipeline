@@ -36,6 +36,8 @@ final class Shell implements Step
 
     private int $slotCapacity = 1;
 
+    private bool $slotOnlyWhenWhole = false;
+
     private function __construct(
         private readonly string $command,
         private readonly string $id,
@@ -68,7 +70,8 @@ final class Shell implements Step
     }
 
     /**
-     * A command whose stdout lines enumerate what this step will inspect.
+     * A command whose stdout lines enumerate what this step will inspect. A line
+     * that is `*` means everything, and gives no count.
      *
      * Only way to know a git-diff-scoped step checked nothing: there is no
      * generic way to infer it from a tool's own output. Without this, the step's
@@ -212,8 +215,15 @@ final class Shell implements Step
      * timeouts. The step waits for a slot before it starts, and its timeout
      * starts when it gets one. The wait needs the pipeline's
      * withResponseWindow(), so that no tool call stays open while it lasts.
+     *
+     * With `$onlyWhenWhole`, the step takes a slot only when its inspecting()
+     * command prints a line that is `*`, apart from surrounding whitespace, which
+     * means "everything". For a step that usually runs a small selection and
+     * falls back to the full suite. Every step with inspecting() gets that output
+     * in the file named by BOOST_PIPELINE_SCOPE_FILE: read it to run the same
+     * selection the slot was decided on.
      */
-    public function exclusive(string $name, int $capacity = 1): self
+    public function exclusive(string $name, int $capacity = 1, bool $onlyWhenWhole = false): self
     {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name) !== 1) {
             throw InvalidPipelineConfigException::slotNameInvalid($this->id, $name);
@@ -225,6 +235,7 @@ final class Shell implements Step
 
         $this->slotName = $name;
         $this->slotCapacity = $capacity;
+        $this->slotOnlyWhenWhole = $onlyWhenWhole;
 
         return $this;
     }
@@ -237,6 +248,11 @@ final class Shell implements Step
     public function slotCapacity(): int
     {
         return $this->slotCapacity;
+    }
+
+    public function slotOnlyWhenWhole(): bool
+    {
+        return $this->slotOnlyWhenWhole;
     }
 
     /**

@@ -147,7 +147,7 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
                 continue;
             }
 
-            $slot = $step->slotName();
+            $slot = $this->slotFor($step, $scope);
 
             try {
                 $hold = $slot === null ? null : $this->slots->take($slot, $step->slotCapacity());
@@ -158,23 +158,7 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             }
 
             if ($slot !== null && ! $hold instanceof SlotHold) {
-                // Not started until it holds a slot, so the wait never counts
-                // toward its timeout: Symfony's clock starts at start().
-                $queuedAt = microtime(true);
-                $queued[$step->id()] = [
-                    $slot,
-                    function () use ($step, $runId, $scope, $slot, $queuedAt): array|Result|null {
-                        try {
-                            $hold = $this->slots->take($slot, $step->slotCapacity());
-                        } catch (SlotUnavailable $slotUnavailable) {
-                            return Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
-                        }
-
-                        return $hold instanceof SlotHold
-                            ? $this->launch($step, $runId, $scope, $hold, $this->milliseconds(microtime(true) - $queuedAt))
-                            : null;
-                    },
-                ];
+                $queued[$step->id()] = [$slot, $this->startOnceFree($step, $runId, $scope, $slot)];
 
                 continue;
             }
@@ -197,11 +181,37 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
     }
 
     /**
-     * Starts one step in the background, holding its slot until it is settled.
+     * What starts a queued step once its slot is free, null while none is.
      *
-     * @return array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void}|Result
+     * Not started until it holds a slot, so the wait never counts toward its
+     * timeout: Symfony's clock starts at start().
+     *
+     * @return Closure(): (array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void, (Closure(): void)|null}|Result|null)
      */
-    private function launch(Shell $step, string $runId, ?int $scope, ?SlotHold $hold, ?int $slotWaitMs): array|Result
+    private function startOnceFree(Shell $step, string $runId, ?Scope $scope, string $slot): Closure
+    {
+        $queuedAt = microtime(true);
+
+        return function () use ($step, $runId, $scope, $slot, $queuedAt): array|Result|null {
+            try {
+                $hold = $this->slots->take($slot, $step->slotCapacity());
+            } catch (SlotUnavailable $slotUnavailable) {
+                return Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
+            }
+
+            return $hold instanceof SlotHold
+                ? $this->launch($step, $runId, $scope, $hold, $this->milliseconds(microtime(true) - $queuedAt))
+                : null;
+        };
+    }
+
+    /**
+     * Starts one step in the background, holding its slot until its process
+     * ends, or until it is settled without pcntl.
+     *
+     * @return array{Process, Closure(?Throwable, float, bool): Result, Closure(): void, Closure(): void, (Closure(): void)|null}|Result
+     */
+    private function launch(Shell $step, string $runId, ?Scope $scope, ?SlotHold $hold, ?int $slotWaitMs): array|Result
     {
         // Windows runs the command through cmd.exe, which has no `exec` to
         // redirect with, so output stays on pipes there. A long background
@@ -215,16 +225,20 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             return Result::error($step->id(), sprintf('Could not run: no file for its output could be created in %s.', sys_get_temp_dir()));
         }
 
-        $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
-        $process = $this->start($step, $timeout, $runId, $files);
-        $discard = static function () use ($files, $hold): void {
-            if ($files !== null) {
-                @unlink($files[0]);
-                @unlink($files[1]);
-            }
-
+        $scopeFile = $scope?->toFile();
+        $discard = static function () use ($files, $scopeFile, $hold): void {
+            self::remove($scopeFile, ...$files ?? []);
             $hold?->release();
         };
+
+        if ($scopeFile === false) {
+            $discard();
+
+            return $this->noScopeFile($step);
+        }
+
+        $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
+        $process = $this->start($step, $timeout, $runId, $files, $scopeFile);
 
         if ($process instanceof Result) {
             $discard();
@@ -237,7 +251,7 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             function (?Throwable $failure, float $seenAt, bool $late) use ($step, $process, $scope, $runId, $timeout, $discard, $slotWaitMs): Result {
                 try {
                     $result = match (true) {
-                        ! $failure instanceof Throwable => $this->verdictFor($step, $process, $scope, $runId, $timeout, $seenAt, $late),
+                        ! $failure instanceof Throwable => $this->verdictFor($step, $process, $scope?->count, $runId, $timeout, $seenAt, $late),
                         $failure instanceof ProcessTimedOutException => $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s.", $this->aborted($step, $runId)),
                         default => $this->preserving($process, $step->id(), $runId, "Could not run: {$failure->getMessage()}"),
                     };
@@ -252,6 +266,7 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             function () use ($step, $runId): void {
                 $this->aborted($step, $runId);
             },
+            $hold instanceof SlotHold ? $hold->release(...) : null,
         ];
     }
 
@@ -290,19 +305,25 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
         }
 
         try {
-            [$hold, $slotWaitMs] = $this->waitForSlot($step);
+            [$hold, $slotWaitMs] = $this->waitForSlot($step, $this->slotFor($step, $scope));
         } catch (SlotUnavailable $slotUnavailable) {
             return Result::error($step->id(), "Could not run: {$slotUnavailable->getMessage()}");
         }
 
+        $scopeFile = $scope?->toFile();
+
         try {
+            if ($scopeFile === false) {
+                return $this->noScopeFile($step);
+            }
+
             $timeout = $step->timeoutSeconds() ?? $this->timeoutSeconds;
 
             // The command ALWAYS runs. An empty scope annotates the verdict; it never
             // replaces it. Short-circuiting here would mean a typo'd scope glob, or a
             // scope command that silently matches nothing, permanently disables the
             // gate — a false green of exactly the kind this pipeline exists to stop.
-            $process = $this->start($step, $timeout, $runId);
+            $process = $this->start($step, $timeout, $runId, scopeFile: $scopeFile);
 
             if ($process instanceof Result) {
                 return $process;
@@ -323,10 +344,11 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
 
             $result = $timedOut
                 ? $this->preserving($process, $step->id(), $runId, "Timed out after {$timeout}s.", $this->aborted($step, $runId))
-                : $this->verdictFor($step, $process, $scope, $runId, $timeout, $endedAt);
+                : $this->verdictFor($step, $process, $scope?->count, $runId, $timeout, $endedAt);
 
             return $result->timed($this->milliseconds($endedAt - $process->getStartTime()), $slotWaitMs);
         } finally {
+            self::remove($scopeFile);
             $hold?->release();
         }
     }
@@ -336,12 +358,11 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
      * window resolves a step this way, and config loading refuses a slot there,
      * so this serves a runner called directly.
      *
+     * @param  string|null  $slot  the slot this run of the step takes, from {@see slotFor()}
      * @return array{SlotHold|null, int|null}
      */
-    private function waitForSlot(Shell $step): array
+    private function waitForSlot(Shell $step, ?string $slot): array
     {
-        $slot = $step->slotName();
-
         if ($slot === null) {
             return [null, null];
         }
@@ -429,13 +450,13 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
     }
 
     /**
-     * The number of files the step declared it would inspect, null when it
-     * declared no scope, or an error Result when the scope cannot be computed.
+     * What the step declared it would inspect, null when it declared no scope,
+     * or an error Result when the scope cannot be computed.
      *
      * A declared-but-uncomputable scope is a broken config, not "unknown": if the
      * scope command cannot run, treating it as zero would hand back a pass.
      */
-    private function resolveScope(Shell $step, string $runId): int|null|Result
+    private function resolveScope(Shell $step, string $runId): Scope|null|Result
     {
         $command = $step->scopeCommand();
 
@@ -464,15 +485,33 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             ), logPath: $logPath);
         }
 
-        return count($this->nonEmptyLines($process->getOutput()));
+        return Scope::fromOutput($process->getOutput());
+    }
+
+    private function slotFor(Shell $step, ?Scope $scope): ?string
+    {
+        return $step->slotOnlyWhenWhole() && $scope?->whole !== true ? null : $step->slotName();
+    }
+
+    private static function remove(string|false|null ...$paths): void
+    {
+        foreach (array_filter($paths, is_string(...)) as $path) {
+            @unlink($path);
+        }
+    }
+
+    private function noScopeFile(Shell $step): Result
+    {
+        return Result::error($step->id(), sprintf('Could not run: no file for its scope could be created in %s.', sys_get_temp_dir()));
     }
 
     /**
      * Started but not waited on, so a caller can have several running at once.
      *
      * @param  array{string, string}|null  $files  where stdout and stderr go instead of to pipes
+     * @param  string|null  $scopeFile  the path of the file with the scope output, set last so the step's own env cannot replace it
      */
-    private function start(Shell $step, float $timeout, string $runId, ?array $files = null): Process|Result
+    private function start(Shell $step, float $timeout, string $runId, ?array $files = null, ?string $scopeFile = null): Process|Result
     {
         try {
             $process = $this->processFor(
@@ -483,7 +522,7 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
                     // shell running the step, as it is without the redirect.
                     : sprintf('exec /bin/sh -c %s >%s 2>%s', escapeshellarg($step->command()), escapeshellarg($files[0]), escapeshellarg($files[1])),
                 $timeout,
-                $step->env(),
+                $scopeFile === null ? $step->env() : [...$step->env(), 'BOOST_PIPELINE_SCOPE_FILE' => $scopeFile],
             );
 
             if ($files !== null) {
@@ -659,23 +698,6 @@ final readonly class ProcessStepRunner implements BackgroundStepRunner, BatchSte
             $remaining,
             $logPath === null ? '. '.$this->lostLog() : " — full output at {$logPath}",
         );
-    }
-
-    /** @return list<string> */
-    private function nonEmptyLines(string $output): array
-    {
-        return array_values(array_filter(
-            $this->splitLines($output),
-            static fn (string $line): bool => trim($line) !== '',
-        ));
-    }
-
-    /** @return list<string> */
-    private function splitLines(string $output): array
-    {
-        $lines = preg_split('/\R/', trim($output));
-
-        return $lines === false ? [] : $lines;
     }
 
     /**

@@ -137,6 +137,11 @@ final class InvalidPipelineConfigException extends RuntimeException
         return new self("Step [{$stepId}] waits for a machine-wide slot (exclusive()), but its pipeline sets no withResponseWindow(). Without one, next_step would stay open for the whole wait and the client can give up on it. Add ->withResponseWindow(90) to the pipeline.");
     }
 
+    public static function wholeSlotNeedsScope(string $stepId): self
+    {
+        return new self("Step [{$stepId}] takes its slot only when its scope is whole (exclusive(onlyWhenWhole: true)), but declares no inspecting() command to report that scope. Add ->inspecting('...') to the step.");
+    }
+
     public static function vendorChanged(): self
     {
         return new self('vendor/ changed since this server started: a composer install, a composer update or a branch switch installed other packages. This server still holds classes from the old versions, and it would load the rest from the new ones. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again.');

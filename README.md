@@ -86,7 +86,9 @@ in declaration order within a phase, so the order of your `in()` calls changes n
 
 A step whose command is scoped to a diff, such as a linter over `git diff --name-only`, exits 0
 having checked nothing when the diff is empty. Declare that scope with `->inspecting(...)` so the
-verdict says how many files it looked at; see "The trap worth knowing" below.
+verdict says how many files it looked at; see "The trap worth knowing" below. A scope line that is
+exactly `*` means "every file", so a file named `*` cannot be listed: the verdict then gives no count. The step can read the scope output
+from the file named in `BOOST_PIPELINE_SCOPE_FILE`.
 
 Give a step an explicit `id` when several invoke the same skill or command. Ids name the log files,
 and a duplicate throws when the run opens. `.config/` sits outside most analysed paths, so add it to
@@ -187,8 +189,27 @@ A step waits until one of the two `tests` slots is free, and its timeout starts 
 While it waits, `next_step` answers `state: running` with `waiting_for_slot`, and its result then
 carries `slot_wait_ms` next to `duration_ms`. The slots are lock files in
 `/tmp/boost-pipeline-slots`; set `boost-pipeline.slots.directory` to use another directory. A
-server that dies frees its slot. `exclusive()` needs `withResponseWindow()`, and the config is
-refused without it.
+server that dies frees its slot. A step frees its slot when its process ends, even if no
+`next_step` call collects the verdict. Without the `pcntl` extension, the slot frees only when the
+verdict is collected. `exclusive()` needs `withResponseWindow()`, and the config is refused without
+it.
+
+Some steps load the machine only sometimes, for example a test step that runs a small selection and
+falls back to the full suite when it cannot work out the selection. Give such a step
+`onlyWhenWhole: true`, and it takes a slot only when its `inspecting()` command prints a line that
+is exactly `*`:
+
+```php
+Shell::run('composer test:affected', id: 'tests')
+    ->inspecting('composer test:affected -- --list')
+    ->exclusive('tests', 2, onlyWhenWhole: true),
+```
+
+A scope command that cannot work out the selection prints `*` and exits 0. A non-zero exit makes the
+step an error. The scope command and the step run one after the other, and each can reach its own
+answer. So the step reads the scope output from the file in `BOOST_PIPELINE_SCOPE_FILE` and runs that
+selection: otherwise a full suite can run without a slot. `onlyWhenWhole` without `inspecting()` is
+refused.
 
 ### Long steps and `status`
 
