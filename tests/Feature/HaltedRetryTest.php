@@ -173,11 +173,9 @@ it('tells a blocked run to reopen rather than continue, on every surface that ad
 });
 
 it('never tells the reader that no file changed means next_step is safe', function (): void {
-    // The rule this replaced said exactly that, and it contradicted the stale
-    // message shipped two releases earlier: the fingerprint covers the commit, so
-    // an amend moves the tree with nothing on disk changed. A rule the reader has
-    // to apply is a rule they can apply wrongly; `open_run` being idempotent on an
-    // unmoved tree is what lets the advice drop the judgement entirely.
+    // The rule this replaced said exactly that. A rule the reader has to apply is
+    // a rule they can apply wrongly; `open_run` being idempotent on an unmoved
+    // tree is what lets the advice drop the judgement entirely.
     $tool = new NextStep(resolve(RunManager::class));
     $description = new ReflectionClass($tool)->getProperty('description')->getValue($tool);
     $instructions = new ReflectionClass(PipelineServer::class)->getDefaultProperties()['instructions'];
@@ -193,9 +191,8 @@ it('never tells the reader that no file changed means next_step is safe', functi
         'tool description' => false,
         'server instructions' => false,
     ])
-        // And a surface names a commit as moving the tree, so a reader cannot
-        // conclude that an amend leaves the run intact.
-        ->and(is_string($instructions) && str_contains($instructions, 'amend'))->toBeTrue();
-
-    PipelineServer::prompt(RunPipeline::class)->assertOk()->assertSee('amend');
+        // The fingerprint reads content, so no surface may name a commit as
+        // moving the tree: that reader walks twice for one answer.
+        ->and(is_string($instructions) && str_contains($instructions, 'change no content'))->toBeTrue()
+        ->and(is_string($instructions) && str_contains($instructions, 'covers the commit'))->toBeFalse();
 });

@@ -39,17 +39,19 @@ final class PipelineServer extends Server
     A step reporting "failed" returns the same step again. Fix the cause, then call
     open_run rather than next_step — and do not try to work out whether your fix
     moved the tree. open_run hands back the run you were already in when nothing
-    moved, and a fresh one when anything did: an edit, but also a commit, an
-    amend, a checkout or a rebase, because the fingerprint covers the commit too.
+    moved, and a fresh one when the content did: an edit, a checkout or a rebase.
     next_step never re-checks, so carrying on finishes a walk whose earlier passes
     no longer describe the code, and reports all_verified false.
 
     Neither call sees a fix that touches only a git-ignored file, `.env` for
     instance: nothing moves, so judge that one yourself.
 
-    While a walk is open, do no unrelated repository work — no committing finished
-    work, amending, rebasing or switching branches. A run holds a claim about one
-    tree, and any git-visible change invalidates it.
+    While a walk is open, do no unrelated repository work — no editing, rebasing,
+    switching branches or stashing. A run holds a claim about the content of one
+    tree, and any change to that content invalidates it. Staging and committing
+    change no content, so they leave the run valid. Commit after the walk, and
+    commit all of it: a commit while the tree still holds uncommitted changes
+    makes `pipeline:verify` refuse.
 
     A "skill" step is handed to you to invoke, then acknowledged with report_step;
     it is recorded as acknowledged, never as verified.
