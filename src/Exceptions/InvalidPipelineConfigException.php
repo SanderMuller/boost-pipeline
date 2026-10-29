@@ -144,7 +144,7 @@ final class InvalidPipelineConfigException extends RuntimeException
 
     public static function vendorChanged(): self
     {
-        return new self('vendor/ changed since this server started: a composer install, a composer update or a branch switch installed other packages. This server still holds classes from the old versions, and it would load the rest from the new ones. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again.');
+        return new self('vendor/ changed since this server started: a composer install, a composer update or a branch switch changed a package that autoloads classes. This server still holds classes from the old versions, and it would load the rest from the new ones. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again.');
     }
 
     public static function configReloadFailed(string $message): self

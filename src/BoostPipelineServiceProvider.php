@@ -84,7 +84,7 @@ final class BoostPipelineServiceProvider extends ServiceProvider
                     $this->app->instance(Pipeline::class, $pipelines->sole());
                 }
             },
-            $this->app->basePath('vendor/composer/installed.php'),
+            $this->app->basePath('vendor/composer/installed.json'),
         ));
 
         $this->app->singleton(Pipelines::class, function (): Pipelines {

@@ -64,9 +64,9 @@ function writeConfig(string $base, string $code): void
 }
 
 /** @return array{RunManager, StepRunnerFactory, ConfigReloader} */
-function reloadingManager(string $base): array
+function reloadingManager(string $base, ?string $installedPackages = null): array
 {
-    $reloader = new ConfigReloader(new PipelineLoader($base), $base);
+    $reloader = new ConfigReloader(new PipelineLoader($base), $base, installedPackages: $installedPackages);
     $pipelines = $reloader->pipelines() ?? throw new RuntimeException('No config.');
 
     $runners = new StepRunnerFactory(static fn (string $name): StepRunner => new TimedRunner($reloader->pipelines()->get($name)?->timeoutSeconds()));
@@ -415,21 +415,56 @@ it('tracks a project class a failed reload loaded, so a later edit to it is refu
     expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, $class.'.php');
 });
 
-it('refuses once the installed packages changed, before it looks at the config', function (): void {
+/** Composer's `installed.json`, with one autoloading package and one that ships only markdown. */
+function installedJson(string $toolVersion, string $docsVersion, string $source = 'dist'): string
+{
+    return (string) json_encode(['packages' => [
+        ['name' => 'acme/tool', 'version' => $toolVersion, 'installation-source' => $source, 'autoload' => ['psr-4' => ['Acme\\Tool\\' => 'src/']]],
+        ['name' => 'acme/docs', 'version' => $docsVersion, 'autoload' => null],
+    ], 'dev' => true]);
+}
+
+it('refuses once an autoloading package changed, before it looks at the config', function (): void {
     writeConfig($this->base, configDeclaring(['default' => ['echo old']]));
-    $installed = $this->base.'/installed.php';
-    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '1.0.0']];\n");
-    $reloader = new ConfigReloader(new PipelineLoader($this->base), $this->base, installedPackages: $installed);
-    $runs = new RunManager($reloader->pipelines() ?? throw new RuntimeException('No config.'), new StepRunnerFactory(static fn (): StepRunner => new TimedRunner(null)), config: $reloader);
+    $installed = $this->base.'/installed.json';
+    file_put_contents($installed, installedJson('1.0.0', '1.0.0'));
+    [$runs] = reloadingManager($this->base, $installed);
     $runs->open('default');
 
     // Same bytes written again, as a `composer install` that changes nothing does.
-    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '1.0.0']];\n");
+    file_put_contents($installed, installedJson('1.0.0', '1.0.0'));
 
     $runs->open('default');
 
-    file_put_contents($installed, "<?php return ['versions' => ['acme/tool' => '2.0.0']];\n");
+    file_put_contents($installed, installedJson('2.0.0', '1.0.0'));
     writeConfig($this->base, configDeclaring(['default' => ['echo new']]));
 
     expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'vendor/ changed');
+});
+
+it('refuses once an autoloading package is gone', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo old']]));
+    $installed = $this->base.'/installed.json';
+    file_put_contents($installed, installedJson('1.0.0', '1.0.0'));
+    [$runs] = reloadingManager($this->base, $installed);
+    $runs->open('default');
+
+    file_put_contents($installed, (string) json_encode(['packages' => [['name' => 'acme/docs', 'version' => '1.0.0', 'autoload' => null]]]));
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'vendor/ changed');
+});
+
+it('keeps serving when only a package without autoload entries changed', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo old']]));
+    $installed = $this->base.'/installed.json';
+    file_put_contents($installed, installedJson('1.0.0', '1.0.0'));
+    [$runs] = reloadingManager($this->base, $installed);
+    $runs->open('default');
+
+    // A package that holds no class PHP could have loaded, the same version
+    // installed from source instead of a dist, and a reformatted file.
+    file_put_contents($installed, json_encode(json_decode(installedJson('1.0.0', '1.0.1', 'source')), JSON_PRETTY_PRINT));
+    writeConfig($this->base, configDeclaring(['default' => ['echo new']]));
+
+    expect($runs->open('default')->currentStep()?->step->id())->toBe('echo new');
 });

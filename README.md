@@ -340,9 +340,11 @@ that already held your change. Open a new run.
 reconnect. A reload replaces every open run, unless its step is still running.
 `open_run` refuses instead, and says why, when running the file again in the same process is not
 safe: the config declares a named class, function or constant, it includes another file, a class
-it loaded changed, or the set of pipeline names changed. It also refuses once
-`vendor/composer/installed.php` changed, after a `composer install` or a branch switch, because the
-server would run a mix of old and new package classes. Reconnect the MCP client then.
+it loaded changed, or the set of pipeline names changed. It also refuses once a package that
+declares autoload entries changed in `vendor/composer/installed.json`, after a `composer install` or
+a branch switch, because the server would run a mix of old and new package classes. A package
+without autoload entries, such as one that ships only markdown, does not count. Reconnect the MCP
+client then.
 
 Two other things produce the same mismatch, and the message names all three. A config git cannot
 see — ignored, symlinked, or composed from a file outside the repository — moves without moving the

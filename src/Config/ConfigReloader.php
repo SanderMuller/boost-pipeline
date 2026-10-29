@@ -34,8 +34,12 @@ use Throwable;
  * A failed reload — a parse error, an invalid declaration — keeps the map and the
  * hashes it had, so the next `open_run` tries again once the file is fixed.
  *
- * It also refuses once Composer's installed-package list changed, because the
- * vendor classes this server loaded cannot be loaded again either.
+ * It also refuses once a package that autoloads code changed, because the
+ * vendor classes this server loaded cannot be loaded again either. A package
+ * without autoload entries holds no class PHP could have loaded, so a bump of
+ * one does not count. Neither does the root package: Composer rewrites its
+ * commit on every install, and the project files the config loads are tracked
+ * on their own.
  */
 final class ConfigReloader
 {
@@ -50,12 +54,16 @@ final class ConfigReloader
 
     private bool $loaded = false;
 
-    /** The hash of Composer's installed-package list when this server started. */
-    private readonly ?string $installed;
+    /**
+     * Every package that autoloads code when this server started, with a hash of what identifies its code.
+     *
+     * @var array<string, string>|null
+     */
+    private readonly ?array $installed;
 
     /**
      * @param  (Closure(Pipelines): void)|null  $onReload
-     * @param  string|null  $installedPackages  Composer's `vendor/composer/installed.php`, or null to not watch it
+     * @param  string|null  $installedPackages  Composer's `vendor/composer/installed.json`, or null to not watch it
      */
     public function __construct(
         private readonly PipelineLoader $loader,
@@ -65,7 +73,7 @@ final class ConfigReloader
     ) {
         // Taken now, at server start, because that is when the vendor classes
         // loaded. A first `open_run` can come after a `composer install`.
-        $this->installed = $installedPackages === null ? null : $this->hash($installedPackages);
+        $this->installed = $installedPackages === null ? null : $this->autoloadingPackages($installedPackages);
     }
 
     /**
@@ -98,7 +106,7 @@ final class ConfigReloader
     {
         // PHP keeps the vendor classes it already loaded and autoloads the rest
         // from the new files, so the server would run a mix of two versions.
-        if ($this->installedPackages !== null && $this->hash($this->installedPackages) !== $this->installed) {
+        if ($this->installedPackages !== null && $this->autoloadingPackages($this->installedPackages) !== $this->installed) {
             throw InvalidPipelineConfigException::vendorChanged();
         }
 
@@ -352,6 +360,54 @@ final class ConfigReloader
         }
 
         return $token->is(T_FUNCTION) ? 'it declares a named function, which a second run would declare again' : null;
+    }
+
+    /**
+     * The packages in Composer's `installed.json` that declare autoload entries,
+     * each with a hash of what identifies its code, or null when the file cannot
+     * be read.
+     *
+     * `installed.php` cannot answer this: it carries no autoload entries, and its
+     * root entry names the commit checked out at the last install, so it changes
+     * on every branch switch.
+     *
+     * Only the fields that pick the code are hashed. The rest of an entry, such
+     * as whether it came from a dist or from source, can differ between two
+     * installs of the same version.
+     *
+     * @return array<string, string>|null
+     */
+    private function autoloadingPackages(string $path): ?array
+    {
+        $json = @file_get_contents($path);
+        $installed = $json === false ? null : json_decode($json, true);
+        $packages = is_array($installed) ? $installed['packages'] ?? null : null;
+
+        if (! is_array($packages)) {
+            return null;
+        }
+
+        $autoloading = [];
+
+        foreach ($packages as $package) {
+            if (! is_array($package) || ! is_string($package['name'] ?? null)) {
+                continue;
+            }
+
+            if (($package['autoload'] ?? []) !== []) {
+                $autoloading[$package['name']] = hash('xxh3', (string) json_encode([
+                    $package['version'] ?? null,
+                    is_array($package['source'] ?? null) ? $package['source']['reference'] ?? null : null,
+                    is_array($package['dist'] ?? null) ? $package['dist']['reference'] ?? null : null,
+                    $package['install-path'] ?? null,
+                    $package['autoload'],
+                ]));
+            }
+        }
+
+        ksort($autoloading);
+
+        return $autoloading;
     }
 
     private function hash(string $path): ?string
