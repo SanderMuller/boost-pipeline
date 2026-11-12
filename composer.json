@@ -49,6 +49,7 @@
         "rector/rector": "^2.5",
         "sandermuller/boost-skills": "^2.27.0",
         "sandermuller/package-boost-laravel": "^1.0",
+        "sandermuller/rector-preset": "~2.8.0",
         "spaze/phpstan-disallowed-calls": "^4.13",
         "symplify/phpstan-rules": "~14.16.0",
         "tomasvotruba/cognitive-complexity": "~1.2.0",
