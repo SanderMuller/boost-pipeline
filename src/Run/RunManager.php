@@ -91,7 +91,7 @@ final class RunManager
     /** @throws InvalidPipelineConfigException */
     private function openRun(?string $pipeline, ?string $selection): Run
     {
-        $this->guardInstalledPackages($pipeline);
+        $this->guardInstalledPackages();
         $this->reloadChangedConfig();
 
         $name = $this->resolveName($pipeline);
@@ -210,13 +210,12 @@ final class RunManager
      * server takes the request; otherwise it refuses.
      *
      * A restart drops every run this process holds, so it waits while any step
-     * runs, and while another pipeline holds a walk that is not finished. The run
-     * of the pipeline being opened does not count: the agent is opening it again,
-     * often to retry a failed step, and its passes measured the old packages.
+     * runs. An unfinished walk does not block it: its passes measured the old
+     * packages, and the next open_run of its pipeline replaces it anyway.
      *
      * @throws InvalidPipelineConfigException
      */
-    private function guardInstalledPackages(?string $pipeline): void
+    private function guardInstalledPackages(): void
     {
         if ($this->supervisor?->isRestart() === true && ! $this->restartAnnounced) {
             $this->toolListChanged = true;
@@ -244,7 +243,7 @@ final class RunManager
         }
 
         $supervised = $this->supervisor?->isSupervised() === true;
-        $blocker = $this->restartBlocker($pipeline ?? $this->pipelines->implied());
+        $blocker = $this->restartBlocker();
 
         if ($supervised && $blocker === null) {
             $this->supervisor?->restart();
@@ -253,19 +252,12 @@ final class RunManager
         throw InvalidPipelineConfigException::vendorChanged($supervised, $blocker);
     }
 
-    /** Why a restart would lose work, or null when it would not. */
-    private function restartBlocker(?string $opening): ?string
+    /** Why a restart would lose work in flight, or null when it would not. */
+    private function restartBlocker(): ?string
     {
         foreach ($this->runs as $name => $run) {
             if ($run->isPending()) {
                 return sprintf('a step of pipeline [%s] is still running. Call next_step until it finishes, then call open_run again', $name);
-            }
-        }
-
-        foreach ($this->runs as $name => $run) {
-            // A run whose pipeline a reload removed cannot be finished, so it does not block.
-            if ($name !== $opening && $this->pipelines->has($name) && $run->results() !== [] && ! $run->state()->isTerminal()) {
-                return sprintf('pipeline [%s] holds a walk that is not finished, and a restart would lose it. Finish that walk, or reconnect the MCP server (in Claude Code: /mcp) to drop it, then call open_run again', $name);
             }
         }
 

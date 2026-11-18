@@ -371,7 +371,7 @@ gitignored lock. So the receipt records what the run walked, and the gate compar
 | Vendor changed, `vendor/` matches the lock, no run in progress, supervised | Server exits `75`. The supervisor restarts it and resends `open_run`. The agent gets a normal answer with a warning that earlier runs are gone. Phase `server-restart` and `supervisor` tests. |
 | Vendor changed while a step runs in the background | No exit. `open_run` refuses and tells the agent to wait for the step. The next `open_run` after the step restarts the server. Phase `server-restart` tests. |
 | Vendor changed, and the agent re-opens the same pipeline after a failed step | The run in that pipeline does not block the restart. The new server opens a fresh run, and the warning says earlier runs are gone. Phase `server-restart` tests. |
-| Vendor changed while another pipeline has a run with results that is not complete | No exit. `open_run` refuses and names that pipeline, so the agent can finish or drop it. Phase `server-restart` tests. |
+| Vendor changed while another pipeline has a run with results that is not complete | The server restarts. That walk measured the old packages, and the next `open_run` of its pipeline would replace it anyway. Phase `server-restart` tests. |
 | Vendor changed, server not supervised | Refusal as today. The message names the supervisor. Phase `server-restart` tests. |
 | `open_run` arrives while a `composer install` still runs | `vendor/` does not match the lock yet, or `bootstrap/cache/packages.php` is older than `installed.json`. `open_run` refuses with `installInProgress()`. No restart. Phase `server-restart` tests. |
 | `composer.lock` changed but nobody ran an install (for example after a merge with no hook) | `open_run` refuses with `installInProgress()`, also when nothing in `vendor/` changed since the server started. The message says to run the install. Phase `server-restart` tests. |
@@ -572,6 +572,10 @@ Stop and report — do not improvise — if any of these proves false during imp
   last time before it dumps the autoloader. In a project without the `package:discover` hook, a
   restart in that short window can boot a server on the old `autoload_*.php`, and that server
   sees no later vendor change. Not traced against Composer source; the window is short.
+- **Review: only a running step blocks a restart.** The first version also waited for an unfinished
+  walk in another pipeline. That walk measured the old packages, and `installedMoved()` replaces it at
+  its next `open_run`, so waiting protected nothing and asked for the reconnect this change removes
+  (a blocked step, then `composer install`, then `open_run` of another pipeline).
 - **Review: the receipt digest carries a format prefix** (`xxh128-v1:`). A later change to what a
   digest covers takes a new prefix, and `pipeline:verify` skips a digest it cannot compare instead
   of failing every older receipt.

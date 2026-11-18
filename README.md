@@ -361,7 +361,7 @@ config: `open_run` then opens with a warning. `pipeline:verify` still fails a ru
 `vendor/composer/installed.json`, after a `composer install`) means the server holds classes from
 the old versions. Under `vendor/bin/boost-pipeline-mcp`, `open_run` restarts the server and the
 client gets a normal answer, with a warning that runs opened before are gone. It waits while a step
-still runs, or while another pipeline holds a walk that is not finished, and says so. Without the
+still runs, and says so. Without the
 script, `open_run` refuses and asks for a reconnect. A package without autoload entries, such as
 one that ships only markdown, does not count.
 

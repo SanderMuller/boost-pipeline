@@ -700,7 +700,7 @@ it('lets the run of the pipeline being opened again, a failed step to retry, not
     expect(fn (): mixed => $runs->open('default'))->toThrow(RestartRequested::class);
 });
 
-it('refuses instead of restarting while another pipeline holds a walk that is not finished, and names it', function (): void {
+it('restarts although another pipeline holds an unfinished walk, because its passes measured the old packages', function (): void {
     writeConfig($this->base, configDeclaring(['backend' => ['echo one', 'echo two'], 'release' => ['echo three']]));
     installedProject($this->base);
     [$runs, $supervisor] = supervisedManager($this->base);
@@ -708,8 +708,8 @@ it('refuses instead of restarting while another pipeline holds a walk that is no
 
     installedProject($this->base, '1.1.0');
 
-    expect(fn (): mixed => $runs->open('release'))->toThrow(InvalidPipelineConfigException::class, 'pipeline [backend] holds a walk that is not finished')
-        ->and($supervisor->restarts)->toBe(0);
+    expect(fn (): mixed => $runs->open('release'))->toThrow(RestartRequested::class)
+        ->and($supervisor->restarts)->toBe(1);
 });
 
 it('restarts when the other pipeline finished its walk', function (): void {
