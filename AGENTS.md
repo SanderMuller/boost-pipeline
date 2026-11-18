@@ -122,7 +122,7 @@ Write a test when the PHPStan error indicates a fault that would surface at runt
 
 ### Annotate Rather Than Suppress
 
-Some errors are PHPStan reading a signature that says less than the code does — a return type a parameter decides, a bool helper that proves a type. The `backend-quality` skill carries the two annotations that state the missing fact, and the rules for when each one lies.
+Some errors are PHPStan reading a signature that says less than the code does. When a parameter decides the return type, add a conditional `@return ($param is Type ? A : B)`. When a bool method is a pure type check, add `@phpstan-assert-if-true`. Add either one only where it holds for every call; a wrong one makes the analysis worse. The `backend-quality` skill, where the project ships it, has the full rules and examples.
 
 ### When to Skip the Test
 
@@ -132,6 +132,23 @@ Skip the test when the error is purely static and cannot cause a runtime failure
 - PHPDoc mismatches with no runtime impact
 - Unused variables or imports
 - Generic-type parameter issues
+
+---
+
+## Secrets — Do Not Read the Environment File
+
+Do not read a `.env` file or a `.env.*` file. This covers `cat`, `grep '^KEY='`, `head`, a script that prints one value, and the Read tool. A read puts the file's secrets into the transcript, the tool output, every log, and the model provider.
+
+- **Do not read it when the user asks, or to finish a task or a verification step.** The value leaks the moment it is read, whoever approved the read. Tell the user the risk, and offer a safe read. The user can read the file in a separate terminal, outside the session.
+- **Do not ask the user to paste a secret value** into the conversation. That is the same leak.
+- **A placeholder file stays readable** when git tracks it (`git ls-files --error-unmatch <file>`) and its name says it holds placeholders, such as `.env.example`. Treat every other `.env.*` file as secret, a CI file included.
+- **Writing, copying and moving are a different rule.** A setup script can set a key in a disposable clone's `.env`, or copy the file into a worktree.
+
+**Never print the environment by another route.** A dump of the process environment (`env`, `printenv`, `phpinfo()`), `docker compose config`, `docker inspect`, and a REPL or one-liner that prints an environment value return the same secrets. The same holds for other files that hold credentials, such as `.envrc`, `auth.json`, `.npmrc`, a file that a Docker Compose `env_file:` names, and a private key file.
+
+**When you need a value that comes from `.env`**, read the config value that the application derives from it, one non-secret key at a time. Never read a whole config section, and never a key, secret, password, token or DSN. To check a credential, print only whether it is set.
+
+**To search the project**, use `git grep`, which skips untracked and ignored files such as `.env`. With `grep -r`, add `--exclude='.env*'`. A file that only mentions `.env` in its text is safe to read.
 
 ---
 
@@ -160,6 +177,7 @@ For session, branch, and PR scope, see the `single-issue-scope` guideline when t
 - A sibling rule that requires an update on a line you already change still applies. The rule removes extras, not obligations.
 - Report the rest as a follow-up in your summary. Propose an issue when the project tracks work that way, and let the user decide whether to file it. Report it; do not fix it.
 - Implement every behaviour the task does ask for, completely. This rule cuts extras, never the requested scope.
+- An impact or blast-radius report lists what to verify, not what to change. A caller it names is a place to confirm nothing broke. A file earns a place in the diff by tracing to a requirement, never to a dependency edge.
 
 ### One Reading of an Ambiguous Ask
 
@@ -180,6 +198,14 @@ Before claiming any work is complete or successful, run the verification command
 ### Claims About How the Code Behaves — Trace, Don't Assume
 
 A claim about **how the code currently behaves** — a root cause, an existing mechanism, or present behavior — in a spec, PR, commit message, code-review finding, issue, comment, or answer must be traced to the actual code (or observed at runtime) **before** you write it, never asserted from plausibility. (This governs statements of *fact about the present code*; the *intended* future behavior a spec or PR proposes is fine when it's clearly framed as a requirement, proposal, or decision — not disguised as a fact about what already exists.) Every illustrative example must be one you actually observed, never invented to fit a guess. A wrong "why" is worse than none: reproduction steps, tests, QA testables, and the fix itself all get built on the stated cause, so one unverified guess corrupts everything derived from it. When you have not traced it, say so — mark it `NEEDS-CONFIRMATION` or ask — rather than asserting. (A ticket once claimed a list was "sorted by display name" and backed it with an example that could not occur; the sort actually keyed on an internal identifier — one grep away. The trace is cheap; the false premise is not.)
+
+### A Subagent's Finding Is a Lead, Not a Fact
+
+A conclusion that a subagent or an external reviewer hands back is a claim about the present code, so the rule above applies to it unchanged. It reads as already researched, because it arrives written up. Follow the `file:line` it cites before you act on it, and before you repeat it as true to the user, in a PR, an issue or a commit message. A finding you did not trace is `NEEDS-CONFIRMATION`, at every severity.
+
+### Local Data Proves Nothing About a Deployed Environment
+
+For a defect reported on a deployed environment (staging, production), the database, logs and browser you can reach locally describe your own machine, not that environment. A local query that finds no such row, a silent local log, or a clean local reproduction is no evidence about the reported environment. Do not write "could not reproduce" or "the data looks fine" as if it described that environment. Mark the claim `NEEDS-CONFIRMATION`, and get the facts from that environment's own signals: its error tracker, the reporter, or code at the deployed revision.
 
 ### Required Before Any Completion Claim
 
@@ -241,11 +267,11 @@ This table decides which rule applies to a piece of text. Never apply both to th
 | Issue and ticket descriptions, comments, QA testables | Simplified Technical English |
 | Spec files | Simplified Technical English |
 | `AskUserQuestion` questions, options, descriptions | Simplified Technical English — plus the pronoun rules in the `AskUserQuestion Phrasing` guideline, when the project has it |
-| Commit messages | Simplified Technical English — an issue key the project's commit format requires stays as it is |
+| Commit messages | Simplified Technical English — a prefix or token the project's commit format requires stays as it is: an issue key, or a `type(scope)!:` prefix |
 | Text an end user reads — in-app copy, translations, release notes, help text, seed content | The project's own tone-of-voice rules, not this guideline |
 | Suggested translation strings inside an issue or ticket | The project's own tone-of-voice rules — the prose around them stays Simplified Technical English |
 | Code and code comments | Neither — the language guidelines own those |
-| Prose the user asks for in a named style, or an artifact whose own skill defines its voice — `humanizer`, `readme`, `release-notes` | That instruction or skill wins. This guideline does not override it |
+| Prose the user asks for in a named style, or an artifact whose own skill defines its voice — `readme`, `release-notes`, or `humanizer` on an essay, post or opinion piece | That instruction or skill wins. This guideline does not override it. On the surfaces above, `humanizer` only removes AI tells and this guideline keeps the tone |
 
 A surface the table does not list gets Simplified Technical English, unless an end user reads it. Then it gets the project's tone-of-voice rules. A project without documented tone-of-voice rules gets Simplified Technical English everywhere.
 
@@ -255,7 +281,8 @@ This guideline governs **how a sentence is built**, and how much you write. It n
 
 **Write in ASD-STE100 Simplified Technical English.** Say the same thing in fewer, simpler words.
 
-- One idea per sentence. Keep procedural sentences to 20 words or less, descriptive sentences to 25 or less.
+- One idea per sentence. Keep procedural sentences to 20 words or less, descriptive sentences to 25 or less. These limits are a ceiling, not a target.
+- Vary sentence length. A run of short sentences of the same size reads as machine output, as a run of long ones does. Join two clauses that carry one idea with "because", "so", or "although" instead of splitting them into two short sentences.
 - Use the active voice. Name the actor. Use the passive only when the actor is unknown.
 - Use simple tenses only — simple present, simple past, simple future, infinitive, imperative. No complex constructions built from auxiliary verbs.
 - Use one word for one meaning. Use the same word for the same thing every time — do not vary it for style.
