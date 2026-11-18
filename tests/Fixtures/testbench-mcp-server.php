@@ -4,8 +4,8 @@
  * Starts the real pipeline MCP server on a throwaway application base path.
  *
  * The end-to-end supervisor test needs a vendor/composer/installed.json and a
- * composer.lock it may change. The Testbench skeleton links vendor/ to this
- * repository's own, so it boots a copy of the skeleton instead: classes still
+ * composer.lock it may change, and the Testbench skeleton can link vendor/ to
+ * this repository's own. So it boots a copy of the skeleton instead: classes still
  * load from this repository's autoloader, while the application reads its
  * base path files from the copy.
  *

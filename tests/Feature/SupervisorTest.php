@@ -355,9 +355,9 @@ function installEverywhere(string $base, string $version): void
 it('restarts the real server after a vendor change, and the client gets an answer on the same connection', function (): void {
     $base = $this->state.'/app';
     new Process(['cp', '-R', dirname(__DIR__, 2).'/vendor/orchestra/testbench-core/laravel', $base])->mustRun();
-    // The copy links vendor/ to this repository's; replace the link with a
-    // directory this test may write into.
-    unlink($base.'/vendor');
+    // A local copy links vendor/ to this repository's, and a CI copy has none.
+    // Either way, give the copy a vendor/ this test may write into.
+    new Process(['rm', '-rf', $base.'/vendor'])->mustRun();
     mkdir($base.'/vendor/composer', recursive: true);
     @mkdir($base.'/.config');
     file_put_contents($base.'/.config/pipeline.php', "<?php\n\nuse SanderMuller\\BoostPipeline\\Config\\Pipeline;\nuse SanderMuller\\BoostPipeline\\Phases\\Defaults\\Tests;\nuse SanderMuller\\BoostPipeline\\Phases\\Steps;\nuse SanderMuller\\BoostPipeline\\Steps\\Shell;\n\nreturn Pipeline::configure()->withSteps(function (Steps \$steps): void {\n\$steps->in(Tests::class)->append(Shell::run('true', id: 'probe'));\n});\n");
