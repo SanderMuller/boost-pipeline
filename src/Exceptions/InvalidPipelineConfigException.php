@@ -6,6 +6,7 @@ namespace SanderMuller\BoostPipeline\Exceptions;
 
 use RuntimeException;
 use SanderMuller\BoostPipeline\Config\InstallState;
+use SanderMuller\BoostPipeline\Runner\EnvironmentSupervisor;
 
 final class InvalidPipelineConfigException extends RuntimeException
 {
@@ -144,14 +145,21 @@ final class InvalidPipelineConfigException extends RuntimeException
     }
 
     /**
-     * @param  bool  $supervised  whether vendor/bin/boost-pipeline-mcp started this server
+     * @param  bool|null  $supervised  whether vendor/bin/boost-pipeline-mcp started this server; null from a caller older than 0.24
      * @param  string|null  $blocker  why a supervised server did not restart itself
      */
-    public static function vendorChanged(bool $supervised = false, ?string $blocker = null): self
+    public static function vendorChanged(?bool $supervised = null, ?string $blocker = null): self
     {
         $message = 'vendor/ changed since this server started: a composer install, a composer update or a branch switch changed a package that autoloads classes. This server still holds classes from the old versions, and it would load the rest from the new ones.';
 
-        if ($supervised && $blocker !== null) {
+        // A server older than 0.24 calls this without arguments, and loads this
+        // class from the new vendor/. Under the supervisor it cannot restart
+        // itself, so the supervisor hint below would be wrong.
+        if ($supervised === null && new EnvironmentSupervisor()->isSupervised()) {
+            return new self($message.' This server runs under vendor/bin/boost-pipeline-mcp, but its version cannot restart itself. Reconnect the MCP server once (in Claude Code: /mcp), then call open_run again.');
+        }
+
+        if ($supervised === true && $blocker !== null) {
             return new self(sprintf('%s The server restarts itself when no run is in progress, but %s.', $message, $blocker));
         }
 

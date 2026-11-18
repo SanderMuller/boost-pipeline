@@ -118,7 +118,7 @@ final class ConfigReloader
     public function refresh(): ?Pipelines
     {
         if ($this->vendorChanged()) {
-            throw InvalidPipelineConfigException::vendorChanged();
+            throw InvalidPipelineConfigException::vendorChanged(supervised: false);
         }
 
         $current = $this->pipelines();

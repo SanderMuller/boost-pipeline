@@ -51,7 +51,12 @@ Register the server in `.mcp.json`:
 `composer install` changes your packages, the server restarts itself at the next `open_run`, and
 the client keeps its connection. Without it, use `"command": "php"` with
 `"args": ["artisan", "mcp:start", "pipeline"]`, and reconnect the client (`/mcp` in Claude Code)
-after such an install. On Windows the script runs the server without restarts.
+after such an install. On Windows the script runs the server without restarts. To keep one entry
+that also works where the script cannot run directly, use `"command": "php"` with
+`"args": ["vendor/bin/boost-pipeline-mcp", "php", "artisan", "mcp:start", "pipeline"]`.
+
+A restart starts the version that `vendor/` holds. After a branch switch to a lock with a version
+before 0.24, that server cannot restart itself, so the next vendor change asks for one reconnect.
 
 Set the `timeout` explicitly. It is a hard wall-clock limit per tool call, and progress
 notifications do not extend it. The tools decline to register until `.config/pipeline.php` exists.
