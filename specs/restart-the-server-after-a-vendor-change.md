@@ -618,3 +618,10 @@ Stop and report — do not improvise — if any of these proves false during imp
   used, so the exit came from the probe, not from this code.
 - **Phase 1: a halted run in another pipeline does not block a restart.** "Not complete" is read as
   "not terminal" (`RunState::isTerminal()`): a halted walk must be opened again anyway.
+- **Trial: a restart can start a version older than 0.24.** A restart runs the version that
+  `vendor/` holds. After a branch switch to a lock with a version before 0.24, the supervisor
+  starts that older server, which cannot restart itself. Its refusal loads
+  `InvalidPipelineConfigException` from the new `vendor/`, so the message told the agent to start
+  the server through the supervisor that already ran it. Since 0.24.2, `vendorChanged()` called
+  without arguments reads `BOOST_PIPELINE_SUPERVISED` and asks for one reconnect. A peer trial
+  confirmed the new text, and `open_run` worked after one reconnect. The README names this limit.
