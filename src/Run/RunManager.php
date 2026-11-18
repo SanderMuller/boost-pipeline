@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use SanderMuller\BoostPipeline\Config\ConfigReloader;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\Pipelines;
+use SanderMuller\BoostPipeline\Contracts\ServerSupervisor;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Runner\PipelineTree;
@@ -15,8 +17,8 @@ use SanderMuller\BoostPipeline\Runner\StepRunnerFactory;
 /**
  * Holds one run per pipeline.
  *
- * State is in-process, so these live and die with the server process, and the
- * server process is per session. A project declaring one pipeline holds one run,
+ * State is in-process, so these live and die with the server process. A client
+ * session has one server process, or several when the supervisor restarts it. A project declaring one pipeline holds one run,
  * exactly as before.
  *
  * Several at once is deliberate. An agent that hits a blocking failure in one
@@ -56,7 +58,18 @@ final class RunManager
         private readonly ?RunHistoryStoreFactory $history = null,
         private readonly ?LiveProgressStoreFactory $live = null,
         private readonly ?ConfigReloader $config = null,
+        private readonly ?InstallState $install = null,
+        private readonly ?ServerSupervisor $supervisor = null,
+        private readonly bool $requireInstalledLock = true,
     ) {}
+
+    /** @var list<string> */
+    private array $warnings = [];
+
+    /** Whether an answer carried the restart notice; set only when open() succeeds, so a refused call does not use it up. */
+    private bool $restartAnnounced = false;
+
+    private bool $toolListChanged = false;
 
     /**
      * @param  string|null  $pipeline  Which pipeline to walk. Required when the project declares several.
@@ -66,6 +79,19 @@ final class RunManager
      */
     public function open(?string $pipeline = null, ?string $selection = null): Run
     {
+        $this->warnings = [];
+        $this->toolListChanged = false;
+
+        $run = $this->openRun($pipeline, $selection);
+        $this->restartAnnounced = $this->restartAnnounced || $this->supervisor?->isRestart() === true;
+
+        return $run;
+    }
+
+    /** @throws InvalidPipelineConfigException */
+    private function openRun(?string $pipeline, ?string $selection): Run
+    {
+        $this->guardInstalledPackages($pipeline);
         $this->reloadChangedConfig();
 
         $name = $this->resolveName($pipeline);
@@ -107,6 +133,7 @@ final class RunManager
             // a repeat of this question. Threading this digest into it would
             // baseline against a moment already past.
             ['moved' => $moved, 'stale' => $stale] = $run->condition();
+            $moved = $moved || $run->installedMoved();
 
             if ($moved && $run->results() === []) {
                 // Nothing recorded, so no verdict to lose: it takes the new tree
@@ -139,12 +166,110 @@ final class RunManager
                 history: $this->history?->for($name),
                 live: $this->live?->for($name),
                 responseWindow: $declared->responseWindow(),
+                install: $this->install,
             );
 
             $this->openedFrom[$name] = $this->pipelines;
         }
 
         return $this->runs[$name] = $run;
+    }
+
+    /**
+     * Warnings the last open() collected for its answer.
+     *
+     * @return list<string>
+     */
+    public function warnings(): array
+    {
+        return $this->warnings;
+    }
+
+    /**
+     * Whether the last open() changed the tool schema the client holds.
+     *
+     * The `pipeline` argument names the declared pipelines and exists only for a
+     * map of them, so a reload that renames a pipeline, or switches between one
+     * pipeline and a map, leaves the client with a stale schema. So does a
+     * restart, because the new server cannot know what the old one declared.
+     * True even when open() then threw: the error answer carries it too.
+     */
+    public function toolListChanged(): bool
+    {
+        return $this->toolListChanged;
+    }
+
+    /**
+     * Refuse, or restart the server, when `vendor/` is not what this server can run against.
+     *
+     * Two questions, in this order. Does `vendor/` hold what `composer.lock`
+     * names? If not, an install is running, failed or never ran, and a run would
+     * verify against packages the lock does not name. Then: did a package that
+     * autoloads code change since this server started? If so, this process holds
+     * classes from the old versions. Under the supervisor it exits and a new
+     * server takes the request; otherwise it refuses.
+     *
+     * A restart drops every run this process holds, so it waits while any step
+     * runs, and while another pipeline holds a walk that is not finished. The run
+     * of the pipeline being opened does not count: the agent is opening it again,
+     * often to retry a failed step, and its passes measured the old packages.
+     *
+     * @throws InvalidPipelineConfigException
+     */
+    private function guardInstalledPackages(?string $pipeline): void
+    {
+        if ($this->supervisor?->isRestart() === true && ! $this->restartAnnounced) {
+            $this->toolListChanged = true;
+            $this->warnings[] = 'The pipeline server restarted after a vendor/ change. Runs opened before the restart are gone; their receipts and history stay on disk.';
+        }
+
+        $differences = $this->install?->differences() ?? [];
+
+        if ($differences !== []) {
+            if ($this->requireInstalledLock) {
+                throw InvalidPipelineConfigException::installInProgress($differences);
+            }
+
+            $this->warnings[] = InvalidPipelineConfigException::installInProgress($differences)->getMessage();
+        }
+
+        if ($this->config?->vendorChanged() !== true) {
+            return;
+        }
+
+        // Even with the lock check switched off: a new server must not boot on a
+        // half-installed vendor/, and this one cannot run the new packages.
+        if ($differences !== []) {
+            throw InvalidPipelineConfigException::installInProgress($differences);
+        }
+
+        $supervised = $this->supervisor?->isSupervised() === true;
+        $blocker = $this->restartBlocker($pipeline ?? $this->pipelines->implied());
+
+        if ($supervised && $blocker === null) {
+            $this->supervisor?->restart();
+        }
+
+        throw InvalidPipelineConfigException::vendorChanged($supervised, $blocker);
+    }
+
+    /** Why a restart would lose work, or null when it would not. */
+    private function restartBlocker(?string $opening): ?string
+    {
+        foreach ($this->runs as $name => $run) {
+            if ($run->isPending()) {
+                return sprintf('a step of pipeline [%s] is still running. Call next_step until it finishes, then call open_run again', $name);
+            }
+        }
+
+        foreach ($this->runs as $name => $run) {
+            // A run whose pipeline a reload removed cannot be finished, so it does not block.
+            if ($name !== $opening && $this->pipelines->has($name) && $run->results() !== [] && ! $run->state()->isTerminal()) {
+                return sprintf('pipeline [%s] holds a walk that is not finished, and a restart would lose it. Finish that walk, or reconnect the MCP server (in Claude Code: /mcp) to drop it, then call open_run again', $name);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -160,14 +285,30 @@ final class RunManager
         $fresh = $this->config?->refresh();
 
         if ($fresh instanceof Pipelines) {
+            if ($fresh->names() !== $this->pipelines->names() || $fresh->requiresName() !== $this->pipelines->requiresName()) {
+                $this->toolListChanged = true;
+            }
+
             $this->pipelines = $fresh;
             $this->runners->flush();
         }
     }
 
-    /** @throws InvalidPipelineConfigException */
+    /**
+     * A run whose step still runs stays reachable by its name after a reload
+     * removed its pipeline, so the agent can collect the verdict and a restart
+     * is not blocked by a run nobody can finish.
+     *
+     * @throws InvalidPipelineConfigException
+     */
     public function for(?string $pipeline = null): ?Run
     {
+        $orphan = $pipeline === null || $this->pipelines->has($pipeline) ? null : $this->runs[$pipeline] ?? null;
+
+        if ($orphan instanceof Run && $orphan->isPending()) {
+            return $orphan;
+        }
+
         return $this->runs[$this->resolveName($pipeline)] ?? null;
     }
 

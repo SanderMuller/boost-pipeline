@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
@@ -21,6 +22,7 @@ use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\Run;
 use SanderMuller\BoostPipeline\Runner\TreeDigest;
 use SanderMuller\BoostPipeline\Steps\Shell;
+use Symfony\Component\Process\Process;
 
 /**
  * A phase no pipeline registers, so a step declared into it is dropped from the
@@ -1774,4 +1776,152 @@ it('refuses a receipt whose digest this build cannot read, rather than assuming 
     expect($exit)->toBe(1)
         ->and($output)->toContain('cannot read')
         ->and($output)->toContain('expected once');
+});
+
+/** @param  array{digest: string, dev: bool}|null  $installed */
+function receiptWithInstalled(?array $installed): Receipt
+{
+    $base = receipt();
+
+    return new Receipt(
+        runId: $base->runId,
+        state: $base->state,
+        allVerified: $base->allVerified,
+        tree: $base->tree,
+        stale: $base->stale,
+        verdicts: $base->verdicts,
+        recordedAt: $base->recordedAt,
+        scope: $base->scope,
+        coverage: $base->coverage,
+        asserted: $base->asserted,
+        config: $base->config,
+        installed: $installed,
+    );
+}
+
+/** A project directory whose composer.lock names acme/tool at $version, bound as the install state. */
+function lockedProject(string $version): string
+{
+    $base = sys_get_temp_dir().'/bp-verify-lock-'.bin2hex(random_bytes(4));
+    mkdir($base.'/vendor/composer', recursive: true);
+    $package = ['name' => 'acme/tool', 'version' => $version];
+    file_put_contents($base.'/composer.lock', (string) json_encode(['packages' => [$package], 'packages-dev' => []]));
+    file_put_contents($base.'/vendor/composer/installed.json', (string) json_encode(['packages' => [$package], 'dev' => true]));
+    app()->instance(InstallState::class, new InstallState($base));
+
+    return $base;
+}
+
+it('compares a run from a --no-dev install with the lock without its dev packages', function (): void {
+    $base = lockedProject('1.0.0');
+    $lock = (array) json_decode((string) file_get_contents($base.'/composer.lock'), true);
+    $lock['packages-dev'] = [['name' => 'acme/test-helper', 'version' => '2.0.0']];
+    file_put_contents($base.'/composer.lock', (string) json_encode($lock));
+    file_put_contents($base.'/vendor/composer/installed.json', (string) json_encode(['packages' => [['name' => 'acme/tool', 'version' => '1.0.0']], 'dev' => false]));
+    receiptStoreHolding(receiptWithInstalled(resolve(InstallState::class)->installedDigest()));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
+});
+
+it('passes a run whose installed packages match composer.lock', function (): void {
+    $base = lockedProject('1.0.0');
+    receiptStoreHolding(receiptWithInstalled(resolve(InstallState::class)->installedDigest()));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
+});
+
+it('fails a run that walked packages the lock does not name, even with the lock check switched off', function (bool $requireLock): void {
+    config()->set('boost-pipeline.open_run.require_installed_lock', $requireLock);
+    $base = lockedProject('1.0.0');
+    $walked = resolve(InstallState::class)->installedDigest();
+
+    file_put_contents($base.'/composer.lock', (string) json_encode(['packages' => [['name' => 'acme/tool', 'version' => '1.1.0']], 'packages-dev' => []]));
+    receiptStoreHolding(receiptWithInstalled($walked));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(1)
+            ->and(Artisan::output())->toContain('do not match composer.lock');
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
+})->with(['lock check on' => true, 'lock check off' => false]);
+
+it('does not check the packages of a receipt that recorded none, or of a project without a lock', function (): void {
+    $base = lockedProject('1.0.0');
+    receiptStoreHolding(receiptWithInstalled(null));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+
+        unlink($base.'/composer.lock');
+        receiptStoreHolding(receiptWithInstalled(['digest' => InstallState::DIGEST_FORMAT.'anything', 'dev' => true]));
+
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
+});
+
+it('does not check a digest in a format this build does not know, rather than failing every older receipt', function (): void {
+    $base = lockedProject('1.0.0');
+    receiptStoreHolding(receiptWithInstalled(['digest' => 'xxh128-v0:anything', 'dev' => true]));
+    treeReporting('tree-a');
+
+    try {
+        expect(Artisan::call('pipeline:verify'))->toBe(0);
+
+        receiptStoreHolding(receiptWithInstalled(['digest' => InstallState::DIGEST_FORMAT.'anything', 'dev' => true]));
+
+        expect(Artisan::call('pipeline:verify'))->toBe(1);
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
+});
+
+it('records the installed packages in the receipt a real run writes, and refreshes them on a rebaseline', function (): void {
+    $base = lockedProject('1.0.0');
+    $path = $base.'/receipt.json';
+    $store = new JsonReceiptStore($path);
+    $pipeline = Pipeline::configure()->withSteps(function (Steps $steps): void {
+        $steps->in(Formatting::class)->append(Shell::run('true', id: 'fmt'));
+    });
+    $install = resolve(InstallState::class);
+
+    $run = Run::start(
+        $pipeline->walk(),
+        new class implements StepRunner
+        {
+            public function run(Step $step, string $runId): Result
+            {
+                return Result::passed($step->id(), 'ok');
+            }
+        },
+        'r-installed',
+        receipts: $store,
+        install: $install,
+    );
+
+    // composer install ran before the first step; the run takes the new set.
+    file_put_contents($base.'/vendor/composer/installed.json', (string) json_encode(['packages' => [['name' => 'acme/tool', 'version' => '1.1.0']], 'dev' => true]));
+    $run->rebaseline();
+    $run->resolveCurrent();
+
+    try {
+        expect($store->read()?->installed)->toBe($install->installedDigest())
+            ->and($store->read()?->installed['digest'] ?? null)->not->toBe($install->lockDigest(true));
+    } finally {
+        new Process(['rm', '-rf', $base])->run();
+    }
 });

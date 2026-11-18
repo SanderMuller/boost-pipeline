@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SanderMuller\BoostPipeline\Mcp\Tools;
 
+use Generator;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -58,7 +59,24 @@ final class OpenRun extends Tool
         ];
     }
 
-    public function handle(Request $request): Response|ResponseFactory
+    /**
+     * @return Generator<int, Response|ResponseFactory>|Response|ResponseFactory
+     */
+    public function handle(Request $request): Generator|Response|ResponseFactory
+    {
+        $response = $this->answer($request);
+
+        if (! $this->runs->toolListChanged()) {
+            return $response;
+        }
+
+        return (static function () use ($response): Generator {
+            yield Response::notification('notifications/tools/list_changed');
+            yield $response;
+        })();
+    }
+
+    private function answer(Request $request): Response|ResponseFactory
     {
         // Idempotent: opening an already-open run returns it where it stands.
         // Restarting would discard verdicts silently.
@@ -75,9 +93,9 @@ final class OpenRun extends Tool
 
         $payload = StepPayload::opened($run);
 
-        // Not a notice: a notice means a declared gate will never run, so the run
-        // cannot be fully verified. This only says where the walk will stop.
-        $warnings = $this->preflight->warnings($run->walk);
+        // The preflight part is not a walk notice: a notice means a declared gate
+        // will never run. Preflight only says where the walk will stop.
+        $warnings = [...$this->runs->warnings(), ...$this->preflight->warnings($run->walk)];
 
         if ($warnings !== []) {
             $payload['warnings'] = $warnings;

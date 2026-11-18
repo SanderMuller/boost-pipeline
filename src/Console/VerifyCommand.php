@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Str;
 use SanderMuller\BoostPipeline\BoostPipelineServiceProvider;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineFingerprint;
 use SanderMuller\BoostPipeline\Config\Pipelines;
@@ -123,6 +124,14 @@ final class VerifyCommand extends Command
                 'Run [%s] recorded its tree in a format this version cannot read, so whether it describes the code on disk cannot be determined. This is expected once, on the release that changed the fingerprint. Open a new run.',
                 $receipt->runId,
             ));
+
+            return self::FAILURE;
+        }
+
+        $packages = $this->installedMismatch($receipt);
+
+        if ($packages !== null) {
+            $this->components->error($packages);
 
             return self::FAILURE;
         }
@@ -471,6 +480,32 @@ final class VerifyCommand extends Command
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Why the packages the run walked are not the ones `composer.lock` names, or null when they are.
+     *
+     * The tree fingerprint leaves `vendor/` out, and a lock that git ignores is
+     * out of it too. `open_run` refuses such a vendor/ by default, but the
+     * project can switch that refusal off, so an agent can walk; that switch does
+     * not reach this gate.
+     */
+    private function installedMismatch(Receipt $receipt): ?string
+    {
+        if ($receipt->installed === null || ! str_starts_with($receipt->installed['digest'], InstallState::DIGEST_FORMAT)) {
+            return null;
+        }
+
+        $lock = $this->laravel->make(InstallState::class)->lockDigest($receipt->installed['dev']);
+
+        if ($lock === null || $lock === $receipt->installed['digest']) {
+            return null;
+        }
+
+        return sprintf(
+            'Run [%s] walked installed packages that do not match composer.lock now: vendor/ did not hold what the lock names, or the lock changed after the run. Run composer install and open a new run.',
+            $receipt->runId,
+        );
     }
 
     /**

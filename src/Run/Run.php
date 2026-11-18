@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Run;
 
 use InvalidArgumentException;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Contracts\BackgroundStepRunner;
 use SanderMuller\BoostPipeline\Contracts\BatchStepRunner;
 use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
@@ -83,6 +84,13 @@ final class Run
     /** Steps started by an earlier call that have not all finished yet. */
     private ?PendingPosition $pending = null;
 
+    /**
+     * The installed packages this run measured, taken with the tree.
+     *
+     * @var array{digest: string, dev: bool}|null
+     */
+    private ?array $installed;
+
     private function __construct(
         public readonly string $id,
         public readonly Walk $walk,
@@ -110,8 +118,10 @@ final class Run
          * Honoured only by a runner that can start steps in the background.
          */
         public readonly ?float $responseWindow = null,
+        private readonly ?InstallState $install = null,
     ) {
         $this->lastSeen = $this->tree?->capture();
+        $this->installed = $this->install?->installedDigest();
 
         if ($walk->isEmpty()) {
             $this->state = RunState::Complete;
@@ -129,6 +139,7 @@ final class Run
         ?RunHistoryStore $history = null,
         ?LiveProgressStore $live = null,
         ?float $responseWindow = null,
+        ?InstallState $install = null,
     ): self {
         // A verdict is measured from THIS walk's selection, so a scope that
         // disagrees would put a true answer about one scope on a receipt claiming
@@ -159,6 +170,7 @@ final class Run
             $live,
             $pipeline,
             $responseWindow,
+            $install,
         );
     }
 
@@ -445,6 +457,17 @@ final class Run
      * first step is not a reason to replace it — doing that churned through run
      * ids while the agent was still deciding what to run.
      */
+    /**
+     * Whether `vendor/` now holds other packages than the ones this run measured.
+     *
+     * The tree fingerprint leaves `vendor/` out, so an install that changed no
+     * autoloading package moves neither the tree nor the server's vendor check.
+     */
+    public function installedMoved(): bool
+    {
+        return $this->install instanceof InstallState && $this->install->installedDigest() !== $this->installed;
+    }
+
     public function rebaseline(): void
     {
         if ($this->results !== []) {
@@ -452,6 +475,7 @@ final class Run
         }
 
         $this->lastSeen = $this->tree?->capture();
+        $this->installed = $this->install?->installedDigest();
     }
 
     /**
@@ -801,6 +825,7 @@ final class Run
             coverage: $this->walk->dropped === [] && ! $this->walk->selectionCarriedNothing ? 'complete' : 'incomplete',
             asserted: array_keys(array_filter($this->asserted)),
             config: $this->walk->configDigest,
+            installed: $this->installed,
         );
 
         $this->receipts?->write($receipt);

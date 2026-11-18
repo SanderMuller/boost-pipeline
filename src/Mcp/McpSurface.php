@@ -56,6 +56,8 @@ final class McpSurface
         [Tool::class, 'annotations'],
         [Tool::class, 'outputSchema'],
         [Registrar::class, 'local'],
+        [Response::class, 'notification'],
+        [Server::class, 'addCapability'],
     ];
 
     /**

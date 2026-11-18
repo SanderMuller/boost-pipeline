@@ -2,16 +2,23 @@
 
 declare(strict_types=1);
 
+use Laravel\Mcp\Server;
+use Laravel\Mcp\Server\Transport\FakeTransporter;
 use SanderMuller\BoostPipeline\Config\ConfigReloader;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Config\Pipelines;
+use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
+use SanderMuller\BoostPipeline\Contracts\ServerSupervisor;
 use SanderMuller\BoostPipeline\Contracts\Step;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
 use SanderMuller\BoostPipeline\Mcp\PipelineServer;
 use SanderMuller\BoostPipeline\Mcp\Tools\OpenRun;
 use SanderMuller\BoostPipeline\Results\Result;
+use SanderMuller\BoostPipeline\Run\JsonReceiptStore;
+use SanderMuller\BoostPipeline\Run\ReceiptStoreFactory;
 use SanderMuller\BoostPipeline\Run\RunManager;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
@@ -201,14 +208,30 @@ it('refuses when a file the config loaded changed, not only the config', functio
     expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, $class.'.php');
 });
 
-it('refuses a different set of pipeline names, which the client tool list still names', function (): void {
+it('reloads a different set of pipeline names, and says the client must fetch the tool list again', function (): void {
     writeConfig($this->base, configDeclaring(['pr' => ['echo a'], 'release' => ['echo b']]));
     [$runs] = reloadingManager($this->base);
     $runs->open('pr');
 
-    writeConfig($this->base, configDeclaring(['pr' => ['echo a'], 'nightly' => ['echo c']]));
+    expect($runs->toolListChanged())->toBeFalse();
 
-    expect(fn (): mixed => $runs->open('pr'))->toThrow(InvalidPipelineConfigException::class, 'instead of [pr, release]');
+    writeConfig($this->base, configDeclaring(['pr' => ['echo a2'], 'nightly' => ['echo c']]));
+
+    expect(firstCommand($runs, 'pr'))->toBe('echo a2')
+        ->and($runs->toolListChanged())->toBeTrue()
+        ->and(firstCommand($runs, 'nightly'))->toBe('echo c')
+        ->and($runs->toolListChanged())->toBeFalse();
+});
+
+it('keeps the tool list when a reload changes only the steps', function (): void {
+    writeConfig($this->base, configDeclaring(['pr' => ['echo a']]));
+    [$runs] = reloadingManager($this->base);
+    $runs->open('pr');
+
+    writeConfig($this->base, configDeclaring(['pr' => ['echo b']]));
+    $runs->open('pr');
+
+    expect($runs->toolListChanged())->toBeFalse();
 });
 
 it('refuses a config that no longer loads, then reloads once it is fixed', function (): void {
@@ -264,14 +287,86 @@ it('changes nothing when the config did not change', function (): void {
         ->and($reloader->pipelines())->toBeInstanceOf(Pipelines::class);
 });
 
-it('refuses a switch between one pipeline and a map, which changes whether a name is required', function (): void {
+it('reloads a switch between one pipeline and a map, and says the client must fetch the tool list again', function (): void {
     writeConfig($this->base, configDeclaring(['default' => ['echo a']]));
     [$runs] = reloadingManager($this->base);
     $runs->open('default');
 
     writeConfig($this->base, str_replace(["return [\n'default' => ", "}),\n];"], ['return ', '});'], configDeclaring(['default' => ['echo b']])));
 
-    expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'returning one pipeline');
+    expect($runs->open()->currentStep()?->step->id())->toBe('echo b')
+        ->and($runs->toolListChanged())->toBeTrue();
+});
+
+it('tells the client to fetch the tool list when a reload renamed a pipeline, and only then', function (): void {
+    $path = app()->basePath('.config/pipeline.php');
+    @mkdir(dirname($path), recursive: true);
+    file_put_contents($path, configDeclaring(['pr' => ['echo a'], 'release' => ['echo b']]));
+
+    foreach ([ConfigReloader::class, Pipelines::class, Pipeline::class, RunManager::class, StepRunnerFactory::class] as $abstract) {
+        app()->forgetInstance($abstract);
+    }
+
+    try {
+        PipelineServer::tool(OpenRun::class, ['pipeline' => 'pr'])
+            ->assertNotificationCount(0);
+
+        file_put_contents($path, configDeclaring(['pr' => ['echo a'], 'nightly' => ['echo c']]));
+
+        PipelineServer::tool(OpenRun::class, ['pipeline' => 'pr'])
+            ->assertSentNotification('notifications/tools/list_changed')
+            ->assertSee('echo a');
+
+        PipelineServer::tool(OpenRun::class, ['pipeline' => 'release'])
+            ->assertNotificationCount(0)
+            ->assertHasErrors();
+    } finally {
+        @unlink($path);
+    }
+});
+
+it('sends the notification with the error too, when the renamed pipeline is the one asked for', function (): void {
+    $path = app()->basePath('.config/pipeline.php');
+    @mkdir(dirname($path), recursive: true);
+    file_put_contents($path, configDeclaring(['pr' => ['echo a'], 'release' => ['echo b']]));
+
+    foreach ([ConfigReloader::class, Pipelines::class, Pipeline::class, RunManager::class, StepRunnerFactory::class] as $abstract) {
+        app()->forgetInstance($abstract);
+    }
+
+    try {
+        PipelineServer::tool(OpenRun::class, ['pipeline' => 'pr']);
+
+        file_put_contents($path, configDeclaring(['nightly' => ['echo c'], 'weekly' => ['echo d']]));
+
+        PipelineServer::tool(OpenRun::class, ['pipeline' => 'pr'])
+            ->assertSentNotification('notifications/tools/list_changed')
+            ->assertHasErrors();
+    } finally {
+        @unlink($path);
+    }
+});
+
+it('declares that the tool list can change, so a client acts on the notification', function (): void {
+    $server = new PipelineServer(new FakeTransporter);
+    $server->start();
+
+    expect(new ReflectionProperty(Server::class, 'capabilities')->getValue($server))
+        ->toMatchArray(['tools' => ['listChanged' => true]]);
+});
+
+it('tells the client to fetch the tool list on the first open after a restart', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base, new FakeSupervisor(restarted: true));
+
+    $runs->open('default');
+
+    expect($runs->toolListChanged())->toBeTrue();
+
+    $runs->open('default');
+
+    expect($runs->toolListChanged())->toBeFalse();
 });
 
 it('rebinds the map in the container, so the tools read the reloaded config', function (): void {
@@ -467,4 +562,341 @@ it('keeps serving when only a package without autoload entries changed', functio
     writeConfig($this->base, configDeclaring(['default' => ['echo new']]));
 
     expect($runs->open('default')->currentStep()?->step->id())->toBe('echo new');
+});
+
+final class RestartRequested extends RuntimeException {}
+
+final class FakeSupervisor implements ServerSupervisor
+{
+    public int $restarts = 0;
+
+    public function __construct(public bool $supervised = true, public bool $restarted = false) {}
+
+    public function isSupervised(): bool
+    {
+        return $this->supervised;
+    }
+
+    public function isRestart(): bool
+    {
+        return $this->restarted;
+    }
+
+    public function restart(): never
+    {
+        $this->restarts++;
+
+        throw new RestartRequested('restart');
+    }
+}
+
+/**
+ * A project with a lock file and an installed vendor/, both naming acme/tool at $version.
+ *
+ * @return string the installed.json path
+ */
+function installedProject(string $base, string $version = '1.0.0'): string
+{
+    file_put_contents($base.'/composer.lock', (string) json_encode(['packages' => [
+        ['name' => 'acme/tool', 'version' => $version, 'autoload' => ['psr-4' => ['Acme\\Tool\\' => 'src/']]],
+    ], 'packages-dev' => []]));
+
+    return installAt($base, $version);
+}
+
+/** Write vendor/composer/installed.json with acme/tool at $version, as a composer install does. */
+function installAt(string $base, string $version): string
+{
+    @mkdir($base.'/vendor/composer', recursive: true);
+    $path = $base.'/vendor/composer/installed.json';
+    file_put_contents($path, (string) json_encode(['packages' => [
+        ['name' => 'acme/tool', 'version' => $version, 'autoload' => ['psr-4' => ['Acme\\Tool\\' => 'src/']]],
+    ], 'dev' => true]));
+
+    return $path;
+}
+
+/** @return array{RunManager, FakeSupervisor} */
+function supervisedManager(string $base, ?FakeSupervisor $supervisor = null, bool $requireLock = true): array
+{
+    $reloader = new ConfigReloader(new PipelineLoader($base), $base, installedPackages: $base.'/vendor/composer/installed.json');
+    $pipelines = $reloader->pipelines() ?? throw new RuntimeException('No config.');
+    $runners = new StepRunnerFactory(static fn (string $name): StepRunner => new TimedRunner(null));
+    $supervisor ??= new FakeSupervisor;
+
+    return [new RunManager($pipelines, $runners, config: $reloader, install: new InstallState($base), supervisor: $supervisor, requireInstalledLock: $requireLock), $supervisor];
+}
+
+it('refuses while vendor/ does not hold what composer.lock names, with no vendor change since start, and names the package', function (bool $supervised): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base, new FakeSupervisor(supervised: $supervised));
+    $runs->open('default');
+
+    // A merge changed the lock; nobody ran composer install.
+    file_put_contents($this->base.'/composer.lock', str_replace('1.0.0', '1.1.0', (string) file_get_contents($this->base.'/composer.lock')));
+
+    expect(fn (): mixed => $runs->open('default'))
+        ->toThrow(InvalidPipelineConfigException::class, 'acme/tool is 1.0.0, composer.lock names 1.1.0')
+        ->and($supervisor->restarts)->toBe(0);
+})->with(['unsupervised' => false, 'supervised' => true]);
+
+it('opens with a warning instead when the lock check is switched off', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base, requireLock: false);
+
+    file_put_contents($this->base.'/composer.lock', str_replace('1.0.0', '1.1.0', (string) file_get_contents($this->base.'/composer.lock')));
+
+    expect($runs->open('default')->currentStep()?->step->id())->toBe('echo one')
+        ->and($runs->warnings())->toHaveCount(1)
+        ->and($runs->warnings()[0])->toContain('vendor/ does not match composer.lock');
+});
+
+it('still refuses a restart while vendor/ does not match the lock, even with the lock check switched off', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base, requireLock: false);
+
+    // Half way through an install: installed.json moved on, the lock names more.
+    installAt($this->base, '1.1.0');
+    file_put_contents($this->base.'/composer.lock', str_replace('1.0.0', '1.2.0', (string) file_get_contents($this->base.'/composer.lock')));
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'still running, failed, or did not run')
+        ->and($supervisor->restarts)->toBe(0);
+});
+
+it('asks the supervisor for a restart once vendor/ changed and matches the lock again', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base);
+    $runs->open('default');
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(RestartRequested::class)
+        ->and($supervisor->restarts)->toBe(1);
+});
+
+it('never asks for a restart while vendor/ did not change', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base);
+
+    $runs->open('default');
+    $runs->open('default');
+
+    expect($supervisor->restarts)->toBe(0);
+});
+
+it('lets the run of the pipeline being opened again, a failed step to retry, not block its own restart', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one', 'echo two']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base);
+    $runs->open('default')->resolveCurrent();
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(RestartRequested::class);
+});
+
+it('refuses instead of restarting while another pipeline holds a walk that is not finished, and names it', function (): void {
+    writeConfig($this->base, configDeclaring(['backend' => ['echo one', 'echo two'], 'release' => ['echo three']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base);
+    $runs->open('backend')->resolveCurrent();
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('release'))->toThrow(InvalidPipelineConfigException::class, 'pipeline [backend] holds a walk that is not finished')
+        ->and($supervisor->restarts)->toBe(0);
+});
+
+it('restarts when the other pipeline finished its walk', function (): void {
+    writeConfig($this->base, configDeclaring(['backend' => ['echo one'], 'release' => ['echo three']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base);
+    $runs->open('backend')->resolveCurrent();
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('release'))->toThrow(RestartRequested::class);
+});
+
+it('restarts when the sole pipeline is opened again by no name in the middle of its walk', function (): void {
+    writeConfig($this->base, "<?php\n\nuse SanderMuller\\BoostPipeline\\Config\\Pipeline;\nuse SanderMuller\\BoostPipeline\\Phases\\Defaults\\Tests;\nuse SanderMuller\\BoostPipeline\\Phases\\Steps;\nuse SanderMuller\\BoostPipeline\\Steps\\Shell;\n\nreturn Pipeline::configure()->withSteps(function (Steps \$steps): void {\n\$steps->in(Tests::class)->append(Shell::run('echo one', id: 'one'))->append(Shell::run('echo two', id: 'two'));\n});\n");
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base);
+    $runs->open()->resolveCurrent();
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open())->toThrow(RestartRequested::class)
+        ->and($supervisor->restarts)->toBe(1);
+});
+
+it('records the installed packages in the receipt of a run it opens', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    $reloader = new ConfigReloader(new PipelineLoader($this->base), $this->base, installedPackages: $this->base.'/vendor/composer/installed.json');
+    $install = new InstallState($this->base);
+    $runs = new RunManager(
+        $reloader->pipelines() ?? throw new RuntimeException('No config.'),
+        new StepRunnerFactory(static fn (string $name): StepRunner => new TimedRunner(null)),
+        receipts: new ReceiptStoreFactory(fn (string $name): ReceiptStore => new JsonReceiptStore($this->base."/receipt-{$name}.json")),
+        config: $reloader,
+        install: $install,
+    );
+
+    $run = $runs->open('default');
+
+    while (! $run->state()->isTerminal()) {
+        $run->resolveCurrent();
+    }
+
+    expect(new JsonReceiptStore($this->base.'/receipt-default.json')->read()?->installed)
+        ->not->toBeNull()
+        ->toBe($install->installedDigest());
+});
+
+it('opens a new run when an install changed packages that autoload nothing', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    $install = static function (string $base, string $version): void {
+        $package = ['name' => 'acme/rules', 'version' => $version];
+        @mkdir($base.'/vendor/composer', recursive: true);
+        file_put_contents($base.'/composer.lock', (string) json_encode(['packages' => [$package], 'packages-dev' => []]));
+        file_put_contents($base.'/vendor/composer/installed.json', (string) json_encode(['packages' => [$package], 'dev' => true]));
+    };
+    $install($this->base, '1.0.0');
+    [$runs, $supervisor] = supervisedManager($this->base);
+    $first = $runs->open('default');
+    $first->resolveCurrent();
+
+    $install($this->base, '1.1.0');
+    $second = $runs->open('default');
+
+    expect($second->id)->not->toBe($first->id)
+        ->and($supervisor->restarts)->toBe(0);
+});
+
+it('restarts although a removed pipeline holds an unfinished walk, because nothing can finish it', function (): void {
+    writeConfig($this->base, configDeclaring(['backend' => ['echo one', 'echo two'], 'release' => ['echo three']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base);
+    $runs->open('backend')->resolveCurrent();
+
+    writeConfig($this->base, configDeclaring(['release' => ['echo three']]));
+    touch($this->base.'/.config/pipeline.php', time() + 5);
+    $runs->open('release');
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('release'))->toThrow(RestartRequested::class);
+});
+
+it('refuses with a hint to the supervisor when the server runs without one', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base, new FakeSupervisor(supervised: false));
+    $runs->open('default');
+
+    installedProject($this->base, '1.1.0');
+
+    expect(fn (): mixed => $runs->open('default'))->toThrow(InvalidPipelineConfigException::class, 'vendor/bin/boost-pipeline-mcp')
+        ->and($supervisor->restarts)->toBe(0);
+});
+
+it('keeps a run with a running step reachable after a reload removed its pipeline', function (): void {
+    $config = static fn (string $names): string => "<?php\n\nuse SanderMuller\\BoostPipeline\\Config\\Pipeline;\nuse SanderMuller\\BoostPipeline\\Phases\\Defaults\\Tests;\nuse SanderMuller\\BoostPipeline\\Phases\\Steps;\nuse SanderMuller\\BoostPipeline\\Steps\\Shell;\n\n\$slow = fn () => Pipeline::configure()->withResponseWindow(0.05)->withSteps(function (Steps \$steps): void {\n\$steps->in(Tests::class)->append(Shell::run('sleep 0.5', id: 'slow'));\n});\n\nreturn [{$names}];\n";
+    writeConfig($this->base, $config("'backend' => \$slow(), 'release' => \$slow()"));
+    $reloader = new ConfigReloader(new PipelineLoader($this->base), $this->base);
+    $runs = new RunManager(
+        $reloader->pipelines() ?? throw new RuntimeException('No config.'),
+        new StepRunnerFactory(fn (): StepRunner => new ProcessStepRunner(
+            workingDirectory: sys_get_temp_dir(),
+            logs: new LogWriter($this->base.'/logs'),
+            summariser: new OutputSummariser,
+            environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        )),
+        config: $reloader,
+    );
+
+    $run = $runs->open('backend');
+    $run->resolveCurrent();
+
+    expect($run->isPending())->toBeTrue();
+
+    writeConfig($this->base, $config("'release' => \$slow()"));
+    touch($this->base.'/.config/pipeline.php', time() + 5);
+    $runs->open('release');
+
+    expect($runs->for('backend'))->toBe($run);
+
+    while ($run->isPending()) {
+        $run->resolveCurrent();
+    }
+
+    expect(fn (): mixed => $runs->for('backend'))->toThrow(InvalidPipelineConfigException::class, 'No pipeline named [backend]');
+});
+
+it('refuses with a wait message while a step of any pipeline still runs', function (): void {
+    writeConfig($this->base, "<?php\n\nuse SanderMuller\\BoostPipeline\\Config\\Pipeline;\nuse SanderMuller\\BoostPipeline\\Phases\\Defaults\\Tests;\nuse SanderMuller\\BoostPipeline\\Phases\\Steps;\nuse SanderMuller\\BoostPipeline\\Steps\\Shell;\n\nreturn Pipeline::configure()->withResponseWindow(0.05)->withSteps(function (Steps \$steps): void {\n\$steps->in(Tests::class)->append(Shell::run('sleep 0.5', id: 'slow'));\n});\n");
+    installedProject($this->base);
+    $reloader = new ConfigReloader(new PipelineLoader($this->base), $this->base, installedPackages: $this->base.'/vendor/composer/installed.json');
+    $supervisor = new FakeSupervisor;
+    $logs = $this->base.'/logs';
+    $runs = new RunManager(
+        $reloader->pipelines() ?? throw new RuntimeException('No config.'),
+        new StepRunnerFactory(static fn (): StepRunner => new ProcessStepRunner(
+            workingDirectory: sys_get_temp_dir(),
+            logs: new LogWriter($logs),
+            summariser: new OutputSummariser,
+            environment: new EnvironmentScrubber(sys_get_temp_dir()),
+        )),
+        config: $reloader,
+        install: new InstallState($this->base),
+        supervisor: $supervisor,
+    );
+
+    $run = $runs->open();
+    $run->resolveCurrent();
+    installedProject($this->base, '1.1.0');
+
+    expect($run->isPending())->toBeTrue()
+        ->and(fn (): mixed => $runs->open())->toThrow(InvalidPipelineConfigException::class, 'is still running. Call next_step until it finishes')
+        ->and($supervisor->restarts)->toBe(0);
+
+    while ($run->isPending()) {
+        $run->resolveCurrent();
+    }
+
+    expect(fn (): mixed => $runs->open())->toThrow(RestartRequested::class);
+});
+
+it('says once, on the first open after a restart, that earlier runs are gone', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base, new FakeSupervisor(restarted: true));
+
+    $runs->open('default');
+
+    expect($runs->warnings())->toHaveCount(1)
+        ->and($runs->warnings()[0])->toContain('restarted after a vendor/ change');
+
+    $runs->open('default');
+
+    expect($runs->warnings())
+        ->toBeEmpty();
+});
+
+it('keeps the restart notice for the next call when the first open after a restart is refused', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one'], 'other' => ['echo two']]));
+    installedProject($this->base);
+    [$runs] = supervisedManager($this->base, new FakeSupervisor(restarted: true));
+
+    expect(fn (): mixed => $runs->open())->toThrow(InvalidPipelineConfigException::class);
+
+    $runs->open('default');
+
+    expect($runs->warnings())->toHaveCount(1)
+        ->and($runs->warnings()[0])->toContain('restarted after a vendor/ change');
 });

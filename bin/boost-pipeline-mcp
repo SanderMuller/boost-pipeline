@@ -1,0 +1,496 @@
+#!/usr/bin/env php
+<?php
+
+/*
+ * Keeps an MCP client connected while the pipeline server restarts.
+ *
+ * Usage, in .mcp.json:  "command": "vendor/bin/boost-pipeline-mcp",
+ *                       "args": ["php", "artisan", "mcp:start", "pipeline"]
+ *
+ * The arguments are the server command. This script starts it, passes JSON-RPC
+ * lines between the client and the server, and keeps the client requests that
+ * have no answer yet. When open_run finds that vendor/ changed, the server exits
+ * with code 75. This script then starts a new server and sends it the requests
+ * that had no answer, so the client never has to reconnect.
+ *
+ * It loads nothing from vendor/ on purpose: a vendor change must not make this
+ * process stale too. PHP compiles it once, at start.
+ */
+
+declare(strict_types=1);
+
+const BOOST_PIPELINE_PROTOCOL = '1';
+const BOOST_PIPELINE_RESTART_EXIT = 75;
+
+$command = array_slice($argv, 1);
+
+if ($command === []) {
+    fwrite(STDERR, "[boost-pipeline-mcp] Pass the server command as arguments, for example: boost-pipeline-mcp php artisan mcp:start pipeline\n");
+    exit(64);
+}
+
+$environment = getenv();
+
+// stream_select() fails on proc_open() pipes on Windows, so there is no way to
+// watch both sides. Run the server directly; it then refuses on a vendor
+// change, as it does without this script.
+if (DIRECTORY_SEPARATOR === '\\') {
+    fwrite(STDERR, "[boost-pipeline-mcp] Windows cannot watch the server's pipes, so the server runs without restarts.\n");
+    $process = proc_open($command, [STDIN, STDOUT, STDERR], $pipes, null, $environment);
+    exit(is_resource($process) ? proc_close($process) : 1);
+}
+
+/** @var list<float> $delays seconds before each new try of a server that died before its first answer */
+$delays = [1.0, 2.0, 4.0, 8.0];
+$override = getenv('BOOST_PIPELINE_SUPERVISOR_DELAYS');
+
+if (is_string($override) && $override !== '') {
+    $delays = array_map('floatval', explode(',', $override));
+}
+
+$supervisor = new BoostPipelineSupervisor($command, $environment, $delays);
+
+exit($supervisor->run());
+
+final class BoostPipelineSupervisor
+{
+    /** @var resource|null */
+    private $process = null;
+
+    /** @var resource|null */
+    private $serverIn = null;
+
+    /** @var resource|null */
+    private $serverOut = null;
+
+    private string $fromClient = '';
+
+    private string $fromServer = '';
+
+    private string $toServer = '';
+
+    private string $toClient = '';
+
+    /** Whether the running server closed its STDOUT; it is then left out of the select until it exits. */
+    private bool $serverOutClosed = false;
+
+    /**
+     * Client requests with no answer yet, in the order they came, keyed by their encoded id.
+     *
+     * @var array<string, string>
+     */
+    private array $pending = [];
+
+    /**
+     * Client lines that are not requests (notifications, answers to server requests), kept while a request has no answer.
+     *
+     * The running server gets them at once too. If it exits before it reads them, the next
+     * server gets them again, after the resent requests. laravel/mcp drops notifications
+     * today; this keeps a cancel working once it handles one.
+     *
+     * @var list<string>
+     */
+    private array $held = [];
+
+    private bool $clientClosed = false;
+
+    /** Whether the running server replaces one that asked for a restart. */
+    private bool $replacement = false;
+
+    /** Whether the running server sent any answer. */
+    private bool $answered = false;
+
+    /** How many new tries have failed since the last server that answered. */
+    private int $failures = 0;
+
+    /** When to start the next server, or null when none is due. */
+    private ?float $startAt = null;
+
+    /**
+     * @param  list<string>  $command
+     * @param  array<string, string>  $environment
+     * @param  list<float>  $delays
+     */
+    public function __construct(
+        private readonly array $command,
+        private readonly array $environment,
+        private readonly array $delays,
+    ) {}
+
+    public function run(): int
+    {
+        stream_set_blocking(STDIN, false);
+        stream_set_blocking(STDOUT, false);
+
+        if (! $this->start(false)) {
+            return 1;
+        }
+
+        while (true) {
+            if ($this->startAt !== null && microtime(true) >= $this->startAt) {
+                $this->startAt = null;
+                $this->start(true);
+            }
+
+            $read = [];
+            $write = [];
+
+            if (! $this->clientClosed) {
+                $read[] = STDIN;
+            }
+
+            if ($this->serverOut !== null && ! $this->serverOutClosed) {
+                $read[] = $this->serverOut;
+            }
+
+            if ($this->toClient !== '') {
+                $write[] = STDOUT;
+            }
+
+            if ($this->serverIn !== null && $this->toServer !== '') {
+                $write[] = $this->serverIn;
+            }
+
+            if ($read === [] && $write === [] && $this->process === null && $this->startAt === null) {
+                return 0;
+            }
+
+            $except = null;
+            $wait = $this->startAt === null ? 0.2 : max(0.0, min(0.2, $this->startAt - microtime(true)));
+
+            if ($read === [] && $write === []) {
+                usleep((int) ($wait * 1_000_000));
+            } elseif (@stream_select($read, $write, $except, 0, (int) ($wait * 1_000_000)) === false) {
+                usleep(10_000);
+
+                continue;
+            }
+
+            foreach ($read as $stream) {
+                $stream === STDIN ? $this->readClient() : $this->readServer();
+            }
+
+            foreach ($write as $stream) {
+                if ($stream !== STDOUT) {
+                    $this->flushServer();
+                } elseif (! $this->flush(STDOUT, $this->toClient)) {
+                    // The client went away; nothing can read the rest. Close the
+                    // server's input too, so it reads EOF and exits.
+                    $this->toClient = '';
+                    $this->clientClosed = true;
+                    $this->startAt = null;
+
+                    if ($this->serverIn !== null) {
+                        fclose($this->serverIn);
+                        $this->serverIn = null;
+                        $this->toServer = '';
+                    }
+                }
+            }
+
+            $exit = $this->reap();
+
+            if ($exit !== null) {
+                return $exit;
+            }
+        }
+    }
+
+    private function readClient(): void
+    {
+        $data = fread(STDIN, 65536);
+
+        if ($data === false || ($data === '' && feof(STDIN))) {
+            $this->clientClosed = true;
+            $this->startAt = null;
+
+            if ($this->serverIn !== null && $this->toServer === '') {
+                fclose($this->serverIn);
+                $this->serverIn = null;
+            }
+
+            return;
+        }
+
+        $this->fromClient .= $data;
+
+        foreach ($this->lines($this->fromClient) as $line) {
+            $message = json_decode($line, true);
+            $isRequest = is_array($message) && isset($message['method']) && array_key_exists('id', $message);
+
+            if ($isRequest) {
+                $this->pending[(string) json_encode($message['id'])] = $line;
+            }
+
+            if ($this->serverIn !== null) {
+                $this->toServer .= $line."\n";
+
+                if (! $isRequest && $this->pending !== []) {
+                    $this->held[] = $line;
+                }
+            } elseif (! $isRequest) {
+                $this->held[] = $line;
+            } elseif ($this->process === null && $this->startAt === null) {
+                // The last tries gave up; a new request asks for a new server.
+                $this->startAt = microtime(true);
+            }
+        }
+    }
+
+    private function readServer(): void
+    {
+        if ($this->serverOut === null) {
+            return;
+        }
+
+        $data = fread($this->serverOut, 65536);
+
+        if ($data === false || $data === '') {
+            $this->serverOutClosed = feof($this->serverOut);
+
+            return;
+        }
+
+        $this->fromServer .= $data;
+
+        foreach ($this->lines($this->fromServer) as $line) {
+            $this->fromServerLine($line);
+        }
+    }
+
+    private function fromServerLine(string $line): void
+    {
+        $message = json_decode($line, true);
+
+        if (is_array($message) && ! isset($message['method']) && array_key_exists('id', $message)) {
+            unset($this->pending[(string) json_encode($message['id'])]);
+            $this->answered = true;
+
+            if ($this->pending === []) {
+                $this->held = [];
+            }
+            $this->failures = 0;
+        }
+
+        $this->toClient .= $line."\n";
+    }
+
+    /**
+     * Handle a server that exited. Returns the supervisor's own exit code when it should stop.
+     */
+    private function reap(): ?int
+    {
+        if ($this->process === null) {
+            return $this->clientClosed && $this->toClient === '' && $this->startAt === null ? 0 : null;
+        }
+
+        $status = proc_get_status($this->process);
+
+        if ($status['running']) {
+            return null;
+        }
+
+        $code = $status['signaled'] ? 128 + $status['termsig'] : $status['exitcode'];
+
+        // Whatever it wrote before it died still goes out; a line it did not
+        // finish is dropped, because the request it answered is sent again.
+        // A process that inherited the server's STDOUT can keep the pipe open, so
+        // the read stops after a second instead of waiting for EOF.
+        if ($this->serverOut !== null) {
+            $deadline = microtime(true) + 1.0;
+
+            while (! feof($this->serverOut) && microtime(true) < $deadline) {
+                $data = fread($this->serverOut, 65536);
+
+                if ($data === false || $data === '') {
+                    usleep(10_000);
+
+                    continue;
+                }
+
+                $this->fromServer .= $data;
+            }
+
+            foreach ($this->lines($this->fromServer) as $line) {
+                $this->fromServerLine($line);
+            }
+        }
+
+        $this->stop();
+
+        if ($this->clientClosed) {
+            $this->drainClient();
+
+            return 0;
+        }
+
+        if ($this->replacement && ! $this->answered) {
+            $this->retry();
+
+            return null;
+        }
+
+        if ($code === BOOST_PIPELINE_RESTART_EXIT) {
+            $this->start(true);
+
+            return null;
+        }
+
+        $this->drainClient();
+
+        return $code;
+    }
+
+    /** A replacement died before it answered: try again later, or answer the waiting requests with an error. */
+    private function retry(): void
+    {
+        if ($this->failures < count($this->delays)) {
+            $this->startAt = microtime(true) + $this->delays[$this->failures];
+            $this->failures++;
+
+            return;
+        }
+
+        foreach ($this->pending as $line) {
+            $message = json_decode($line, true);
+
+            $this->toClient .= json_encode([
+                'jsonrpc' => '2.0',
+                'id' => is_array($message) ? $message['id'] : null,
+                'error' => [
+                    'code' => -32000,
+                    'message' => 'The pipeline server could not restart after a vendor/ change. A composer install may still be running, or the server fails at boot. Wait, then call open_run again. No reconnect is needed.',
+                ],
+            ])."\n";
+        }
+
+        $this->pending = [];
+        $this->held = [];
+        $this->failures = 0;
+    }
+
+    private function start(bool $replacement): bool
+    {
+        $environment = [...$this->environment, 'BOOST_PIPELINE_SUPERVISED' => BOOST_PIPELINE_PROTOCOL];
+
+        if ($replacement) {
+            $environment['BOOST_PIPELINE_RESTARTED'] = '1';
+        } else {
+            unset($environment['BOOST_PIPELINE_RESTARTED']);
+        }
+
+        $process = proc_open($this->command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => STDERR], $pipes, null, $environment);
+
+        if (! is_resource($process)) {
+            fwrite(STDERR, '[boost-pipeline-mcp] Could not start: '.implode(' ', $this->command)."\n");
+
+            if ($replacement) {
+                $this->retry();
+            }
+
+            return false;
+        }
+
+        $this->process = $process;
+        $this->serverIn = $pipes[0];
+        $this->serverOut = $pipes[1];
+        stream_set_blocking($this->serverIn, false);
+        stream_set_blocking($this->serverOut, false);
+
+        $this->replacement = $replacement;
+        $this->answered = false;
+        $this->serverOutClosed = false;
+        $this->fromServer = '';
+
+        // No initialize: the server keeps no session state, so the requests
+        // that had no answer are all it needs, in the order they came. Held
+        // notifications follow them, so a cancel arrives after its request.
+        $this->toServer = implode('', array_map(static fn (string $line): string => $line."\n", [...array_values($this->pending), ...$this->held]));
+
+        if ($this->pending === []) {
+            $this->held = [];
+        }
+
+        return true;
+    }
+
+    private function stop(): void
+    {
+        foreach ([$this->serverIn, $this->serverOut] as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+
+        if (is_resource($this->process)) {
+            proc_close($this->process);
+        }
+
+        $this->process = null;
+        $this->serverIn = null;
+        $this->serverOut = null;
+        $this->toServer = '';
+    }
+
+    private function flushServer(): void
+    {
+        if ($this->serverIn === null) {
+            return;
+        }
+
+        $this->flush($this->serverIn, $this->toServer);
+
+        if ($this->clientClosed && $this->toServer === '') {
+            fclose($this->serverIn);
+            $this->serverIn = null;
+        }
+    }
+
+    /**
+     * Write what the stream takes now. False when the write failed, for example on a closed pipe.
+     *
+     * @param  resource  $stream
+     */
+    private function flush($stream, string &$buffer): bool
+    {
+        $written = @fwrite($stream, $buffer);
+
+        if ($written === false) {
+            return false;
+        }
+
+        $buffer = substr($buffer, $written);
+
+        return true;
+    }
+
+    /** Write what is left for the client before the supervisor exits. */
+    private function drainClient(): void
+    {
+        stream_set_blocking(STDOUT, true);
+
+        if ($this->toClient !== '') {
+            fwrite(STDOUT, $this->toClient);
+            $this->toClient = '';
+        }
+    }
+
+    /**
+     * Take the complete lines out of a buffer, and leave a partial last line in it.
+     *
+     * @return list<string>
+     */
+    private function lines(string &$buffer): array
+    {
+        $end = strrpos($buffer, "\n");
+
+        if ($end === false) {
+            return [];
+        }
+
+        $complete = substr($buffer, 0, $end);
+        $buffer = substr($buffer, $end + 1);
+
+        return array_values(array_filter(explode("\n", $complete), static fn (string $line): bool => trim($line) !== ''));
+    }
+}

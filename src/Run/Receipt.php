@@ -102,6 +102,18 @@ final readonly class Receipt
          * them on upgrade day would be a false failure for every consumer.
          */
         public ?string $config = null,
+        /**
+         * Which installed packages the run walked: a digest of each package's
+         * name, version and reference, and whether that install had the dev
+         * packages. `pipeline:verify` compares it with the lock.
+         *
+         * Absent means it was not recorded: a receipt from before this existed,
+         * or a project without a readable lock or installed.json. It is then not
+         * checked, the same as a receipt that recorded no tree.
+         *
+         * @var array{digest: string, dev: bool}|null
+         */
+        public ?array $installed = null,
     ) {}
 
     /**
@@ -121,6 +133,7 @@ final readonly class Receipt
             'coverage' => $this->coverage,
             'asserted' => $this->asserted,
             'config' => $this->config,
+            'installed' => $this->installed,
         ], static fn (mixed $value): bool => $value !== null);
     }
 
@@ -167,7 +180,18 @@ final readonly class Receipt
             coverage: is_string($coverage) ? $coverage : null,
             asserted: self::readAsserted($data['asserted'] ?? null),
             config: is_string($config) ? $config : null,
+            installed: self::readInstalled($data['installed'] ?? null),
         );
+    }
+
+    /** @return array{digest: string, dev: bool}|null */
+    private static function readInstalled(mixed $installed): ?array
+    {
+        if (! is_array($installed) || ! is_string($installed['digest'] ?? null) || ! is_bool($installed['dev'] ?? null)) {
+            return null;
+        }
+
+        return ['digest' => $installed['digest'], 'dev' => $installed['dev']];
     }
 
     /**
@@ -192,6 +216,12 @@ final readonly class Receipt
             if ($value !== null && ! is_string($value)) {
                 return false;
             }
+        }
+
+        $installed = $data['installed'] ?? null;
+
+        if ($installed !== null && self::readInstalled($installed) === null) {
+            return false;
         }
 
         $allVerified = $data['all_verified'] ?? null;

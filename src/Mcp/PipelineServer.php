@@ -72,4 +72,16 @@ final class PipelineServer extends Server
     protected array $prompts = [
         RunPipeline::class,
     ];
+
+    /**
+     * Says that open_run may send `notifications/tools/list_changed`.
+     *
+     * A client ignores the notification unless the server declares this. open_run
+     * sends it after a reload that changes the pipeline names, or switches between
+     * one pipeline and a map, and on the first open_run after a restart.
+     */
+    protected function boot(): void
+    {
+        $this->addCapability(self::CAPABILITY_TOOLS.'.listChanged');
+    }
 }

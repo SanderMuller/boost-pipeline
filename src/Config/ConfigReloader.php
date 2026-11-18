@@ -19,7 +19,7 @@ use Throwable;
  * `open_run` asks this first, and a changed config is reloaded before the run
  * opens, or refused with the reason when a reload is not safe.
  *
- * A reload runs the config file again in the same process. Three things make
+ * A reload runs the config file again in the same process. Two things make
  * that unsafe, and each one is refused rather than attempted:
  *
  * - A changed file other than the config: a class PHP already loaded, or a
@@ -27,9 +27,10 @@ use Throwable;
  * - A config that declares a named class or function, defines a constant, or
  *   includes another file. Running it twice redeclares something, which is a
  *   fatal error no handler can catch — the server would die mid-session.
- * - A different set of pipeline names, or a switch between one pipeline and a
- *   map. The client holds the tool schema it listed at connect, and that schema
- *   names the pipelines and says whether a name is required.
+ *
+ * A reload may change the pipeline names, or switch between one pipeline and a
+ * map. The client then holds a stale tool schema; `open_run` tells it to fetch
+ * the list again (`notifications/tools/list_changed`).
  *
  * A failed reload — a parse error, an invalid declaration — keeps the map and the
  * hashes it had, so the next `open_run` tries again once the file is fixed.
@@ -96,6 +97,18 @@ final class ConfigReloader
     }
 
     /**
+     * Whether a package that autoloads code changed since this server started.
+     *
+     * PHP keeps the vendor classes it already loaded and autoloads the rest from
+     * the new files, so the server would run a mix of two versions. Public so the
+     * run manager can choose between a restart and a refusal.
+     */
+    public function vendorChanged(): bool
+    {
+        return $this->installedPackages !== null && $this->autoloadingPackages($this->installedPackages) !== $this->installed;
+    }
+
+    /**
      * Reload when the config changed since it was loaded.
      *
      * @return Pipelines|null the new map, or null when nothing changed
@@ -104,9 +117,7 @@ final class ConfigReloader
      */
     public function refresh(): ?Pipelines
     {
-        // PHP keeps the vendor classes it already loaded and autoloads the rest
-        // from the new files, so the server would run a mix of two versions.
-        if ($this->installedPackages !== null && $this->autoloadingPackages($this->installedPackages) !== $this->installed) {
+        if ($this->vendorChanged()) {
             throw InvalidPipelineConfigException::vendorChanged();
         }
 
@@ -175,20 +186,6 @@ final class ConfigReloader
         // changed in between ran unchecked, and may have declared something.
         if ($this->hash($config) !== hash('xxh3', $code)) {
             throw InvalidPipelineConfigException::configNeedsReconnect('it changed again while it was being reloaded, so the server may have run code it did not check');
-        }
-
-        if ($fresh->requiresName() !== $current->requiresName()) {
-            throw InvalidPipelineConfigException::configNeedsReconnect(
-                'it switched between returning one pipeline and returning a map of named ones, which changes whether every tool call needs a pipeline name',
-            );
-        }
-
-        if ($fresh->names() !== $current->names()) {
-            throw InvalidPipelineConfigException::configNeedsReconnect(sprintf(
-                'it now declares the pipelines [%s] instead of [%s], and the client still holds the tool list that names the old ones',
-                implode(', ', $fresh->names()),
-                implode(', ', $current->names()),
-            ));
         }
 
         $this->pipelines = $fresh;

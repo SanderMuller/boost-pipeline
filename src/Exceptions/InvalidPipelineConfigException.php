@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SanderMuller\BoostPipeline\Exceptions;
 
 use RuntimeException;
+use SanderMuller\BoostPipeline\Config\InstallState;
 
 final class InvalidPipelineConfigException extends RuntimeException
 {
@@ -142,9 +143,28 @@ final class InvalidPipelineConfigException extends RuntimeException
         return new self("Step [{$stepId}] takes its slot only when its scope is whole (exclusive(onlyWhenWhole: true)), but declares no inspecting() command to report that scope. Add ->inspecting('...') to the step.");
     }
 
-    public static function vendorChanged(): self
+    /**
+     * @param  bool  $supervised  whether vendor/bin/boost-pipeline-mcp started this server
+     * @param  string|null  $blocker  why a supervised server did not restart itself
+     */
+    public static function vendorChanged(bool $supervised = false, ?string $blocker = null): self
     {
-        return new self('vendor/ changed since this server started: a composer install, a composer update or a branch switch changed a package that autoloads classes. This server still holds classes from the old versions, and it would load the rest from the new ones. Reconnect the MCP server (in Claude Code: /mcp), then call open_run again.');
+        $message = 'vendor/ changed since this server started: a composer install, a composer update or a branch switch changed a package that autoloads classes. This server still holds classes from the old versions, and it would load the rest from the new ones.';
+
+        if ($supervised && $blocker !== null) {
+            return new self(sprintf('%s The server restarts itself when no run is in progress, but %s.', $message, $blocker));
+        }
+
+        return new self($message.' Reconnect the MCP server (in Claude Code: /mcp), then call open_run again. To restart without a reconnect, start the server through vendor/bin/boost-pipeline-mcp (see the README).');
+    }
+
+    /** @param  list<string>  $differences  from InstallState::differences() */
+    public static function installInProgress(array $differences): self
+    {
+        return new self(sprintf(
+            'vendor/ does not match composer.lock: a composer install is still running, failed, or did not run (%s). Wait for it, or run composer install (ask the user if you may not run it), then call open_run again.',
+            InstallState::summarise($differences),
+        ));
     }
 
     public static function configReloadFailed(string $message): self

@@ -59,6 +59,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | open_run
+    |--------------------------------------------------------------------------
+    |
+    | open_run refuses while vendor/ does not hold what composer.lock names:
+    | an install is still running, failed, or never ran after a merge or a
+    | checkout changed the lock. A run opened then would verify against
+    | packages the lock does not name.
+    |
+    | Set this to false when the agent may not run composer install, so a
+    | lock that is ahead does not stop every walk. open_run then opens and
+    | adds a warning. pipeline:verify still fails a run that walked such a
+    | vendor/: this lets an agent walk, it does not let the gate pass. A
+    | restart after a vendor change still waits for a matching lock.
+    |
+    */
+
+    'open_run' => [
+        'require_installed_lock' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Machine-wide slots
     |--------------------------------------------------------------------------
     |

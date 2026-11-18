@@ -1,5 +1,25 @@
 # Upgrading
 
+## From 0.23 to 0.24
+
+- **`open_run` refuses while `vendor/` does not match `composer.lock`.** Run `composer install` when
+  it says so. If your agent may not run it, set `open_run.require_installed_lock` to false in the
+  published config: `open_run` then opens with a warning.
+
+- **`pipeline:verify` fails a run that walked packages `composer.lock` does not name now,** also
+  with `open_run.require_installed_lock` false. A receipt written before 0.24 is not checked.
+
+- **Optional: start the server through `vendor/bin/boost-pipeline-mcp`** in `.mcp.json` (see the
+  README). The server then restarts itself after a vendor change instead of asking for a reconnect.
+
+- **A reload that renames a pipeline no longer refuses.** `open_run` tells the client to fetch the
+  tool list again. The server now declares `tools.listChanged`.
+
+- **Additive API:** `Run::start()` takes an optional `InstallState`. `Receipt` has `installed`.
+  `ConfigReloader` has `vendorChanged()`. `InvalidPipelineConfigException::vendorChanged()` takes
+  two optional arguments. `RunManager` takes an optional `InstallState`, `ServerSupervisor` (a new
+  contract) and `requireInstalledLock`, and has `warnings()` and `toolListChanged()`.
+
 ## From 0.21 to 0.22
 
 - **A timeout now stops every process the step started,** not only its shell. Add

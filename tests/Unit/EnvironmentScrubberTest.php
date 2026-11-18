@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
+use SanderMuller\BoostPipeline\Runner\EnvironmentSupervisor;
 
 beforeEach(function (): void {
     $this->base = sys_get_temp_dir().'/bp-env-'.bin2hex(random_bytes(4));
@@ -19,9 +20,9 @@ afterEach(function (): void {
     }
 });
 
-it('returns nothing to scrub when the app has no .env', function (): void {
+it('scrubs only the supervisor flags when the app has no .env', function (): void {
     expect(new EnvironmentScrubber($this->base)->forStep())
-        ->toBeEmpty();
+        ->toBe([EnvironmentSupervisor::SUPERVISED => false, EnvironmentSupervisor::RESTARTED => false]);
 });
 
 it('removes every key the app .env defines, so the child re-reads it', function (): void {
@@ -53,5 +54,5 @@ it('ignores malformed lines rather than producing bogus keys', function (): void
     // trim() rejects outright under strict_types.
     file_put_contents($this->base.'/.env', "not a valid line\n1BAD=x\n=\n===\nGOOD=y\n");
 
-    expect(array_keys(new EnvironmentScrubber($this->base)->forStep()))->toBe(['GOOD']);
+    expect(array_keys(new EnvironmentScrubber($this->base)->forStep()))->toBe(['GOOD', EnvironmentSupervisor::SUPERVISED, EnvironmentSupervisor::RESTARTED]);
 });

@@ -10,6 +10,7 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Mcp\Facades\Mcp;
 use SanderMuller\BoostPipeline\Config\ConfigError;
 use SanderMuller\BoostPipeline\Config\ConfigReloader;
+use SanderMuller\BoostPipeline\Config\InstallState;
 use SanderMuller\BoostPipeline\Config\Pipeline;
 use SanderMuller\BoostPipeline\Config\PipelineLoader;
 use SanderMuller\BoostPipeline\Config\Pipelines;
@@ -20,6 +21,7 @@ use SanderMuller\BoostPipeline\Contracts\LiveProgressStore;
 use SanderMuller\BoostPipeline\Contracts\ReceiptStore;
 use SanderMuller\BoostPipeline\Contracts\RunHistoryStore;
 use SanderMuller\BoostPipeline\Contracts\ServerProcess;
+use SanderMuller\BoostPipeline\Contracts\ServerSupervisor;
 use SanderMuller\BoostPipeline\Contracts\StepRunner;
 use SanderMuller\BoostPipeline\Contracts\TreeFingerprint;
 use SanderMuller\BoostPipeline\Exceptions\InvalidPipelineConfigException;
@@ -40,6 +42,7 @@ use SanderMuller\BoostPipeline\Run\StepLogReader;
 use SanderMuller\BoostPipeline\Runner\CommandPreflight;
 use SanderMuller\BoostPipeline\Runner\ConsoleServerProcess;
 use SanderMuller\BoostPipeline\Runner\EnvironmentScrubber;
+use SanderMuller\BoostPipeline\Runner\EnvironmentSupervisor;
 use SanderMuller\BoostPipeline\Runner\GitTreeFingerprint;
 use SanderMuller\BoostPipeline\Runner\LogWriter;
 use SanderMuller\BoostPipeline\Runner\MachineSlots;
@@ -73,7 +76,8 @@ final class BoostPipelineServiceProvider extends ServiceProvider
         $this->app->singleton(PipelineLoader::class, fn (): PipelineLoader => new PipelineLoader($this->app->basePath()));
 
         // A reload rebinds the map, so every lazy reader gets the new one, and the
-        // sole-pipeline alias with it. A reload never changes the names.
+        // sole-pipeline alias with it. A reload may change the names; open_run then
+        // tells the client to fetch the tool list again.
         $this->app->singleton(ConfigReloader::class, fn (): ConfigReloader => new ConfigReloader(
             $this->app->make(PipelineLoader::class),
             $this->app->basePath(),
@@ -82,6 +86,10 @@ final class BoostPipelineServiceProvider extends ServiceProvider
 
                 if ($pipelines->soleName() !== null) {
                     $this->app->instance(Pipeline::class, $pipelines->sole());
+                } else {
+                    // A switch from one pipeline to a map: the alias must refuse
+                    // again, not keep handing out the old pipeline.
+                    $this->app->singleton(Pipeline::class, fn (): Pipeline => $this->app->make(Pipelines::class)->sole());
                 }
             },
             $this->app->basePath('vendor/composer/installed.json'),
@@ -113,6 +121,10 @@ final class BoostPipelineServiceProvider extends ServiceProvider
                 return $bound instanceof ProcessStepRunner ? $this->processRunner($pipeline) : $bound;
             },
         ));
+
+        $this->app->singleton(InstallState::class, fn (): InstallState => new InstallState($this->app->basePath()));
+
+        $this->app->singleton(ServerSupervisor::class, fn (): ServerSupervisor => new EnvironmentSupervisor);
 
         $this->app->singleton(
             ServerProcess::class,
@@ -207,6 +219,9 @@ final class BoostPipelineServiceProvider extends ServiceProvider
             $this->app->make(RunHistoryStoreFactory::class),
             $this->app->make(LiveProgressStoreFactory::class),
             $this->app->make(ConfigReloader::class),
+            $this->app->make(InstallState::class),
+            $this->app->make(ServerSupervisor::class),
+            $this->app->make(Repository::class)->get(self::CONFIG.'.open_run.require_installed_lock') !== false,
         ));
     }
 

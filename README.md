@@ -39,13 +39,19 @@ Register the server in `.mcp.json`:
 {
     "mcpServers": {
         "pipeline": {
-            "command": "php",
-            "args": ["artisan", "mcp:start", "pipeline"],
+            "command": "vendor/bin/boost-pipeline-mcp",
+            "args": ["php", "artisan", "mcp:start", "pipeline"],
             "timeout": 600000
         }
     }
 }
 ```
+
+`vendor/bin/boost-pipeline-mcp` starts the server and stays between it and the client. After a
+`composer install` changes your packages, the server restarts itself at the next `open_run`, and
+the client keeps its connection. Without it, use `"command": "php"` with
+`"args": ["artisan", "mcp:start", "pipeline"]`, and reconnect the client (`/mcp` in Claude Code)
+after such an install. On Windows the script runs the server without restarts.
 
 Set the `timeout` explicitly. It is a hard wall-clock limit per tool call, and progress
 notifications do not extend it. The tools decline to register until `.config/pipeline.php` exists.
@@ -337,14 +343,27 @@ the step list looks wrong, and the tree fingerprint matches because the run ran 
 that already held your change. Open a new run.
 
 **`open_run` reloads a changed `.config/pipeline.php`**, so an edit or a branch switch needs no
-reconnect. A reload replaces every open run, unless its step is still running.
-`open_run` refuses instead, and says why, when running the file again in the same process is not
-safe: the config declares a named class, function or constant, it includes another file, a class
-it loaded changed, or the set of pipeline names changed. It also refuses once a package that
-declares autoload entries changed in `vendor/composer/installed.json`, after a `composer install` or
-a branch switch, because the server would run a mix of old and new package classes. A package
-without autoload entries, such as one that ships only markdown, does not count. Reconnect the MCP
+reconnect. A reload replaces every open run, unless its step is still running. A reload that
+renames a pipeline, or switches between one pipeline and a map, tells the client to fetch the tool
+list again (`notifications/tools/list_changed`). `open_run` refuses instead, and says why, when
+running the file again in the same process is not safe: the config declares a named class,
+function or constant, it includes another file, or a class it loaded changed. Reconnect the MCP
 client then.
+
+**`open_run` refuses while `vendor/` does not hold what `composer.lock` names**: an install is still
+running, failed, or did not run after a merge or a checkout changed the lock. A run opened then
+would verify against packages the lock does not name. The message names the packages. If your agent
+may not run `composer install`, set `open_run.require_installed_lock` to false in the published
+config: `open_run` then opens with a warning. `pipeline:verify` still fails a run that walked such a
+`vendor/`, and also a run whose lock changed after it.
+
+**A package that autoloads code changed since the server started** (in
+`vendor/composer/installed.json`, after a `composer install`) means the server holds classes from
+the old versions. Under `vendor/bin/boost-pipeline-mcp`, `open_run` restarts the server and the
+client gets a normal answer, with a warning that runs opened before are gone. It waits while a step
+still runs, or while another pipeline holds a walk that is not finished, and says so. Without the
+script, `open_run` refuses and asks for a reconnect. A package without autoload entries, such as
+one that ships only markdown, does not count.
 
 Two other things produce the same mismatch, and the message names all three. A config git cannot
 see — ignored, symlinked, or composed from a file outside the repository — moves without moving the

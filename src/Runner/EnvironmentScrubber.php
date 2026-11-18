@@ -13,8 +13,8 @@ namespace SanderMuller\BoostPipeline\Runner;
  * `Mcp\ToolExecutor`: set every key the app's own `.env` defines to `false`,
  * which removes it from the child, so the child reads `.env` itself.
  *
- * Scope of that scrub, stated plainly: it removes keys the app's `.env` DEFINES.
- * Everything else in the parent environment is inherited, so a secret exported
+ * Scope of that scrub, stated plainly: it removes keys the app's `.env` DEFINES,
+ * and the supervisor flags. Everything else in the parent environment is inherited, so a secret exported
  * only in the parent shell (a `GITHUB_TOKEN`, an API key, a CI secret) is visible
  * to every configured step command. That is the same exposure as running the tool
  * by hand in that shell, and step commands come from `.config/pipeline.php` —
@@ -38,6 +38,12 @@ final readonly class EnvironmentScrubber
         foreach ($this->dotenvKeys() as $key) {
             $scrubbed[$key] = false;
         }
+
+        // A step that starts its own MCP server, a test suite for one, must not
+        // believe a supervisor waits for it: it would exit on a vendor change
+        // with nobody to start the next one.
+        $scrubbed[EnvironmentSupervisor::SUPERVISED] = false;
+        $scrubbed[EnvironmentSupervisor::RESTARTED] = false;
 
         // Overrides win — that is how a step pins its own DB_DATABASE.
         return [...$scrubbed, ...$overrides];
