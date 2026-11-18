@@ -75,6 +75,12 @@ final readonly class InstallState
         return $differences;
     }
 
+    /** Whether `installed.json` exists and parses; during a fresh install it is absent for a while. */
+    public function installedReadable(): bool
+    {
+        return $this->installedPackages() !== null;
+    }
+
     /**
      * The differences as one sentence fragment, naming at most NAMED of them.
      *

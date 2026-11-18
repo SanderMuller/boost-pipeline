@@ -237,7 +237,13 @@ final class RunManager
         }
 
         // Even with the lock check switched off: a new server must not boot on a
-        // half-installed vendor/, and this one cannot run the new packages.
+        // half-installed vendor/, and this one cannot run the new packages. An
+        // unreadable installed.json counts as no difference above, so it is
+        // checked here too.
+        if ($differences === [] && $this->install?->installedReadable() === false) {
+            $differences = ['vendor/composer/installed.json is missing or cannot be read'];
+        }
+
         if ($differences !== []) {
             throw InvalidPipelineConfigException::installInProgress($differences);
         }

@@ -793,6 +793,20 @@ it('restarts although a removed pipeline holds an unfinished walk, because nothi
     expect(fn (): mixed => $runs->open('release'))->toThrow(RestartRequested::class);
 });
 
+it('waits instead of restarting while installed.json is gone during an install', function (): void {
+    writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
+    installedProject($this->base);
+    [$runs, $supervisor] = supervisedManager($this->base);
+    $runs->open('default');
+
+    // composer install after rm -rf vendor: installed.json is not written yet.
+    unlink($this->base.'/vendor/composer/installed.json');
+
+    expect(fn (): mixed => $runs->open('default'))
+        ->toThrow(InvalidPipelineConfigException::class, 'installed.json is missing or cannot be read')
+        ->and($supervisor->restarts)->toBe(0);
+});
+
 it('refuses with a hint to the supervisor when the server runs without one', function (): void {
     writeConfig($this->base, configDeclaring(['default' => ['echo one']]));
     installedProject($this->base);
